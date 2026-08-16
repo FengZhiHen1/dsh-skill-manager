@@ -18,7 +18,7 @@ window.__ModuleLoader__.load({
     const exports = module.exports
     const React = require('react')
     const { useState, useEffect } = React
-    const { Button, Input, Pill } = require('@deepseek-ai/dsh-client-ui-primitives')
+    const { Button, Input, Pill, IconChevronDownOutline14 } = require('@deepseek-ai/dsh-client-ui-primitives')
     const h = React.createElement
 
     // ---------- Host RPC 调用（统一信封） ----------
@@ -50,14 +50,19 @@ window.__ModuleLoader__.load({
       return envelope.data
     }
 
-    // ---------- DSH 原生主题 token（--dsw-alias-*，ui-theme 定义） ----------
+    // ---------- DSH 原生主题 token（--dsw-alias-*，ui-theme design-platform.css） ----------
     const T = {
       bgBase: 'var(--dsw-alias-bg-base)',
-      bgLayer1: 'var(--dsw-alias-bg-layer-1)',
+      bgLayer2: 'var(--dsw-alias-bg-layer-2)',
+      bgLayer3: 'var(--dsw-alias-bg-layer-3)',
+      bgModulePlatform: 'var(--dsw-alias-bg-module-platform)',
       borderL1: 'var(--dsw-alias-border-l1)',
+      borderL2: 'var(--dsw-alias-border-l2)',
       brand: 'var(--dsw-alias-brand-primary)',
       labelPrimary: 'var(--dsw-alias-label-primary)',
       labelSecondary: 'var(--dsw-alias-label-secondary)',
+      labelTertiary: 'var(--dsw-alias-label-tertiary)',
+      labelDimmed: 'var(--dsw-alias-label-dimmed)',
       success: 'var(--dsw-alias-state-success-primary)',
       error: 'var(--dsw-alias-state-error-primary)',
       warn: 'var(--dsw-alias-state-warn-primary)',
@@ -102,11 +107,13 @@ window.__ModuleLoader__.load({
     const OutlineBtn = (props) => h(Button, { variant: 'outline', size: 'sm', ...props })
 
     // ---------- 插件配置卡片（设置 → 插件 → skill-manager） ----------
+    // 与 DSH 原生 PluginCard 同构：li > header（名称/描述/未保存标记/折叠箭头）
+    // + body（字段 + footer：放弃/保存）；token 与几何对齐 PluginCard.module.css。
     function SkillManagerCard({ scope }) {
+      const [open, setOpen] = useState(false)
       const [draft, setDraft] = useState('')
       const [busy, setBusy] = useState(false)
-      const [error, setError] = useState(null)
-      const [message, setMessage] = useState(null)
+      const [failed, setFailed] = useState(null)
       const sync = () => {
         const snap = scope.getSnapshot()
         setDraft(snap.value && snap.value.workshopDir ? snap.value.workshopDir : '')
@@ -114,58 +121,153 @@ window.__ModuleLoader__.load({
       useEffect(() => scope.subscribe(sync), [scope])
       useEffect(() => { sync() }, [scope])
 
+      const snap = scope.getSnapshot()
+      if (snap.status === 'unavailable') return null // 命名空间不可用：不渲染（PluginCard 语义）
+      const current = snap.value && snap.value.workshopDir ? snap.value.workshopDir : ''
+      const dirty = draft !== current
+      const writable = snap.writable !== false
+      const overridden = Boolean(snap.user && typeof snap.user === 'object' && 'workshopDir' in snap.user)
+
       const save = async () => {
         setBusy(true)
-        setError(null)
-        setMessage(null)
+        setFailed(null)
         try {
           await scope.set('workshopDir', draft.trim())
-          setMessage('已保存，立即生效')
         } catch (e) {
-          setError(e && e.message ? e.message : '保存失败')
+          setFailed(e && e.message ? e.message : '保存失败')
         } finally {
           setBusy(false)
         }
       }
-      const clear = async () => {
+      const discard = () => {
+        setFailed(null)
+        setDraft(current)
+      }
+      const reset = async () => {
         setBusy(true)
-        setError(null)
-        setMessage(null)
+        setFailed(null)
         try {
           await scope.unset('workshopDir')
-          setMessage('已清空（回到未配置状态）')
         } catch (e) {
-          setError(e && e.message ? e.message : '清空失败')
+          setFailed(e && e.message ? e.message : '重置失败')
         } finally {
           setBusy(false)
         }
       }
 
-      const snap = scope.getSnapshot()
-      const configured = Boolean(snap.value && snap.value.workshopDir)
-      const writable = snap.writable !== false
-      return h('div', { style: { padding: '10px 12px' } },
-        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, marginBottom: 8 } },
-          h('span', { style: { fontWeight: 600, color: T.labelPrimary } }, '技能车间（skill-manager）'),
-          h(Pill, { style: badgeStyle(configured ? T.success : T.warn) }, configured ? '已配置' : '未配置'),
-          snap.status === 'loading' ? h('span', { style: S.muted }, '读取中…') : null,
-        ),
-        h('div', { style: { display: 'flex', gap: 8, alignItems: 'center' } },
-          h(Field, { label: '本地 skill 目录' },
-            h(Input, {
-              style: { width: 320 },
-              value: draft,
-              disabled: !writable,
-              placeholder: '例如 E:\\Project\\Skills（默认为空 = 未配置）',
-              onChange: (e) => { setDraft(e.target.value); setMessage(null) },
-            }),
+      return h('li', {
+        style: {
+          listStyle: 'none',
+          border: `1px solid ${T.borderL2}`,
+          borderRadius: 12,
+          background: open ? T.bgLayer2 : T.bgLayer3,
+          transition: 'border-color .16s, background .16s',
+        },
+      },
+        h('button', {
+          type: 'button',
+          'aria-expanded': open,
+          'aria-label': `${open ? '收起' : '展开'}: 技能车间（skill-manager）`,
+          onClick: () => setOpen(!open),
+          style: {
+            width: '100%',
+            appearance: 'none',
+            border: 0,
+            background: 'none',
+            font: 'inherit',
+            color: 'inherit',
+            textAlign: 'left',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            padding: '14px 16px',
+            borderRadius: 12,
+          },
+        },
+          h('span', { style: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 } },
+            h('span', { style: { fontSize: 15, fontWeight: 600, lineHeight: 1.4, color: T.labelPrimary } }, '技能车间（skill-manager）'),
+            h('span', { style: { fontSize: 13, lineHeight: 1.5, color: T.labelTertiary } }, '配置本地 skill 车间根目录（默认为空即未配置）'),
           ),
-          h(OutlineBtn, { onClick: save, disabled: busy || !writable }, '保存'),
-          h(GhostBtn, { onClick: clear, disabled: busy || !writable }, '清空'),
+          dirty
+            ? h('span', { style: { flex: 'none', borderRadius: 999, padding: '1px 8px', fontSize: 11, lineHeight: '17px', fontWeight: 500, whiteSpace: 'nowrap', background: T.bgModulePlatform, color: T.labelSecondary } }, '未保存')
+            : null,
+          h(IconChevronDownOutline14, { style: { flex: 'none', color: T.labelTertiary, transition: 'transform .16s', transform: open ? 'rotate(180deg)' : undefined } }),
         ),
-        h(ErrorLine, { error }),
-        message ? h('div', { style: { ...S.muted, color: T.success, marginTop: 4 } }, message) : null,
-        !writable ? h('div', { style: { ...S.error, padding: '2px 0' } }, '当前配置只读（远端会话）') : null,
+        open
+          ? h('div', { style: { borderTop: `1px solid ${T.borderL2}`, margin: '0 16px', paddingBottom: 8 } },
+              !writable ? h('p', { style: { margin: '12px 0 0', fontSize: 12, lineHeight: 1.5, color: T.labelTertiary } }, '当前配置只读（远端会话）') : null,
+              // 字段（对齐 ValueField 形态：label/input/hint 纵排）
+              h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6, padding: '12px 0' } },
+                h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
+                  h('label', { htmlFor: 'skill-manager-workshop-dir', style: { flex: 1, minWidth: 0, fontSize: 13, fontWeight: 500, lineHeight: 1.5, color: T.labelPrimary } }, '本地 skill 目录'),
+                  overridden
+                    ? h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 8 } },
+                        h('span', { style: { borderRadius: 999, padding: '1px 8px', fontSize: 11, lineHeight: '17px', whiteSpace: 'nowrap', fontWeight: 500, background: T.bgModulePlatform, color: T.labelSecondary } }, '已覆盖'),
+                        h('button', { type: 'button', disabled: busy || !writable, onClick: reset, style: { border: 'none', background: 'none', padding: 0, font: 'inherit', fontSize: 12, lineHeight: 1.5, color: T.labelSecondary, cursor: 'pointer' } }, '重置'),
+                      )
+                    : null,
+                ),
+                h(Input, {
+                  id: 'skill-manager-workshop-dir',
+                  style: {
+                    height: 34,
+                    padding: '0 12px',
+                    border: `1px solid ${T.borderL2}`,
+                    borderRadius: 8,
+                    background: T.bgLayer3,
+                    fontSize: 13,
+                    lineHeight: 1.5,
+                    color: T.labelPrimary,
+                    width: '100%',
+                  },
+                  value: draft,
+                  disabled: !writable,
+                  placeholder: '例如 E:\\Project\\Skills（默认为空 = 未配置）',
+                  onChange: (e) => { setDraft(e.target.value); setFailed(null) },
+                }),
+                h('p', { style: { margin: 0, fontSize: 12, lineHeight: 1.5, color: T.labelTertiary } }, '绝对路径；保存后立即生效，无需重启。'),
+              ),
+              // footer：失败提示 + 放弃/保存（对齐 PluginCard footer）
+              h('div', { style: { display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, padding: '12px 0 4px', borderTop: `1px solid ${T.borderL2}` } },
+                failed ? h('p', { style: { flex: 1, minWidth: 0, margin: 0, fontSize: 12, lineHeight: 1.5, color: T.error } }, failed) : null,
+                h('button', {
+                  type: 'button',
+                  disabled: !dirty || busy,
+                  onClick: discard,
+                  style: {
+                    appearance: 'none',
+                    border: `1px solid ${T.borderL2}`,
+                    borderRadius: 8,
+                    padding: '5px 14px',
+                    font: 'inherit',
+                    fontSize: 13,
+                    lineHeight: 1.5,
+                    cursor: 'pointer',
+                    background: 'none',
+                    color: T.labelSecondary,
+                  },
+                }, '放弃'),
+                h('button', {
+                  type: 'button',
+                  disabled: !dirty || busy || !writable,
+                  onClick: save,
+                  style: {
+                    appearance: 'none',
+                    border: '1px solid transparent',
+                    borderRadius: 8,
+                    padding: '5px 14px',
+                    font: 'inherit',
+                    fontSize: 13,
+                    lineHeight: 1.5,
+                    cursor: 'pointer',
+                    background: T.labelPrimary,
+                    color: T.bgLayer3,
+                  },
+                }, busy ? '保存中…' : '保存'),
+              ),
+            )
+          : null,
       )
     }
 
