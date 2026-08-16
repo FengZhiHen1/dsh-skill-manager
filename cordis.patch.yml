@@ -1,0 +1,5 @@
+# dsh-skill-manager install layer — one insert row. The row's id is the
+# stable identity for profile-level overrides; name resolves the Node module.
+- insert:
+    - id: skill-manager
+      name: dsh-skill-manager
