@@ -117,6 +117,7 @@ window.__ModuleLoader__.load({
       const [draft, setDraft] = useState('')
       const [busy, setBusy] = useState(false)
       const [failed, setFailed] = useState(null)
+      const [focused, setFocused] = useState(false)
       const sync = () => {
         const snap = scope.getSnapshot()
         setDraft(snap.value && snap.value.workshopDir ? snap.value.workshopDir : '')
@@ -129,7 +130,9 @@ window.__ModuleLoader__.load({
       // 避免状态时序问题导致整卡消失）
       const current = snap.value && snap.value.workshopDir ? snap.value.workshopDir : ''
       const dirty = draft !== current
-      const writable = snap.writable !== false && snap.status === 'ready'
+      // 可写性只看 Host 报告的 writable；status 不参与（loading/unavailable 时序
+      // 不应把输入框禁掉——保存失败由 footer 报错呈现）
+      const writable = snap.writable !== false
       const overridden = Boolean(snap.user && typeof snap.user === 'object' && 'workshopDir' in snap.user)
 
       const save = async () => {
@@ -214,23 +217,31 @@ window.__ModuleLoader__.load({
                       )
                     : null,
                 ),
-                h(Input, {
+                // 输入框：裸 input + fields 几何（对齐原生 ValueField；不用 primitives
+                // Input——其 wrap 自带边框/圆角，再传几何会叠成"两个框"）
+                h('input', {
                   id: 'skill-manager-workshop-dir',
-                  style: {
-                    height: 34,
-                    padding: '0 12px',
-                    border: `1px solid ${T.borderL2}`,
-                    borderRadius: 8,
-                    background: T.bgLayer3,
-                    fontSize: 13,
-                    lineHeight: 1.5,
-                    color: T.labelPrimary,
-                    width: '100%',
-                  },
+                  type: 'text',
                   value: draft,
                   disabled: !writable,
                   placeholder: '例如 E:\\Project\\Skills（默认为空 = 未配置）',
                   onChange: (e) => { setDraft(e.target.value); setFailed(null) },
+                  onFocus: () => setFocused(true),
+                  onBlur: () => setFocused(false),
+                  style: {
+                    height: 34,
+                    padding: '0 12px',
+                    border: `1px solid ${focused ? T.brand : T.borderL2}`,
+                    borderRadius: 8,
+                    background: T.bgLayer3,
+                    font: 'inherit',
+                    fontSize: 13,
+                    lineHeight: 1.5,
+                    color: T.labelPrimary,
+                    outline: 'none',
+                    boxSizing: 'border-box',
+                    width: '100%',
+                  },
                 }),
                 h('p', { style: { margin: 0, fontSize: 12, lineHeight: 1.5, color: T.labelTertiary } }, '绝对路径；保存后立即生效，无需重启。'),
               ),
