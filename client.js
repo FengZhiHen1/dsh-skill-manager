@@ -6,8 +6,10 @@
 //   settings.plugin.item id=skill-manager order=30 ——「本地 skill 目录」配置卡片
 //                      （R-22：默认为空即未配置；保存立即生效，清空回到未配置）。
 //
-// 运行时外部依赖只有 react；组件全部 React.createElement 构建，内联样式使用
-// --dsw-* 主题变量，不注入全局样式表；数据全部来自 Host RPC（C-07）。
+// 样式对齐 DSH 原生：主题 token 使用 --dsw-alias-* 系列（ui-theme 定义），
+// 按钮/输入/徽章复用 @deepseek-ai/dsh-client-ui-primitives 的 Button/Input/Pill
+// 原子组件（CSS modules 内嵌、token 驱动、随主题切换）；不注入全局样式表；
+// 数据全部来自 Host RPC（C-07）。
 
 window.__ModuleLoader__.load({
   id: 'dsh-skill-manager',
@@ -15,7 +17,8 @@ window.__ModuleLoader__.load({
     const module = { exports: {} }
     const exports = module.exports
     const React = require('react')
-    const { useState, useEffect, useRef } = React
+    const { useState, useEffect } = React
+    const { Button, Input, Pill } = require('@deepseek-ai/dsh-client-ui-primitives')
     const h = React.createElement
 
     // ---------- Host RPC 调用（统一信封） ----------
@@ -47,26 +50,40 @@ window.__ModuleLoader__.load({
       return envelope.data
     }
 
-    // ---------- 内联样式（--dsw-* 主题变量） ----------
+    // ---------- DSH 原生主题 token（--dsw-alias-*，ui-theme 定义） ----------
+    const T = {
+      bgBase: 'var(--dsw-alias-bg-base)',
+      bgLayer1: 'var(--dsw-alias-bg-layer-1)',
+      borderL1: 'var(--dsw-alias-border-l1)',
+      brand: 'var(--dsw-alias-brand-primary)',
+      labelPrimary: 'var(--dsw-alias-label-primary)',
+      labelSecondary: 'var(--dsw-alias-label-secondary)',
+      success: 'var(--dsw-alias-state-success-primary)',
+      error: 'var(--dsw-alias-state-error-primary)',
+      warn: 'var(--dsw-alias-state-warn-primary)',
+    }
+    /** token 色胶囊徽章：色相随状态 token，底色 color-mix 透明晕。 */
+    const badgeStyle = (color) => ({
+      color,
+      background: `color-mix(in srgb, ${color} 15%, transparent)`,
+    })
+
     const S = {
-      row: { display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 8px', borderBottom: '1px solid var(--dsw-border-color, rgba(128,128,128,.2))', fontSize: 13 },
-      badge: (color) => ({ display: 'inline-block', padding: '1px 6px', borderRadius: 8, fontSize: 11, background: `color-mix(in srgb, ${color} 15%, transparent)`, color }),
-      btn: { padding: '2px 10px', borderRadius: 6, border: '1px solid var(--dsw-border-color, rgba(128,128,128,.3))', background: 'var(--dsw-bg-2, transparent)', color: 'var(--dsw-text-1, inherit)', fontSize: 12, cursor: 'pointer' },
-      input: { padding: '4px 8px', borderRadius: 6, border: '1px solid var(--dsw-border-color, rgba(128,128,128,.3))', background: 'var(--dsw-bg-1, transparent)', color: 'var(--dsw-text-1, inherit)', fontSize: 13 },
-      select: { padding: '3px 6px', borderRadius: 6, border: '1px solid var(--dsw-border-color, rgba(128,128,128,.3))', background: 'var(--dsw-bg-1, transparent)', color: 'var(--dsw-text-1, inherit)', fontSize: 12 },
+      row: { display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 8px', borderBottom: `1px solid ${T.borderL1}`, fontSize: 13 },
+      select: { padding: '4px 8px', borderRadius: 6, border: `1px solid ${T.borderL1}`, background: T.bgBase, color: T.labelPrimary, fontSize: 12 },
       panel: { padding: '10px 12px' },
-      title: { fontSize: 13, fontWeight: 600, margin: '8px 0 6px' },
-      error: { color: '#e06c6c', fontSize: 12, padding: '6px 8px' },
-      muted: { color: 'var(--dsw-text-2, rgba(128,128,128,.8))', fontSize: 12 },
-      tabs: { display: 'flex', gap: '6px', padding: '8px 12px 0' },
-      tab: (active) => ({ padding: '4px 12px', borderRadius: '8px 8px 0 0', fontSize: 12, cursor: 'pointer', border: '1px solid transparent', borderBottom: active ? '2px solid var(--dsw-accent, #4a90d9)' : '2px solid transparent', color: active ? 'var(--dsw-accent, #4a90d9)' : 'var(--dsw-text-2, rgba(128,128,128,.8))' }),
-      guide: { padding: '24px 16px', textAlign: 'center', color: 'var(--dsw-text-2, rgba(128,128,128,.8))', fontSize: 13 },
+      title: { fontSize: 13, fontWeight: 600, margin: '8px 0 6px', color: T.labelPrimary },
+      error: { color: T.error, fontSize: 12, padding: '6px 8px' },
+      muted: { color: T.labelSecondary, fontSize: 12 },
+      guide: { padding: '24px 16px', textAlign: 'center', color: T.labelSecondary, fontSize: 13 },
+      dangerText: { color: T.error },
+      field: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: T.labelSecondary },
+      toolbar: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 },
     }
 
     // ---------- 通用小组件 ----------
     function Field({ label, children }) {
-      return h('label', { style: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--dsw-text-2, rgba(128,128,128,.8))' } },
-        h('span', null, label), children)
+      return h('label', { style: S.field }, h('span', null, label), children)
     }
 
     function ErrorLine({ error }) {
@@ -78,6 +95,11 @@ window.__ModuleLoader__.load({
       const [tick, setTick] = useState(0)
       return [tick, () => setTick((t) => t + 1)]
     }
+
+    /** 行内次要按钮（ghost sm）。 */
+    const GhostBtn = (props) => h(Button, { variant: 'ghost', size: 'sm', ...props })
+    /** 行内主操作按钮（outline sm）。 */
+    const OutlineBtn = (props) => h(Button, { variant: 'outline', size: 'sm', ...props })
 
     // ---------- 插件配置卡片（设置 → 插件 → skill-manager） ----------
     function SkillManagerCard({ scope }) {
@@ -121,37 +143,35 @@ window.__ModuleLoader__.load({
 
       const snap = scope.getSnapshot()
       const configured = Boolean(snap.value && snap.value.workshopDir)
+      const writable = snap.writable !== false
       return h('div', { style: { padding: '10px 12px' } },
-        h('div', { style: { fontSize: 12, marginBottom: 6 } },
-          h('span', { style: { fontWeight: 600 } }, '技能车间（skill-manager）'),
-          configured
-            ? h('span', { style: S.badge('#4a9d5f') }, '已配置')
-            : h('span', { style: S.badge('#d9a13b') }, '未配置'),
-          snap.status === 'loading' ? h('span', { style: S.muted, marginLeft: 8 }, '读取中…') : null,
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, marginBottom: 8 } },
+          h('span', { style: { fontWeight: 600, color: T.labelPrimary } }, '技能车间（skill-manager）'),
+          h(Pill, { style: badgeStyle(configured ? T.success : T.warn) }, configured ? '已配置' : '未配置'),
+          snap.status === 'loading' ? h('span', { style: S.muted }, '读取中…') : null,
         ),
         h('div', { style: { display: 'flex', gap: 8, alignItems: 'center' } },
           h(Field, { label: '本地 skill 目录' },
-            h('input', {
-              style: { ...S.input, width: 320 },
+            h(Input, {
+              style: { width: 320 },
               value: draft,
-              disabled: snap.writable === false,
+              disabled: !writable,
               placeholder: '例如 E:\\Project\\Skills（默认为空 = 未配置）',
               onChange: (e) => { setDraft(e.target.value); setMessage(null) },
             }),
           ),
-          h('button', { style: S.btn, onClick: save, disabled: busy || snap.writable === false }, '保存'),
-          h('button', { style: S.btn, onClick: clear, disabled: busy || snap.writable === false }, '清空'),
+          h(OutlineBtn, { onClick: save, disabled: busy || !writable }, '保存'),
+          h(GhostBtn, { onClick: clear, disabled: busy || !writable }, '清空'),
         ),
         h(ErrorLine, { error }),
-        message ? h('div', { style: { ...S.muted, color: '#4a9d5f', marginTop: 4 } }, message) : null,
-        snap.writable === false ? h('div', { style: { ...S.error, padding: '2px 0' } }, '当前配置只读（远端会话）') : null,
+        message ? h('div', { style: { ...S.muted, color: T.success, marginTop: 4 } }, message) : null,
+        !writable ? h('div', { style: { ...S.error, padding: '2px 0' } }, '当前配置只读（远端会话）') : null,
       )
     }
 
     // ---------- 技能设置页 ----------
     function SkillsSection(props) {
       const call = props.call
-      const scope = props.scope
       const [tab, setTab] = useState('manage')
       const [unconfigured, setUnconfigured] = useState(false)
       const [error, setError] = useState(null)
@@ -177,9 +197,9 @@ window.__ModuleLoader__.load({
 
       if (unconfigured) {
         return h('div', { style: S.guide },
-          h('div', { style: { fontSize: 14, marginBottom: 8 } }, '尚未配置本地 skill 目录'),
+          h('div', { style: { fontSize: 14, marginBottom: 8, color: T.labelPrimary } }, '尚未配置本地 skill 目录'),
           h('div', null, '请到 设置 → 插件 → skill-manager 卡片 配置车间根（默认为空即未配置），配置后本页自动可用。'),
-          h('button', { style: { ...S.btn, marginTop: 12 }, onClick: reload }, '刷新'),
+          h(OutlineBtn, { style: { marginTop: 12 }, onClick: reload }, '刷新'),
         )
       }
       if (!data) {
@@ -190,13 +210,13 @@ window.__ModuleLoader__.load({
       }
 
       return h('div', null,
-        h('div', { style: S.tabs },
-          h('div', { style: S.tab(tab === 'manage'), onClick: () => setTab('manage') }, '管理'),
-          h('div', { style: S.tab(tab === 'search'), onClick: () => setTab('search') }, '搜索'),
-          h('div', { style: S.tab(tab === 'sync'), onClick: () => setTab('sync') }, '同步'),
+        h('div', { style: { display: 'flex', gap: 4, padding: '8px 12px 0' } },
+          h(Pill, { active: tab === 'manage', onClick: () => setTab('manage') }, '管理'),
+          h(Pill, { active: tab === 'search', onClick: () => setTab('search') }, '搜索'),
+          h(Pill, { active: tab === 'sync', onClick: () => setTab('sync') }, '同步'),
         ),
         h(ErrorLine, { error }),
-        tab === 'manage' && h(ManageView, { call, data, reload, scope }),
+        tab === 'manage' && h(ManageView, { call, data, reload }),
         tab === 'search' && h(SearchView, { call, data, reload }),
         tab === 'sync' && h(SyncView, { call, data, reload }),
       )
@@ -211,6 +231,7 @@ window.__ModuleLoader__.load({
       const [importOpen, setImportOpen] = useState(false)
       const [busy, setBusy] = useState(false)
       const [error, setError] = useState(null)
+      const [notice, setNotice] = useState(null)
 
       const refresh = async (extra = {}) => {
         setBusy(true)
@@ -231,8 +252,6 @@ window.__ModuleLoader__.load({
       }, [origin, groupFilter, q])
 
       const groupNames = data.grp.groups.map((g) => g.name)
-      const chips = ['', ...groupNames, '默认']
-      const [notice, setNotice] = useState(null)
       const rowAction = async (name, action, payload = {}) => {
         setBusy(true)
         setError(null)
@@ -294,7 +313,7 @@ window.__ModuleLoader__.load({
 
       return h('div', { style: S.panel },
         // 工具条
-        h('div', { style: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 } },
+        h('div', { style: S.toolbar },
           h('select', { style: S.select, value: origin, onChange: (e) => setOrigin(e.target.value) },
             h('option', { value: '' }, '全部来源'),
             h('option', { value: 'github' }, 'GitHub'),
@@ -306,9 +325,9 @@ window.__ModuleLoader__.load({
             groupNames.map((g) => h('option', { key: g, value: g }, g)),
             h('option', { value: '默认' }, '默认'),
           ),
-          h('input', { style: { ...S.input, width: 140 }, placeholder: '过滤名称/描述', value: q, onChange: (e) => setQ(e.target.value) }),
-          h('button', { style: S.btn, onClick: () => { reload() }, disabled: busy }, '刷新'),
-          h('button', { style: S.btn, onClick: () => setImportOpen(!importOpen), disabled: busy }, '导入 skill'),
+          h(Input, { style: { width: 140 }, placeholder: '过滤名称/描述', value: q, onChange: (e) => setQ(e.target.value) }),
+          h(GhostBtn, { onClick: () => { reload() }, disabled: busy }, '刷新'),
+          h(OutlineBtn, { onClick: () => setImportOpen(!importOpen), disabled: busy }, '导入 skill'),
         ),
         // 检查/更新结果提示
         notice ? h('div', { style: { ...S.muted, marginBottom: 4 } }, notice) : null,
@@ -319,24 +338,24 @@ window.__ModuleLoader__.load({
           h('span', { style: S.muted }, '分组:'),
           data.grp.groups.map((g) =>
             h('span', { key: g.name, style: { display: 'inline-flex', alignItems: 'center', gap: 4 } },
-              h('span', { style: S.badge('#5a7fd9') }, `${g.name}(${g.count})`),
-              h('button', { style: { ...S.btn, padding: '0 6px', fontSize: 11 }, onClick: () => groupOp('rename', g.name, window.prompt('新组名', g.name)) }, '改名'),
-              h('button', { style: { ...S.btn, padding: '0 6px', fontSize: 11 }, onClick: () => groupOp('delete', g.name) }, '删'),
+              h(Pill, { style: badgeStyle(T.brand) }, `${g.name}(${g.count})`),
+              h(GhostBtn, { onClick: () => groupOp('rename', g.name, window.prompt('新组名', g.name)) }, '改名'),
+              h(GhostBtn, { onClick: () => groupOp('delete', g.name) }, '删'),
             ),
           ),
           h(GroupCreate, { call, reload }),
         ),
         // 行
         list.length === 0
-          ? h('div', { style: S.muted, padding: 12 }, '库为空（无匹配 skill）')
+          ? h('div', { style: { ...S.muted, padding: 12 } }, '库为空（无匹配 skill）')
           : list.map((it) => h('div', { key: it.dir, style: S.row },
               h('div', { style: { flex: 1, minWidth: 0 } },
                 h('div', { style: { display: 'flex', alignItems: 'center', gap: 6 } },
-                  h('span', { style: { fontWeight: 600 } }, it.name),
-                  h('span', { style: S.badge(it.origin === 'github' ? '#5a7fd9' : it.origin === 'local' ? '#4a9d5f' : '#8a6fd9') }, it.origin),
-                  it.missing && h('span', { style: S.badge('#e06c6c') }, '缺失'),
-                  it.disabled && h('span', { style: S.badge('#d9a13b') }, '已禁用'),
-                  !it.hasSkillMd && h('span', { style: S.badge('#d9a13b') }, '无 SKILL.md'),
+                  h('span', { style: { fontWeight: 600, color: T.labelPrimary } }, it.name),
+                  h(Pill, { style: badgeStyle(it.origin === 'github' ? T.brand : it.origin === 'local' ? T.success : T.labelSecondary) }, it.origin),
+                  it.missing && h(Pill, { style: badgeStyle(T.error) }, '缺失'),
+                  it.disabled && h(Pill, { style: badgeStyle(T.warn) }, '已禁用'),
+                  !it.hasSkillMd && h(Pill, { style: badgeStyle(T.warn) }, '无 SKILL.md'),
                 ),
                 h('div', { style: S.muted }, `${it.description || '（无描述）'}${it.fingerprint ? ' · ' + it.fingerprint.slice(0, 7) : ''}`),
               ),
@@ -351,15 +370,15 @@ window.__ModuleLoader__.load({
               ),
               h('span', { style: S.muted }, (it.targets || []).join(' ')),
               it.missing
-                ? h('button', { style: S.btn, onClick: () => rowAction(it.dir, 'update'), disabled: busy }, '恢复')
+                ? h(OutlineBtn, { onClick: () => rowAction(it.dir, 'update'), disabled: busy }, '恢复')
                 : h('span', { style: { display: 'flex', gap: 4 } },
-                    h('button', { style: S.btn, onClick: () => rowAction(it.dir, 'check'), disabled: busy }, '检查'),
+                    h(GhostBtn, { onClick: () => rowAction(it.dir, 'check'), disabled: busy }, '检查'),
                     it.disabled
-                      ? h('button', { style: S.btn, onClick: () => rowAction(it.dir, 'enable'), disabled: busy }, '启用')
+                      ? h(OutlineBtn, { onClick: () => rowAction(it.dir, 'enable'), disabled: busy }, '启用')
                       : h('span', { style: { display: 'flex', gap: 4 } },
-                          h('button', { style: S.btn, onClick: () => rowAction(it.dir, 'update'), disabled: busy }, '更新'),
-                          h('button', { style: S.btn, onClick: () => rowAction(it.dir, 'disable'), disabled: busy }, '禁用'),
-                          h('button', { style: { ...S.btn, color: '#e06c6c' }, onClick: () => rowAction(it.dir, 'remove'), disabled: busy }, '删除'),
+                          h(GhostBtn, { onClick: () => rowAction(it.dir, 'update'), disabled: busy }, '更新'),
+                          h(GhostBtn, { onClick: () => rowAction(it.dir, 'disable'), disabled: busy }, '禁用'),
+                          h(GhostBtn, { style: S.dangerText, onClick: () => rowAction(it.dir, 'remove'), disabled: busy }, '删除'),
                         ),
                   ),
             )),
@@ -385,8 +404,8 @@ window.__ModuleLoader__.load({
         }
       }
       return h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 4 } },
-        h('input', { style: { ...S.input, width: 90 }, placeholder: '新组名', value: name, onChange: (e) => setName(e.target.value) }),
-        h('button', { style: S.btn, onClick: create, disabled: busy }, '新建组'),
+        h(Input, { style: { width: 90 }, placeholder: '新组名', value: name, onChange: (e) => setName(e.target.value) }),
+        h(OutlineBtn, { onClick: create, disabled: busy }, '新建组'),
         h(ErrorLine, { error }),
       )
     }
@@ -409,10 +428,10 @@ window.__ModuleLoader__.load({
           setBusy(false)
         }
       }
-      return h('div', { style: { border: '1px solid var(--dsw-border-color, rgba(128,128,128,.2))', borderRadius: 8, padding: 8, marginBottom: 6, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' } },
-        h(Field, { label: '目录或 .zip 路径' }, h('input', { style: { ...S.input, width: 260 }, value: path, onChange: (e) => setPath(e.target.value), placeholder: 'E:\\path\\skill-dir 或 .zip' })),
-        h(Field, { label: '改名(可选)' }, h('input', { style: { ...S.input, width: 120 }, value: as, onChange: (e) => setAs(e.target.value) })),
-        h('button', { style: S.btn, onClick: doImport, disabled: busy || !path.trim() }, '导入'),
+      return h('div', { style: { border: `1px solid ${T.borderL1}`, borderRadius: 8, padding: 8, marginBottom: 6, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' } },
+        h(Field, { label: '目录或 .zip 路径' }, h(Input, { style: { width: 260 }, value: path, onChange: (e) => setPath(e.target.value), placeholder: 'E:\\path\\skill-dir 或 .zip' })),
+        h(Field, { label: '改名(可选)' }, h(Input, { style: { width: 120 }, value: as, onChange: (e) => setAs(e.target.value) })),
+        h(OutlineBtn, { onClick: doImport, disabled: busy || !path.trim() }, '导入'),
         h(ErrorLine, { error }),
       )
     }
@@ -471,9 +490,9 @@ window.__ModuleLoader__.load({
       }
 
       return h('div', { style: S.panel },
-        h('div', { style: { display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 } },
-          h('input', { style: { ...S.input, width: 240 }, placeholder: 'skills.sh 关键词', value: query, onChange: (e) => setQuery(e.target.value) }),
-          h('button', { style: S.btn, onClick: doSearch, disabled: busy }, '搜索'),
+        h('div', { style: S.toolbar },
+          h(Input, { style: { width: 240 }, placeholder: 'skills.sh 关键词', value: query, onChange: (e) => setQuery(e.target.value) }),
+          h(OutlineBtn, { onClick: doSearch, disabled: busy }, '搜索'),
           h(Field, { label: '直接添加' },
             h(DirectAdd, { call, reload, busy, setBusy, setError }),
           ),
@@ -483,17 +502,17 @@ window.__ModuleLoader__.load({
           h('div', { style: S.title }, `${candidates.repo} 含多个 skill，选择其一：`),
           candidates.list.map((c) => h('div', { key: c.path || '<root>', style: S.row },
             h('span', { style: { flex: 1 } }, c.path || '（仓库根）'),
-            h('button', { style: S.btn, onClick: () => addChosen(c.path), disabled: busy }, '入库'),
+            h(OutlineBtn, { onClick: () => addChosen(c.path), disabled: busy }, '入库'),
           )),
         ),
         results && results.skills.length === 0
           ? h('div', { style: S.muted }, '无结果')
           : (results ? results.skills : []).map((s) => h('div', { key: s.key, style: S.row },
               h('div', { style: { flex: 1, minWidth: 0 } },
-                h('div', { style: { fontWeight: 600 } }, s.name),
+                h('div', { style: { fontWeight: 600, color: T.labelPrimary } }, s.name),
                 h('div', { style: S.muted }, `${s.repo}${s.directory ? ' / ' + s.directory : ''} · 安装 ${s.installs}`),
               ),
-              h('button', { style: S.btn, onClick: () => addFrom(s.repo, s.directory, ''), disabled: busy }, '入库'),
+              h(OutlineBtn, { onClick: () => addFrom(s.repo, s.directory, ''), disabled: busy }, '入库'),
             )),
       )
     }
@@ -520,9 +539,9 @@ window.__ModuleLoader__.load({
         }
       }
       return h('span', { style: { display: 'inline-flex', gap: 4, alignItems: 'center' } },
-        h('input', { style: { ...S.input, width: 180 }, placeholder: 'owner/repo', value: repo, onChange: (e) => setRepo(e.target.value) }),
-        h('input', { style: { ...S.input, width: 70 }, placeholder: '分支', value: branch, onChange: (e) => setBranch(e.target.value) }),
-        h('button', { style: S.btn, onClick: add, disabled: busy }, '添加'),
+        h(Input, { style: { width: 180 }, placeholder: 'owner/repo', value: repo, onChange: (e) => setRepo(e.target.value) }),
+        h(Input, { style: { width: 70 }, placeholder: '分支', value: branch, onChange: (e) => setBranch(e.target.value) }),
+        h(OutlineBtn, { onClick: add, disabled: busy }, '添加'),
       )
     }
 
@@ -595,17 +614,20 @@ window.__ModuleLoader__.load({
         }
       }
 
+      const cellColor = (cell) => (
+        cell === '生效' ? T.success : cell === '错误' ? T.error : cell === 'shadowed' ? T.warn : T.labelSecondary
+      )
       return h('div', { style: S.panel },
-        h('div', { style: { display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 } },
-          h('span', { style: { fontWeight: 600 } }, `健康问题 ${health.length} 项`),
-          h('button', { style: S.btn, onClick: fix, disabled: busy || health.length === 0 }, '应用并修复'),
+        h('div', { style: S.toolbar },
+          h('span', { style: { fontWeight: 600, color: T.labelPrimary } }, `健康问题 ${health.length} 项`),
+          h(OutlineBtn, { onClick: fix, disabled: busy || health.length === 0 }, '应用并修复'),
           h(ProjectAdd, { call, reload, busy, setBusy, setError }),
         ),
         h(ErrorLine, { error }),
         health.length === 0
           ? h('div', { style: { ...S.muted, marginBottom: 8 } }, '健康：无问题')
           : health.map((issue, i) => h('div', { key: i, style: S.row },
-              h('span', { style: S.badge('#e06c6c') }, issue.issue),
+              h(Pill, { style: badgeStyle(T.error) }, issue.issue),
               h('span', { style: { flex: 1 } }, `${issue.name} @ ${issue.target || '—'}`),
             )),
         // 项目注册表
@@ -613,23 +635,23 @@ window.__ModuleLoader__.load({
         Object.keys(projects).length === 0
           ? h('div', { style: S.muted }, '未注册项目')
           : Object.entries(projects).map(([name, path]) => h('div', { key: name, style: S.row },
-              h('span', { style: { flex: 1 } }, h('span', { style: { fontWeight: 600 } }, name), h('span', { style: S.muted }, `  ${path}`)),
-              h('button', { style: S.btn, onClick: () => projectOp('rename', { name, newName: window.prompt('新项目名', name) }), disabled: busy }, '改名'),
-              h('button', { style: S.btn, onClick: () => { const p = window.prompt('新路径', path); if (p) projectOp('edit-path', { name, path: p }) }, disabled: busy }, '改路径'),
-              h('button', { style: { ...S.btn, color: '#e06c6c' }, onClick: () => projectOp('remove', { name, cascade: true }), disabled: busy }, '删除'),
+              h('span', { style: { flex: 1 } }, h('span', { style: { fontWeight: 600, color: T.labelPrimary } }, name), h('span', { style: S.muted }, `  ${path}`)),
+              h(GhostBtn, { onClick: () => projectOp('rename', { name, newName: window.prompt('新项目名', name) }), disabled: busy }, '改名'),
+              h(GhostBtn, { onClick: () => { const p = window.prompt('新路径', path); if (p) projectOp('edit-path', { name, path: p }) }, disabled: busy }, '改路径'),
+              h(GhostBtn, { style: S.dangerText, onClick: () => projectOp('remove', { name, cascade: true }), disabled: busy }, '删除'),
             )),
         // 矩阵
         matrix && h('div', null,
           h('div', { style: S.title }, '同步矩阵'),
           h('table', { style: { borderCollapse: 'collapse', fontSize: 12, width: '100%' } },
             h('thead', null, h('tr', null,
-              h('th', { style: { textAlign: 'left', padding: 4 } }, 'skill'),
-              matrix.columns.map((c) => h('th', { key: c.key, style: { textAlign: 'left', padding: 4 } }, c.label)),
+              h('th', { style: { textAlign: 'left', padding: 4, borderBottom: `1px solid ${T.borderL1}`, color: T.labelSecondary } }, 'skill'),
+              matrix.columns.map((c) => h('th', { key: c.key, style: { textAlign: 'left', padding: 4, borderBottom: `1px solid ${T.borderL1}`, color: T.labelSecondary } }, c.label)),
             )),
             h('tbody', null, matrix.rows.map((row) => h('tr', { key: row.dir },
-              h('td', { style: { padding: 4 } }, row.name),
-              row.cells.map((cell, i) => h('td', { key: i, style: { padding: 4 } },
-                h('span', { style: S.badge(cell === '生效' ? '#4a9d5f' : cell === '错误' ? '#e06c6c' : cell === 'shadowed' ? '#d9a13b' : 'rgba(128,128,128,.6)') }, cell),
+              h('td', { style: { padding: 4, borderBottom: `1px solid ${T.borderL1}` } }, row.name),
+              row.cells.map((cell, i) => h('td', { key: i, style: { padding: 4, borderBottom: `1px solid ${T.borderL1}` } },
+                h(Pill, { style: badgeStyle(cellColor(cell)) }, cell),
               )),
             ))),
           ),
@@ -655,9 +677,9 @@ window.__ModuleLoader__.load({
         }
       }
       return h('span', { style: { display: 'inline-flex', gap: 4, alignItems: 'center', marginLeft: 'auto' } },
-        h('input', { style: { ...S.input, width: 110 }, placeholder: '项目名', value: name, onChange: (e) => setName(e.target.value) }),
-        h('input', { style: { ...S.input, width: 200 }, placeholder: '项目绝对路径', value: path, onChange: (e) => setPath(e.target.value) }),
-        h('button', { style: S.btn, onClick: add, disabled: busy || !name.trim() || !path.trim() }, '注册项目'),
+        h(Input, { style: { width: 110 }, placeholder: '项目名', value: name, onChange: (e) => setName(e.target.value) }),
+        h(Input, { style: { width: 200 }, placeholder: '项目绝对路径', value: path, onChange: (e) => setPath(e.target.value) }),
+        h(OutlineBtn, { onClick: add, disabled: busy || !name.trim() || !path.trim() }, '注册项目'),
       )
     }
 
