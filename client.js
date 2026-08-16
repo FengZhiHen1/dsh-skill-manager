@@ -19,7 +19,7 @@ window.__ModuleLoader__.load({
     const React = require('react')
     const { useState, useEffect } = React
     const primitives = require('@deepseek-ai/dsh-client-ui-primitives')
-    const { Button, Input, Pill } = primitives
+    const { Button, Input, Pill, Modal } = primitives
     // 防御：icon 为可选装饰，缺失时降级为文本箭头，绝不让整卡渲染失败
     const ChevronIcon = typeof primitives.IconChevronDownOutline14 === 'function' ? primitives.IconChevronDownOutline14 : null
     const h = React.createElement
@@ -109,15 +109,102 @@ window.__ModuleLoader__.load({
     /** 行内主操作按钮（outline sm）。 */
     const OutlineBtn = (props) => h(Button, { variant: 'outline', size: 'sm', ...props })
 
+    // ---------- 目录选择弹层（平台原语 ctx.workspaces.listDirectory + 原生 Modal） ----------
+    // 对齐原生 DirectoryBrowser 交互：主目录起始、面包屑跳转、逐级下钻、显示隐藏、打开/取消。
+    function DirectoryPicker({ open, onClose, onPick, workspaces }) {
+      const [listing, setListing] = useState(null)
+      const [loading, setLoading] = useState(false)
+      const [error, setError] = useState(null)
+      const [showHidden, setShowHidden] = useState(false)
+
+      const load = async (path, signal) => {
+        setLoading(true)
+        setError(null)
+        try {
+          const next = await workspaces.listDirectory(path, signal)
+          setListing(next)
+        } catch (e) {
+          setError(e && e.message ? e.message : '目录读取失败')
+        } finally {
+          setLoading(false)
+        }
+      }
+      useEffect(() => {
+        if (!open) return
+        const controller = new AbortController()
+        setListing(null)
+        load(undefined, controller.signal) // 未指定路径 = Host 主目录
+        return () => controller.abort()
+      }, [open])
+
+      if (!open) return null
+      const rows = (listing ? listing.entries : []).filter((e) => showHidden || !e.hidden)
+      return h(Modal, {
+        open,
+        onClose,
+        title: '选择本地 skill 目录',
+        description: listing ? `当前：${listing.path}` : '读取目录中…',
+        footer: h('div', { style: { display: 'flex', justifyContent: 'flex-end', gap: 8 } },
+          h(GhostBtn, { onClick: onClose }, '取消'),
+          h(OutlineBtn, { disabled: !listing || loading, onClick: () => { onPick(listing.path) } }, '打开'),
+        ),
+      },
+        h('div', { style: { display: 'flex', flexDirection: 'column', gap: 8, minWidth: 360, maxHeight: 380 } },
+          // 面包屑
+          listing && listing.crumbs.length > 0
+            ? h('div', { style: { display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', fontSize: 12 } },
+                listing.crumbs.map((crumb, i) =>
+                  h('span', { key: crumb.path + i, style: { display: 'inline-flex', alignItems: 'center', gap: 4 } },
+                    i > 0 ? h('span', { style: { color: T.labelTertiary } }, '/') : null,
+                    h('button', {
+                      type: 'button',
+                      onClick: () => { load(crumb.path) },
+                      style: { border: 'none', background: 'none', padding: '2px 4px', borderRadius: 4, font: 'inherit', fontSize: 12, color: i === listing.crumbs.length - 1 ? T.labelPrimary : T.labelSecondary, cursor: 'pointer' },
+                    }, crumb.name),
+                  ),
+                ),
+              )
+            : null,
+          // 隐藏文件开关
+          h('label', { style: { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: T.labelSecondary } },
+            h('input', { type: 'checkbox', checked: showHidden, onChange: (e) => setShowHidden(e.target.checked) }),
+            '显示隐藏文件',
+          ),
+          // 目录列表
+          h('div', { style: { border: `1px solid ${T.borderL1}`, borderRadius: 8, overflowY: 'auto', flex: 1 } },
+            loading && !listing
+              ? h('div', { style: { padding: 12, color: T.labelTertiary, fontSize: 12 } }, '加载中…')
+              : rows.length === 0
+                ? h('div', { style: { padding: 12, color: T.labelTertiary, fontSize: 12 } }, '（无子目录）')
+                : rows.map((entry) => h('button', {
+                    type: 'button',
+                    key: entry.path,
+                    onClick: () => { load(entry.path) },
+                    style: {
+                      display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left',
+                      padding: '6px 10px', border: 'none', background: 'none', font: 'inherit', fontSize: 13,
+                      color: T.labelPrimary, cursor: 'pointer',
+                    },
+                  },
+                    h('span', { style: { color: T.labelTertiary } }, '📁'),
+                    h('span', { style: { flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, entry.name),
+                  )),
+          ),
+          error ? h('div', { style: { color: T.error, fontSize: 12 } }, error) : null,
+        ),
+      )
+    }
+
     // ---------- 插件配置卡片（设置 → 插件 → skill-manager） ----------
     // 与 DSH 原生 PluginCard 同构：li > header（名称/描述/未保存标记/折叠箭头）
     // + body（字段 + footer：放弃/保存）；token 与几何对齐 PluginCard.module.css。
-    function SkillManagerCard({ scope }) {
+    function SkillManagerCard({ scope, workspaces }) {
       const [open, setOpen] = useState(false)
       const [draft, setDraft] = useState('')
       const [busy, setBusy] = useState(false)
       const [failed, setFailed] = useState(null)
       const [focused, setFocused] = useState(false)
+      const [pickerOpen, setPickerOpen] = useState(false)
       const sync = () => {
         const snap = scope.getSnapshot()
         setDraft(snap.value && snap.value.workshopDir ? snap.value.workshopDir : '')
@@ -219,29 +306,39 @@ window.__ModuleLoader__.load({
                 ),
                 // 输入框：裸 input + fields 几何（对齐原生 ValueField；不用 primitives
                 // Input——其 wrap 自带边框/圆角，再传几何会叠成"两个框"）
-                h('input', {
-                  id: 'skill-manager-workshop-dir',
-                  type: 'text',
-                  value: draft,
-                  disabled: !writable,
-                  placeholder: '例如 E:\\Project\\Skills（默认为空 = 未配置）',
-                  onChange: (e) => { setDraft(e.target.value); setFailed(null) },
-                  onFocus: () => setFocused(true),
-                  onBlur: () => setFocused(false),
-                  style: {
-                    height: 34,
-                    padding: '0 12px',
-                    border: `1px solid ${focused ? T.brand : T.borderL2}`,
-                    borderRadius: 8,
-                    background: T.bgLayer3,
-                    font: 'inherit',
-                    fontSize: 13,
-                    lineHeight: 1.5,
-                    color: T.labelPrimary,
-                    outline: 'none',
-                    boxSizing: 'border-box',
-                    width: '100%',
-                  },
+                h('div', { style: { display: 'flex', gap: 8, alignItems: 'center' } },
+                  h('input', {
+                    id: 'skill-manager-workshop-dir',
+                    type: 'text',
+                    value: draft,
+                    disabled: !writable,
+                    placeholder: '例如 E:\\Project\\Skills（默认为空 = 未配置）',
+                    onChange: (e) => { setDraft(e.target.value); setFailed(null) },
+                    onFocus: () => setFocused(true),
+                    onBlur: () => setFocused(false),
+                    style: {
+                      flex: 1,
+                      minWidth: 0,
+                      height: 34,
+                      padding: '0 12px',
+                      border: `1px solid ${focused ? T.brand : T.borderL2}`,
+                      borderRadius: 8,
+                      background: T.bgLayer3,
+                      font: 'inherit',
+                      fontSize: 13,
+                      lineHeight: 1.5,
+                      color: T.labelPrimary,
+                      outline: 'none',
+                      boxSizing: 'border-box',
+                    },
+                  }),
+                  h(GhostBtn, { disabled: !writable, onClick: () => setPickerOpen(true) }, '选择…'),
+                ),
+                h(DirectoryPicker, {
+                  open: pickerOpen,
+                  workspaces,
+                  onClose: () => setPickerOpen(false),
+                  onPick: (path) => { setDraft(path); setFailed(null); setPickerOpen(false) },
                 }),
                 h('p', { style: { margin: 0, fontSize: 12, lineHeight: 1.5, color: T.labelTertiary } }, '绝对路径；保存后立即生效，无需重启。'),
               ),
@@ -803,11 +900,12 @@ window.__ModuleLoader__.load({
     }
 
     // ---------- 插件入口 ----------
-    const inject = ['slots', 'connection', 'remote', 'settingsScope']
+    const inject = ['slots', 'connection', 'remote', 'settingsScope', 'workspaces']
 
     function apply(ctx) {
       const scope = ctx.settingsScope.bind({ namespace: 'skill-manager' })
       const call = createCall()
+      const workspaces = ctx.workspaces
 
       ctx.effect(() => {
         const offSection = ctx.slots.inject('settings.section', () =>
@@ -818,7 +916,7 @@ window.__ModuleLoader__.load({
         )
         const offCard = ctx.slots.inject('settings.plugin.item', () =>
           ctx.slots.register(
-            { name: 'settings.plugin.item', id: 'skill-manager', order: 30, label: '技能目录', inject: () => ({ scope }) },
+            { name: 'settings.plugin.item', id: 'skill-manager', order: 30, label: '技能目录', inject: () => ({ scope, workspaces }) },
             SkillManagerCard,
           ),
         )
