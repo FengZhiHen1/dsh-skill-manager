@@ -415,8 +415,8 @@ window.__ModuleLoader__.load({
           setResults(r)
           setCandidates(null)
         } catch (e) {
+          // 失败保留上一次成功结果与失败原因，不覆盖输入（设计：搜索视图）
           setError(e.message || String(e))
-          setResults(null)
         } finally {
           setBusy(false)
         }
@@ -482,12 +482,13 @@ window.__ModuleLoader__.load({
 
     function DirectAdd({ call, reload, busy, setBusy, setError }) {
       const [repo, setRepo] = useState('')
+      const [branch, setBranch] = useState('')
       const add = async () => {
         if (!repo.trim()) return
         setBusy(true)
         setError(null)
         try {
-          const r = await call('repo-skills', { repo: repo.trim(), ref: 'main' })
+          const r = await call('repo-skills', { repo: repo.trim(), ref: branch.trim() || 'main' })
           if (r.candidates.length <= 1) {
             await call('add', { repo: repo.trim(), dir: r.candidates[0] && r.candidates[0].path ? r.candidates[0].path : undefined, ref: r.branch })
             reload()
@@ -502,6 +503,7 @@ window.__ModuleLoader__.load({
       }
       return h('span', { style: { display: 'inline-flex', gap: 4, alignItems: 'center' } },
         h('input', { style: { ...S.input, width: 180 }, placeholder: 'owner/repo', value: repo, onChange: (e) => setRepo(e.target.value) }),
+        h('input', { style: { ...S.input, width: 70 }, placeholder: '分支', value: branch, onChange: (e) => setBranch(e.target.value) }),
         h('button', { style: S.btn, onClick: add, disabled: busy }, '添加'),
       )
     }

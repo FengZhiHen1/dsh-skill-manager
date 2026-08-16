@@ -13,7 +13,7 @@ import {
   classifyProjectEntries,
   targetKey,
 } from '../lib/sync.js'
-import { loadState, saveState, globalRoot } from '../lib/state.js'
+import { defaultSeedMounts, loadState, migrateLegacyState, saveState, globalRoot } from '../lib/state.js'
 import { readJson, writeJson } from '../lib/workshop.js'
 
 // 重定向 homedir()（globalRoot 每次调用时读取环境）。
@@ -182,4 +182,42 @@ test('loadState：缺失按空骨架', async () => {
   assert.deepEqual(state.mounts, [])
   await writeJson(root, 'distributor/state.json', { projects: {}, mounts: [], synced: {} })
   assert.ok(globalRoot().endsWith('.dsh\\skills') || globalRoot().endsWith('.dsh/skills'))
+})
+
+test('migrateLegacyState：v0.1 旧格式仅迁移 dsh 条目', () => {
+  const migrated = migrateLegacyState({
+    skills: {
+      alpha: { synced: { dsh: { method: 'junction' }, claude: { method: 'junction' } } },
+      beta: { synced: { claude: { method: 'junction' } } },
+    },
+  })
+  assert.deepEqual(migrated.mounts, [{ group: '默认', app: 'dsh', scope: 'global', project: null }])
+  assert.equal(migrated.synced.alpha.length, 1)
+  assert.equal(migrated.synced.alpha[0].app, 'dsh')
+  assert.equal(migrated.synced.beta, undefined) // 仅 claude 记录 → 不迁移
+})
+
+test('defaultSeedMounts：dsh 启用时默认组挂载；禁用时为空', () => {
+  assert.deepEqual(defaultSeedMounts({ dsh: { enabled: true } }), [{ group: '默认', app: 'dsh', scope: 'global', project: null }])
+  assert.deepEqual(defaultSeedMounts({ dsh: { enabled: false } }), [])
+  assert.deepEqual(defaultSeedMounts({}), [])
+})
+
+test('health：报告项目 local-skill/local-empty/local-foreign', async () => {
+  const project = await mkdtemp(join(tmpdir(), 'dsh-sm-proj-'))
+  const base = join(project, '.dsh', 'skills')
+  await mkdir(base, { recursive: true })
+  await mkdir(join(base, 'real-skill'))
+  await writeFile(join(base, 'real-skill', 'SKILL.md'), '---\nname: real-skill\n---\n', 'utf8')
+  await mkdir(join(base, 'empty-dir'))
+  await mkdir(join(base, 'foreign-dir'))
+  await writeFile(join(base, 'foreign-dir', 'notes.txt'), 'x', 'utf8')
+  const state = baseState()
+  state.projects = { 测试项目: project }
+  const issues = await health({ root, state, apps, groups: {}, skills: ['alpha'] })
+  const kinds = issues.map((i) => i.issue)
+  assert.ok(kinds.includes('local-skill'))
+  assert.ok(kinds.includes('local-empty'))
+  assert.ok(kinds.includes('local-foreign'))
+  await rm(project, { recursive: true, force: true })
 })

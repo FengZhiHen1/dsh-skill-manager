@@ -1,7 +1,7 @@
 // api.js 单元测试：未配置门禁、信封映射、单飞队列、方法分发。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { buildApi, createQueue, writeError, readJsonBody, ApiError } from '../lib/api.js'
@@ -43,6 +43,37 @@ test('已配置：library 与 groups 返回车间数据', async () => {
   assert.equal(lib.skills[0].group, '默认')
   const grp = await api['groups']()
   assert.deepEqual(grp.groups, [])
+  await rm(root, { recursive: true, force: true })
+})
+
+test('全新车间：首次访问写入默认挂载种子（默认组 → dsh 全局）', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-sm-test-'))
+  await mkdir(join(root, 'skills', 'alpha'), { recursive: true })
+  await writeFile(join(root, 'skills', 'alpha', 'SKILL.md'), '---\nname: alpha\n---\n', 'utf8')
+  const api = buildApi(() => scopeOf(root))
+  await api['library']({})
+  const state = JSON.parse(await readFile(join(root, 'distributor', 'state.json'), 'utf8'))
+  assert.deepEqual(state.mounts, [{ group: '默认', app: 'dsh', scope: 'global', project: null }])
+  // 第二次访问不再重复写入（种子已存在）
+  await api['groups']()
+  const state2 = JSON.parse(await readFile(join(root, 'distributor', 'state.json'), 'utf8'))
+  assert.equal(state2.mounts.length, 1)
+  await rm(root, { recursive: true, force: true })
+})
+
+test('groups/op create：复制默认组挂载规则作为起步', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-sm-test-'))
+  await mkdir(join(root, 'skills', 'alpha'), { recursive: true })
+  await writeFile(join(root, 'skills', 'alpha', 'SKILL.md'), '---\nname: alpha\n---\n', 'utf8')
+  const api = buildApi(() => scopeOf(root))
+  await api['library']({}) // 触发默认种子
+  const r = await api['groups/op']({ action: 'create', name: '新组' })
+  assert.equal(r.groups.length, 1)
+  const state = JSON.parse(await readFile(join(root, 'distributor', 'state.json'), 'utf8'))
+  const newMounts = state.mounts.filter((m) => m.group === '新组')
+  assert.equal(newMounts.length, 1)
+  assert.equal(newMounts[0].app, 'dsh')
+  assert.equal(newMounts[0].scope, 'global')
   await rm(root, { recursive: true, force: true })
 })
 
