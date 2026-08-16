@@ -18,7 +18,10 @@ window.__ModuleLoader__.load({
     const exports = module.exports
     const React = require('react')
     const { useState, useEffect } = React
-    const { Button, Input, Pill, IconChevronDownOutline14 } = require('@deepseek-ai/dsh-client-ui-primitives')
+    const primitives = require('@deepseek-ai/dsh-client-ui-primitives')
+    const { Button, Input, Pill } = primitives
+    // 防御：icon 为可选装饰，缺失时降级为文本箭头，绝不让整卡渲染失败
+    const ChevronIcon = typeof primitives.IconChevronDownOutline14 === 'function' ? primitives.IconChevronDownOutline14 : null
     const h = React.createElement
 
     // ---------- Host RPC 调用（统一信封） ----------
@@ -122,10 +125,11 @@ window.__ModuleLoader__.load({
       useEffect(() => { sync() }, [scope])
 
       const snap = scope.getSnapshot()
-      if (snap.status === 'unavailable') return null // 命名空间不可用：不渲染（PluginCard 语义）
+      // 命名空间不可用/加载中都不隐藏卡片：仅禁用控件（unavailable 时仍展示，
+      // 避免状态时序问题导致整卡消失）
       const current = snap.value && snap.value.workshopDir ? snap.value.workshopDir : ''
       const dirty = draft !== current
-      const writable = snap.writable !== false
+      const writable = snap.writable !== false && snap.status === 'ready'
       const overridden = Boolean(snap.user && typeof snap.user === 'object' && 'workshopDir' in snap.user)
 
       const save = async () => {
@@ -192,7 +196,9 @@ window.__ModuleLoader__.load({
           dirty
             ? h('span', { style: { flex: 'none', borderRadius: 999, padding: '1px 8px', fontSize: 11, lineHeight: '17px', fontWeight: 500, whiteSpace: 'nowrap', background: T.bgModulePlatform, color: T.labelSecondary } }, '未保存')
             : null,
-          h(IconChevronDownOutline14, { style: { flex: 'none', color: T.labelTertiary, transition: 'transform .16s', transform: open ? 'rotate(180deg)' : undefined } }),
+          ChevronIcon
+            ? h(ChevronIcon, { style: { flex: 'none', color: T.labelTertiary, transition: 'transform .16s', transform: open ? 'rotate(180deg)' : undefined } })
+            : h('span', { style: { flex: 'none', color: T.labelTertiary, fontSize: 12 } }, open ? '▾' : '▸'),
         ),
         open
           ? h('div', { style: { borderTop: `1px solid ${T.borderL2}`, margin: '0 16px', paddingBottom: 8 } },
