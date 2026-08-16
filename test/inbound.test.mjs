@@ -5,18 +5,18 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { deflateRawSync } from 'node:zlib'
-import { add, importSkill, check } from '../lib/inbound.js'
+import { add, importSkill, check, update } from '../lib/inbound.js'
 import { loadLock } from '../lib/library.js'
 import { writeJson } from '../lib/workshop.js'
-
 const SHA = 'a'.repeat(40)
 
 /** 构造 zipball：顶层 <repo>-<branch>，含 SKILL.md 与子文件（deflate）。 */
-function zipball(repo, branch, skillMd) {
+function zipball(repo, branch, skillMd, extraEntries = []) {
   const top = `${repo.replace('/', '-')}-${branch}`
   const entries = [
     { name: `${top}/SKILL.md`, data: Buffer.from(skillMd, 'utf8'), method: 8 },
     { name: `${top}/notes.txt`, data: Buffer.from('hello', 'utf8'), method: 0 },
+    ...extraEntries,
   ]
   const localParts = []
   const centralParts = []
@@ -120,6 +120,56 @@ test('add：非法仓库 slug 拒绝（bad-repo）', async () => {
     () => add({ root, repo: 'not-a-slug', ctx: fakeCtx }),
     (e) => e.code === 'bad-repo',
   )
+  await rm(root, { recursive: true, force: true })
+})
+
+test('add：zip 含路径穿越条目拒绝（bad-zipball），且无越界写入', async () => {  const root = await mkdtemp(join(tmpdir(), 'dsh-sm-test-'))
+  await mkdir(join(root, 'skills'), { recursive: true })
+  globalThis.fetch = async (url) => {
+    const u = String(url)
+    if (u.includes('api.github.com') && u.includes('/branches/')) {
+      return { ok: true, status: 200, json: async () => ({ commit: { sha: SHA } }) }
+    }
+    if (u.includes('archive/refs/heads/')) {
+      const evil = zipball('owner/repo', 'main', '---\nname: my-skill\n---\n', [
+        { name: 'owner-repo-main/../evil.txt', data: Buffer.from('pwned', 'utf8'), method: 0 },
+      ])
+      return { ok: true, status: 200, headers: new Map(), arrayBuffer: async () => evil }
+    }
+    throw new Error(`unexpected fetch: ${u}`)
+  }
+  await assert.rejects(
+    () => add({ root, repo: 'owner/repo', ctx: fakeCtx }),
+    (e) => e.code === 'bad-zipball',
+  )
+  // 未写出任何越界文件
+  let escaped = false
+  try {
+    await stat(join(root, '..', 'evil.txt'))
+    escaped = true
+  } catch {
+    // 期望不存在
+  }
+  assert.equal(escaped, false)
+  await rm(root, { recursive: true, force: true })
+})
+
+test('update：锁记录 path_in_repo 失效时报 path-stale（不静默回退）', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-sm-test-'))
+  await mkdir(join(root, 'skills', 'my-skill'), { recursive: true })
+  await writeFile(join(root, 'skills', 'my-skill', 'SKILL.md'), '---\nname: my-skill\n---\n', 'utf8')
+  await writeJson(root, 'skills.lock.json', {
+    version: 1,
+    skills: {
+      'my-skill': { repo: 'owner/repo', branch: 'main', commit: 'old'.padEnd(40, '0'), path_in_repo: 'old/dir', installed_at: '', content_hash: 'x' },
+    },
+  })
+  // 上游 zipball 只在仓库根有 SKILL.md（old/dir 已失效）
+  mockGitHub('owner/repo', 'main', '---\nname: my-skill\n---\n')
+  const r = await update({ root, names: ['my-skill'], ctx: fakeCtx })
+  assert.equal(r.results.length, 1)
+  assert.equal(r.results[0].status, 'skipped')
+  assert.match(r.results[0].reason, /已失效/)
   await rm(root, { recursive: true, force: true })
 })
 

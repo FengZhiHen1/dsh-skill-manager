@@ -1,6 +1,7 @@
 {
   "name": "dsh-skill-manager",
   "version": "0.1.0",
+  "private": true,
   "description": "DSH 设置页技能管理插件：配置本地 skill 目录（车间根）后，管理库、分组与 DSH 挂载，支持 skills.sh 搜索下载、GitHub 入库、本地导入、检查更新、备份恢复与禁用启用。",
   "type": "module",
   "main": "index.js",

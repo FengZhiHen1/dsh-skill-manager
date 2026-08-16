@@ -1,11 +1,22 @@
 // library.js 单元测试：frontmatter 解析、目录哈希、库扫描。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { execFile } from 'node:child_process'
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { parseSkillMd, dirHash, loadLock, scanLibrary } from '../lib/library.js'
+import { logHashes } from '../lib/git.js'
 import { writeJson } from '../lib/workshop.js'
+
+function git(root, args) {
+  return new Promise((resolvePromise, reject) => {
+    execFile('git', ['-C', root, ...args], (error, stdout) => {
+      if (error) reject(error)
+      else resolvePromise(stdout)
+    })
+  })
+}
 
 test('parseSkillMd：单行 key: value 与引号剥离', () => {
   const md = '---\nname: my-skill\ndescription: "带引号的描述"\nwhenToUse: 某些场景\n---\n正文'
@@ -82,4 +93,32 @@ test('scanLibrary：来源判定、missing 与 disabled 条目', async () => {
   // gamma：禁用
   assert.equal(byDir.gamma.disabled, true)
   await rm(root, { recursive: true, force: true })
+})
+
+test('logHashes：单次 spawn 批量取每路径最新提交哈希', async () => {
+  const repo = await mkdtemp(join(tmpdir(), 'dsh-sm-git-'))
+  await git(repo, ['init', '-b', 'main'])
+  await mkdir(join(repo, 'skills', 'alpha'), { recursive: true })
+  await mkdir(join(repo, 'skills', 'beta'), { recursive: true })
+  await writeFile(join(repo, 'skills', 'alpha', 'SKILL.md'), 'a1', 'utf8')
+  await git(repo, ['add', 'skills/alpha'])
+  await git(repo, ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-m', 'alpha'])
+  await writeFile(join(repo, 'skills', 'beta', 'SKILL.md'), 'b1', 'utf8')
+  await git(repo, ['add', 'skills/beta'])
+  await git(repo, ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-m', 'beta'])
+  await writeFile(join(repo, 'skills', 'alpha', 'SKILL.md'), 'a2', 'utf8')
+  await git(repo, ['add', 'skills/alpha'])
+  await git(repo, ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-m', 'alpha2'])
+
+  const map = await logHashes(repo, ['skills/alpha', 'skills/beta', 'skills/ghost'])
+  const alphaHash = map.get('skills/alpha')
+  const betaHash = map.get('skills/beta')
+  assert.match(alphaHash, /^[0-9a-f]{40}$/)
+  assert.match(betaHash, /^[0-9a-f]{40}$/)
+  assert.notEqual(alphaHash, betaHash)
+  // alpha 的哈希 = 最后一次提交 alpha2（最新）；ghost 无历史 → null
+  const latest = (await git(repo, ['log', '-1', '--format=%H'])).trim()
+  assert.equal(alphaHash, latest)
+  assert.equal(map.get('skills/ghost'), null)
+  await rm(repo, { recursive: true, force: true })
 })

@@ -46,6 +46,18 @@ test('已配置：library 与 groups 返回车间数据', async () => {
   await rm(root, { recursive: true, force: true })
 })
 
+test('车间根目录缺失：统一 workshop-missing（插件保持存活）', async () => {
+  const root = join(tmpdir(), 'dsh-sm-gone-' + Date.now())
+  const api = buildApi(() => scopeOf(root))
+  for (const method of ['library', 'groups', 'health', 'search', 'backups']) {
+    await assert.rejects(
+      () => api[method]({}),
+      (e) => e instanceof WorkshopError && e.code === 'workshop-missing',
+      `方法 ${method} 应报 workshop-missing`,
+    )
+  }
+})
+
 test('全新车间：首次访问写入默认挂载种子（默认组 → dsh 全局）', async () => {
   const root = await mkdtemp(join(tmpdir(), 'dsh-sm-test-'))
   await mkdir(join(root, 'skills', 'alpha'), { recursive: true })

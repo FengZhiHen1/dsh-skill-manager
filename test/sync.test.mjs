@@ -214,10 +214,14 @@ test('health：报告项目 local-skill/local-empty/local-foreign', async () => 
   await writeFile(join(base, 'foreign-dir', 'notes.txt'), 'x', 'utf8')
   const state = baseState()
   state.projects = { 测试项目: project }
+  // 项目级挂载存在时，同一冲突不得双重报告（local-* 由分类统一报，不再报 target-exists）
+  state.mounts = [{ group: '默认', app: 'dsh', scope: 'project', project: '测试项目' }]
   const issues = await health({ root, state, apps, groups: {}, skills: ['alpha'] })
   const kinds = issues.map((i) => i.issue)
   assert.ok(kinds.includes('local-skill'))
   assert.ok(kinds.includes('local-empty'))
   assert.ok(kinds.includes('local-foreign'))
+  assert.equal(kinds.filter((k) => k === 'local-skill').length, 1)
+  assert.equal(kinds.includes('target-exists'), false)
   await rm(project, { recursive: true, force: true })
 })

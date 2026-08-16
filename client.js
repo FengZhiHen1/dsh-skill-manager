@@ -224,17 +224,33 @@ window.__ModuleLoader__.load({
           setBusy(false)
         }
       }
-      useEffect(() => { refresh() }, [origin, groupFilter, q])
+      // q 输入防抖：300ms 内连续输入只发一次请求
+      useEffect(() => {
+        const timer = setTimeout(() => { refresh() }, 300)
+        return () => clearTimeout(timer)
+      }, [origin, groupFilter, q])
 
       const groupNames = data.grp.groups.map((g) => g.name)
       const chips = ['', ...groupNames, '默认']
+      const [notice, setNotice] = useState(null)
       const rowAction = async (name, action, payload = {}) => {
         setBusy(true)
         setError(null)
+        setNotice(null)
         try {
-          if (action === 'check') await call('check', { names: [name] })
-          else if (action === 'update') await call('update', { names: [name] })
-          else if (action === 'disable') await call('disable', { name })
+          if (action === 'check') {
+            const r = await call('check', { names: [name] })
+            const it = (r || []).find((x) => x.name === name)
+            setNotice(it
+              ? `${name}：${it.status}${it.missing ? '（目录缺失）' : ''}${it.locally_modified ? '（本地已修改）' : ''}${it.reason ? '（' + it.reason + '）' : ''}`
+              : `${name}：检查完成`)
+          } else if (action === 'update') {
+            const r = await call('update', { names: [name] })
+            const it = (r.results || []).find((x) => x.name === name)
+            setNotice(it
+              ? `${name}：${it.status}${it.reason ? '（' + it.reason + '）' : ''}`
+              : `${name}：更新完成`)
+          } else if (action === 'disable') await call('disable', { name })
           else if (action === 'enable') await call('enable', { name })
           else if (action === 'remove') {
             if (!window.confirm(`确认删除 ${name}？（先备份到车间 distributor/backups）`)) return
@@ -294,6 +310,8 @@ window.__ModuleLoader__.load({
           h('button', { style: S.btn, onClick: () => { reload() }, disabled: busy }, '刷新'),
           h('button', { style: S.btn, onClick: () => setImportOpen(!importOpen), disabled: busy }, '导入 skill'),
         ),
+        // 检查/更新结果提示
+        notice ? h('div', { style: { ...S.muted, marginBottom: 4 } }, notice) : null,
         // 导入面板
         importOpen && h(ImportPanel, { call, reload, onDone: () => setImportOpen(false) }),
         // 组配置条

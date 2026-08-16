@@ -38,24 +38,17 @@ test('registerConfig：命名空间与 schema 正确', () => {
   assert.ok(captured.options.validate)
 })
 
-test('registerConfig.validate：拒绝相对路径', async () => {
+test('registerConfig.validate：拒绝相对路径', () => {
   const { captured, ctx } = fakeSettings()
   registerConfig(ctx)
-  await assert.rejects(() => captured.options.validate({ workshopDir: 'relative/path' }), /绝对路径/)
+  assert.throws(() => captured.options.validate({ workshopDir: 'relative/path' }), /绝对路径/)
 })
 
-test('registerConfig.validate：拒绝不存在的目录', async () => {
+test('registerConfig.validate：接受任意绝对路径（存在性移运行期）', async () => {
   const { captured, ctx } = fakeSettings()
   registerConfig(ctx)
-  await assert.rejects(
-    () => captured.options.validate({ workshopDir: join(tmpdir(), 'no-such-dir-xyz') }),
-    /不存在或不可访问/,
-  )
-})
-
-test('registerConfig.validate：接受绝对路径且目录存在；空串通过', async () => {
-  const { captured, ctx } = fakeSettings()
-  registerConfig(ctx)
+  // 不存在的绝对路径：形式合法，保存不拒绝（运行期由 requireRoot 报 workshop-missing）
+  await captured.options.validate({ workshopDir: join(tmpdir(), 'no-such-dir-xyz') })
   const dir = await mkdtemp(join(tmpdir(), 'dsh-sm-test-'))
   await captured.options.validate({ workshopDir: dir })
   await captured.options.validate({ workshopDir: '' })
@@ -67,10 +60,19 @@ test('requireRoot：未配置抛 workshop-unconfigured', () => {
   assert.throws(() => requireRoot(scope), (e) => e instanceof WorkshopError && e.code === 'workshop-unconfigured')
 })
 
-test('requireRoot：配置后返回绝对路径', () => {
-  const dir = join(tmpdir(), 'dsh-sm-root')
+test('requireRoot：配置但目录缺失抛 workshop-missing（插件保持存活）', () => {
+  const dir = join(tmpdir(), 'dsh-sm-gone-' + Date.now())
   const scope = { get: () => ({ workshopDir: dir }) }
+  assert.throws(() => requireRoot(scope), (e) => e instanceof WorkshopError && e.code === 'workshop-missing')
+})
+
+test('requireRoot：目录创建后返回绝对路径', async () => {
+  const dir = join(tmpdir(), 'dsh-sm-root-' + Date.now())
+  const scope = { get: () => ({ workshopDir: dir }) }
+  assert.throws(() => requireRoot(scope), (e) => e.code === 'workshop-missing')
+  await mkdir(dir, { recursive: true })
   assert.equal(requireRoot(scope), dir)
+  await rm(dir, { recursive: true, force: true })
 })
 
 test('writeJson/readJson：往返一致且无临时文件残留', async () => {
