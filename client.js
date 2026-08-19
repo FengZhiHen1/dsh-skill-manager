@@ -81,6 +81,26 @@ window.__ModuleLoader__.load({
       color,
       background: `color-mix(in srgb, ${color} 15%, transparent)`,
     })
+    /**
+     * 状态徽章（DSR-008 约定）：原生 pending pill 几何（高 ~19px、圆角 999、11px）。
+     * 正常态灰底灰字，可更新深色字，仅真警告用彩色。
+     */
+    const pillBase = {
+      display: 'inline-block',
+      padding: '1px 8px',
+      borderRadius: 999,
+      fontSize: 11,
+      lineHeight: '17px',
+      background: T.bgModulePlatform,
+      color: T.labelSecondary,
+      whiteSpace: 'nowrap',
+    }
+    const statusPillStyle = (kind) => {
+      if (kind === 'updatable') return { ...pillBase, color: T.labelPrimary, fontWeight: 500 }
+      if (kind === 'warn') return { ...pillBase, ...badgeStyle(T.warn) }
+      if (kind === 'error') return { ...pillBase, ...badgeStyle(T.error) }
+      return pillBase
+    }
 
     const S = {
       row: { display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 8px', borderBottom: `1px solid ${T.borderL1}`, fontSize: 13 },
@@ -114,6 +134,95 @@ window.__ModuleLoader__.load({
     const GhostBtn = (props) => h(Button, { variant: 'ghost', size: 'sm', ...props })
     /** 行内主操作按钮（outline sm）。 */
     const OutlineBtn = (props) => h(Button, { variant: 'outline', size: 'sm', ...props })
+
+    /** 菜单项：hover 高亮（bgModulePlatform），支持悬停展开子菜单。 */
+    function MenuItem({ label, danger, disabled, onClick, onEnter, trailing, children }) {
+      const [hover, setHover] = useState(false)
+      return h('div', {
+        style: {
+          position: 'relative',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: 16,
+          padding: '7px 12px',
+          borderRadius: 6,
+          fontSize: 12,
+          whiteSpace: 'nowrap',
+          cursor: disabled ? 'default' : 'pointer',
+          color: danger ? T.error : T.labelPrimary,
+          background: hover && !disabled ? T.bgModulePlatform : 'transparent',
+        },
+        onClick: disabled ? undefined : onClick,
+        onMouseEnter: () => { setHover(true); if (onEnter) onEnter() },
+        onMouseLeave: () => setHover(false),
+      }, h('span', null, label), trailing || null, children)
+    }
+
+    const menuCardStyle = {
+      position: 'absolute',
+      zIndex: 41,
+      minWidth: 150,
+      background: T.bgLayer3,
+      border: `1px solid ${T.borderL2}`,
+      borderRadius: 12,
+      boxShadow: '0 8px 24px rgba(0,0,0,.18)',
+      padding: 6,
+    }
+    const menuDivider = h('div', { style: { height: 1, margin: '5px 6px', background: T.borderL2 } })
+
+    /**
+     * 行操作 ⋯ 菜单（DSR-008）：立即更新/禁用|启用/移动到分组▸（悬停展开子菜单）/删除。
+     * 点击遮罩或任意动作后关闭；目录缺失的行只保留 恢复/删除。
+     */
+    function RowMenu({ it, groupNames, busy, onAction, onMove, onClose }) {
+      const [subOpen, setSubOpen] = useState(false)
+      const current = it.group || '默认'
+      const allGroups = [...new Set([...groupNames, '默认'])]
+      const pick = (group) => {
+        if (group !== current) onMove(group)
+        onClose()
+      }
+      return h(React.Fragment, null,
+        h('div', { style: { position: 'fixed', inset: 0, zIndex: 40 }, onClick: onClose }),
+        h('div', { style: { ...menuCardStyle, right: 4, top: 'calc(100% - 6px)' } },
+          it.missing
+            ? h(MenuItem, { label: '恢复', disabled: busy, onClick: () => { onClose(); onAction('update') } })
+            : it.disabled
+              ? h(MenuItem, { label: '启用', disabled: busy, onClick: () => { onClose(); onAction('enable') } })
+              : h(React.Fragment, null,
+                  h(MenuItem, { label: '立即更新', disabled: busy, onClick: () => { onClose(); onAction('update') } }),
+                  h(MenuItem, { label: '禁用', disabled: busy, onClick: () => { onClose(); onAction('disable') } }),
+                ),
+          !it.missing && menuDivider,
+          !it.missing && h(MenuItem, {
+            label: '移动到分组',
+            disabled: busy,
+            onEnter: () => setSubOpen(true),
+            onClick: () => setSubOpen((v) => !v),
+            trailing: h('span', { style: { color: T.labelSecondary } }, '▸'),
+          },
+            subOpen && h('div', { style: { ...menuCardStyle, right: '100%', top: -7, marginRight: 6, minWidth: 124, zIndex: 42 } },
+              allGroups.map((group) => h('div', {
+                key: group,
+                style: {
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  padding: '7px 12px', borderRadius: 6, fontSize: 12, whiteSpace: 'nowrap', cursor: 'pointer',
+                  color: group === current ? T.labelPrimary : T.labelSecondary,
+                  fontWeight: group === current ? 500 : 400,
+                },
+                onClick: (event) => { event.stopPropagation(); pick(group) },
+              },
+                h('span', { style: { width: 12, color: T.labelPrimary } }, group === current ? '✓' : ''),
+                group,
+              )),
+            ),
+          ),
+          menuDivider,
+          h(MenuItem, { label: '删除', danger: true, disabled: busy, onClick: () => { onClose(); onAction('remove') } }),
+        ),
+      )
+    }
 
     /** 更新本地修改时的真实遮罩对话框；不使用 window.confirm，确保风险与操作范围可见。 */
     function UpdateConfirmationDialog({ name, detail, busy, onCancel, onConfirm }) {
@@ -418,14 +527,14 @@ window.__ModuleLoader__.load({
           h(Pill, { active: tab === 'sync', onClick: () => setTab('sync') }, '同步'),
         ),
         h(ErrorLine, { error }),
-        tab === 'manage' && h(ManageView, { call, data, reload }),
+        tab === 'manage' && h(ManageView, { call, data, reload, onGoSync: () => setTab('sync') }),
         tab === 'search' && h(SearchView, { call, data, reload }),
         tab === 'sync' && h(SyncView, { call, data, reload }),
       )
     }
 
     // ---------- 管理视图 ----------
-    function ManageView({ call, data, reload }) {
+    function ManageView({ call, data, reload, onGoSync }) {
       const [origin, setOrigin] = useState('')
       const [groupFilter, setGroupFilter] = useState('默认')
       const [q, setQ] = useState('')
@@ -435,8 +544,10 @@ window.__ModuleLoader__.load({
       const [error, setError] = useState(null)
       const [notice, setNotice] = useState(null)
       const [pendingUpdate, setPendingUpdate] = useState(null)
+      const [menuFor, setMenuFor] = useState(null)
 
-      useEffect(() => { setList(data.lib.skills) }, [data.lib])
+      // data.lib 变化（含全局刷新后）按当前筛选重新拉取，保留 origin/group/q 过滤条件
+      useEffect(() => { refresh() }, [data.lib])
 
       const refresh = async (extra = {}) => {
         setBusy(true)
@@ -463,13 +574,7 @@ window.__ModuleLoader__.load({
         setError(null)
         setNotice(null)
         try {
-          if (action === 'check') {
-            const r = await call('check', { names: [name] })
-            const it = (r || []).find((x) => x.name === name)
-            setNotice(it
-              ? `${name}：${it.status}${it.missing ? '（目录缺失）' : ''}${it.locally_modified ? '（本地已修改）' : ''}${it.reason ? '（' + it.reason + '）' : ''}`
-              : `${name}：检查完成`)
-          } else if (action === 'update') {
+          if (action === 'update') {
             if (payload.confirmLocalChanges !== true) {
               const checks = await call('check', { names: [name] })
               const check = (checks || []).find((item) => item.name === name)
@@ -518,6 +623,29 @@ window.__ModuleLoader__.load({
           setBusy(false)
         }
       }
+      // DSR-008：全局刷新 = 重新扫描列表 + 并行检查全部上游，结果缓存后随 library 下发
+      const refreshAll = async () => {
+        setBusy(true)
+        setError(null)
+        setNotice(null)
+        try {
+          const r = await call('check', {})
+          const failed = (r || []).filter((it) => it.status === 'check_failed').length
+          setNotice(failed > 0 ? `检查完成；${failed} 个上游不可达` : '检查完成')
+          reload()
+        } catch (e) {
+          setError(e.message || String(e))
+        } finally {
+          setBusy(false)
+        }
+      }
+      const fmtCheckedAt = (iso) => {
+        const d = new Date(iso)
+        if (Number.isNaN(d.getTime())) return ''
+        const pad = (n) => String(n).padStart(2, '0')
+        return `${pad(d.getHours())}:${pad(d.getMinutes())}`
+      }
+      const ORIGIN_LABEL = { github: 'GitHub', local: '本地', self: '自研' }
       const groupOp = async (action, name, newName) => {
         setBusy(true)
         setError(null)
@@ -560,7 +688,15 @@ window.__ModuleLoader__.load({
                 onChanged: reload,
               }),
         ),
-        h('div', { style: S.title }, '技能库'),
+        // 同步健康提示（对齐 01 帧）：有问题时给出去往「同步」页的入口
+        (data.health || []).length > 0 && h('div', { style: { ...statusPillStyle('warn'), borderRadius: 10, padding: '8px 12px', marginBottom: 8, fontSize: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 } },
+          h('span', null, `发现 ${data.health.length} 个同步问题${data.health.some((i) => i.issue === 'workspace-unmatched') ? '；含未匹配工作区的遗留项' : ''}。`),
+          h(GhostBtn, { onClick: onGoSync }, '查看'),
+        ),
+        h('div', { style: { display: 'flex', alignItems: 'baseline', gap: 8 } },
+          h('div', { style: S.title }, '技能库'),
+          data.lib.checkedAt ? h('span', { style: S.muted }, `上游状态检查于 ${fmtCheckedAt(data.lib.checkedAt)}`) : null,
+        ),
         // 工具条
         h('div', { style: S.toolbar },
           h('select', { style: S.select, value: origin, onChange: (e) => setOrigin(e.target.value) },
@@ -570,7 +706,7 @@ window.__ModuleLoader__.load({
             h('option', { value: 'self' }, '自研'),
           ),
           h(Input, { style: { width: 140 }, placeholder: '过滤名称/描述', value: q, onChange: (e) => setQ(e.target.value) }),
-          h(GhostBtn, { onClick: () => { reload() }, disabled: busy }, '刷新'),
+          h(GhostBtn, { onClick: refreshAll, disabled: busy, title: '重新扫描列表并检查全部上游状态' }, '↻ 刷新'),
           h(OutlineBtn, { onClick: () => setImportOpen(!importOpen), disabled: busy }, '导入 skill'),
         ),
         // 检查/更新结果提示
@@ -580,39 +716,41 @@ window.__ModuleLoader__.load({
         // 行
         list.length === 0
           ? h('div', { style: { ...S.muted, padding: 12 } }, '库为空（无匹配 skill）')
-          : list.map((it) => h('div', { key: it.dir, style: S.row },
-              h('div', { style: { flex: 1, minWidth: 0 } },
-                h('div', { style: { display: 'flex', alignItems: 'center', gap: 6 } },
-                  h('span', { style: { fontWeight: 600, color: T.labelPrimary } }, it.name),
-                  h(Pill, { style: badgeStyle(it.origin === 'github' ? T.brand : it.origin === 'local' ? T.success : T.labelSecondary) }, it.origin),
-                  it.missing && h(Pill, { style: badgeStyle(T.error) }, '缺失'),
-                  it.disabled && h(Pill, { style: badgeStyle(T.warn) }, '已禁用'),
-                  !it.hasSkillMd && h(Pill, { style: badgeStyle(T.warn) }, '无 SKILL.md'),
+          : list.map((it) => h('div', { key: it.dir, style: { ...S.row, position: 'relative' } },
+              h('div', { style: { flex: 1, minWidth: 0 }, title: it.description || '' },
+                h('div', { style: { fontWeight: 600, color: T.labelPrimary } }, it.name),
+                h('div', { style: S.muted },
+                  `${ORIGIN_LABEL[it.origin] || it.origin} · ${it.group}${(it.targets || []).length > 0 ? ' · ' + it.targets.join(' ') : ''}${it.fingerprint ? ' · ' + it.fingerprint.slice(0, 7) : ''}`,
                 ),
-                h('div', { style: S.muted }, `${it.description || '（无描述）'}${it.fingerprint ? ' · ' + it.fingerprint.slice(0, 7) : ''}`),
               ),
-              h('select', {
-                style: S.select,
-                value: it.group || '默认',
-                onChange: (e) => move(it.dir, e.target.value),
-                disabled: busy,
-              },
-                groupNames.map((g) => h('option', { key: g, value: g }, g)),
-                h('option', { value: '默认' }, '默认'),
+              h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 } },
+                it.missing && h('span', { style: statusPillStyle('error') }, '缺失'),
+                it.disabled && h('span', { style: statusPillStyle('warn') }, '已禁用'),
+                !it.hasSkillMd && h('span', { style: statusPillStyle('warn') }, '无 SKILL.md'),
+                it.upstream && it.upstream.status === 'updatable' && h('span', { style: statusPillStyle('updatable') }, '可更新'),
+                it.upstream && it.upstream.status === 'up_to_date' && h('span', { style: statusPillStyle('normal') }, '已是最新'),
+                it.upstream && it.upstream.status === 'check_failed' && h('span', { style: statusPillStyle('warn') }, '检查失败'),
+                it.upstream && it.upstream.locally_modified && h('span', { style: statusPillStyle('warn') }, '本地有修改'),
+                h('button', {
+                  type: 'button',
+                  title: '行操作',
+                  disabled: busy,
+                  onClick: () => setMenuFor(menuFor === it.dir ? null : it.dir),
+                  style: {
+                    border: 'none', background: 'transparent', cursor: busy ? 'default' : 'pointer',
+                    fontSize: 16, lineHeight: 1, padding: '3px 6px', borderRadius: 6,
+                    color: menuFor === it.dir ? T.labelPrimary : T.labelSecondary,
+                  },
+                }, '⋯'),
               ),
-              h('span', { style: S.muted }, (it.targets || []).join(' ')),
-              it.missing
-                ? h(OutlineBtn, { onClick: () => rowAction(it.dir, 'update'), disabled: busy }, '恢复')
-                : h('span', { style: { display: 'flex', gap: 4 } },
-                    h(GhostBtn, { onClick: () => rowAction(it.dir, 'check'), disabled: busy }, '检查'),
-                    it.disabled
-                      ? h(OutlineBtn, { onClick: () => rowAction(it.dir, 'enable'), disabled: busy }, '启用')
-                      : h('span', { style: { display: 'flex', gap: 4 } },
-                          h(GhostBtn, { onClick: () => rowAction(it.dir, 'update'), disabled: busy }, '更新'),
-                          h(GhostBtn, { onClick: () => rowAction(it.dir, 'disable'), disabled: busy }, '禁用'),
-                          h(GhostBtn, { style: S.dangerText, onClick: () => rowAction(it.dir, 'remove'), disabled: busy }, '删除'),
-                        ),
-                  ),
+              menuFor === it.dir && h(RowMenu, {
+                it,
+                groupNames,
+                busy,
+                onAction: (action) => rowAction(it.dir, action),
+                onMove: (group) => move(it.dir, group),
+                onClose: () => setMenuFor(null),
+              }),
             )),
         pendingUpdate && h(UpdateConfirmationDialog, {
           name: pendingUpdate.name,
@@ -742,7 +880,17 @@ window.__ModuleLoader__.load({
       const [results, setResults] = useState(null)
       const [busy, setBusy] = useState(false)
       const [error, setError] = useState(null)
+      const [notice, setNotice] = useState(null)
       const [candidates, setCandidates] = useState(null)
+      const [selected, setSelected] = useState(new Set())
+
+      // 多候选统一入口：搜索入库与直接添加（探测仓库）共用（DSR-007/DSR-008 复选批量入库）
+      const showCandidates = (value) => {
+        setCandidates(value)
+        setSelected(new Set())
+        setNotice(null)
+        setError(null)
+      }
 
       const doSearch = async () => {
         setBusy(true)
@@ -765,9 +913,10 @@ window.__ModuleLoader__.load({
           const r = await call('repo-skills', { repo, ref: ref || 'main' })
           if (r.candidates.length <= 1) {
             await call('add', { repo, dir: r.candidates[0] && r.candidates[0].path ? r.candidates[0].path : dir, ref: r.branch })
+            setNotice(`已入库 ${repo}`)
             reload()
           } else {
-            setCandidates({ repo, branch: r.branch, list: r.candidates })
+            showCandidates({ repo, branch: r.branch, list: r.candidates })
           }
         } catch (e) {
           setError(e.message || String(e))
@@ -775,15 +924,33 @@ window.__ModuleLoader__.load({
           setBusy(false)
         }
       }
-      const addChosen = async (path) => {
+      const suggestName = (c) => (c.path ? c.path.split('/').pop() : (candidates.repo.split('/')[1] || candidates.repo))
+      // 批量入库：串行逐个 add（每次 add 自带锁/提交/同步），单条失败不中断批次
+      const addSelected = async () => {
+        if (!candidates || selected.size === 0) return
         setBusy(true)
         setError(null)
+        setNotice(null)
+        const picked = candidates.list.filter((c) => selected.has(c.path || ''))
+        const failures = []
+        let done = 0
         try {
-          await call('add', { repo: candidates.repo, dir: path || undefined, ref: candidates.branch })
-          setCandidates(null)
-          reload()
-        } catch (e) {
-          setError(e.message || String(e))
+          for (const c of picked) {
+            try {
+              await call('add', { repo: candidates.repo, dir: c.path || undefined, ref: candidates.branch })
+              done += 1
+            } catch (e) {
+              failures.push(`${c.path || '（仓库根）'}：${e.message || e}`)
+            }
+          }
+          if (done > 0) reload()
+          if (failures.length > 0) {
+            setError(failures.join('；'))
+          } else {
+            setCandidates(null)
+            setSelected(new Set())
+          }
+          setNotice(`已入库 ${done} 个${failures.length > 0 ? `；失败 ${failures.length} 个` : ''}`)
         } finally {
           setBusy(false)
         }
@@ -794,16 +961,46 @@ window.__ModuleLoader__.load({
           h(Input, { style: { width: 240 }, placeholder: 'skills.sh 关键词', value: query, onChange: (e) => setQuery(e.target.value) }),
           h(OutlineBtn, { onClick: doSearch, disabled: busy }, '搜索'),
           h(Field, { label: '直接添加' },
-            h(DirectAdd, { call, reload, busy, setBusy, setError }),
+            h(DirectAdd, { call, reload, busy, setBusy, setError, onCandidates: showCandidates, onAdded: () => setNotice('已入库') }),
           ),
         ),
         h(ErrorLine, { error }),
+        notice ? h('div', { style: { ...S.muted, marginBottom: 4 } }, notice) : null,
         candidates && h('div', { style: { marginBottom: 8 } },
-          h('div', { style: S.title }, `${candidates.repo} 含多个 skill，选择其一：`),
-          candidates.list.map((c) => h('div', { key: c.path || '<root>', style: S.row },
-            h('span', { style: { flex: 1 } }, c.path || '（仓库根）'),
-            h(OutlineBtn, { onClick: () => addChosen(c.path), disabled: busy }, '入库'),
-          )),
+          h(GhostBtn, { onClick: () => { setCandidates(null); setSelected(new Set()) }, disabled: busy }, '← 返回搜索'),
+          h('div', { style: { border: `1px solid ${T.borderL1}`, borderRadius: 10, padding: '8px 10px', margin: '6px 0', background: T.bgLayer2 } },
+            h('div', { style: { fontWeight: 600, color: T.labelPrimary, fontSize: 13 } }, candidates.repo),
+            h('div', { style: S.muted }, `${candidates.branch} · 发现 ${candidates.list.length} 个含 SKILL.md 的目录，可多选入库。`),
+          ),
+          h('div', { style: S.title }, '选择要入库的 Skill（可多选）'),
+          candidates.list.map((c) => {
+            const key = c.path || ''
+            const checked = selected.has(key)
+            return h('label', { key: key || '<root>', style: { ...S.row, cursor: busy ? 'default' : 'pointer' } },
+              h('input', {
+                type: 'checkbox',
+                checked,
+                disabled: busy,
+                onChange: () => {
+                  const next = new Set(selected)
+                  if (checked) next.delete(key)
+                  else next.add(key)
+                  setSelected(next)
+                },
+              }),
+              h('span', { style: { flex: 1, minWidth: 0 } },
+                h('div', { style: { color: T.labelPrimary, fontWeight: 500 } }, c.path || '（仓库根）'),
+                h('div', { style: S.muted }, `建议名称：${suggestName(c)}`),
+              ),
+            )
+          }),
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, margin: '8px 0' } },
+            h('span', { style: { ...S.muted, flex: 1 } }, `已选 ${selected.size} 个 · 共 ${candidates.list.length} 个候选`),
+            h(Button, { size: 'sm', onClick: addSelected, disabled: busy || selected.size === 0 }, busy ? '入库中…' : '入库所选'),
+          ),
+          h('div', { style: { ...badgeStyle(T.warn), borderRadius: 8, padding: '7px 10px', fontSize: 12, lineHeight: 1.55 } },
+            '同名且同仓库时改用更新；同名异源时需先出库。分支按指定值 → main → master 回退。',
+          ),
         ),
         results && results.skills.length === 0
           ? h('div', { style: S.muted }, '无结果')
@@ -817,7 +1014,8 @@ window.__ModuleLoader__.load({
       )
     }
 
-    function DirectAdd({ call, reload, busy, setBusy, setError }) {
+    /** DSR-007：直接添加入口语义为「探测仓库」；多候选交给搜索视图的候选列表选择。 */
+    function DirectAdd({ call, reload, busy, setBusy, setError, onCandidates, onAdded }) {
       const [repo, setRepo] = useState('')
       const [branch, setBranch] = useState('')
       const add = async () => {
@@ -828,9 +1026,10 @@ window.__ModuleLoader__.load({
           const r = await call('repo-skills', { repo: repo.trim(), ref: branch.trim() || 'main' })
           if (r.candidates.length <= 1) {
             await call('add', { repo: repo.trim(), dir: r.candidates[0] && r.candidates[0].path ? r.candidates[0].path : undefined, ref: r.branch })
+            if (onAdded) onAdded()
             reload()
           } else {
-            setError(`仓库含多个 skill：${r.candidates.map((c) => c.path || '（根）').join(', ')}，请先用搜索或指定目录`)
+            onCandidates({ repo: repo.trim(), branch: r.branch, list: r.candidates })
           }
         } catch (e) {
           setError(e.message || String(e))
@@ -841,7 +1040,7 @@ window.__ModuleLoader__.load({
       return h('span', { style: { display: 'inline-flex', gap: 4, alignItems: 'center' } },
         h(Input, { style: { width: 180 }, placeholder: 'owner/repo', value: repo, onChange: (e) => setRepo(e.target.value) }),
         h(Input, { style: { width: 70 }, placeholder: '分支', value: branch, onChange: (e) => setBranch(e.target.value) }),
-        h(OutlineBtn, { onClick: add, disabled: busy }, '添加'),
+        h(OutlineBtn, { onClick: add, disabled: busy }, '探测仓库'),
       )
     }
 
@@ -957,7 +1156,7 @@ window.__ModuleLoader__.load({
                 h('div', { style: { fontWeight: 600, color: T.labelPrimary } }, workspace.title),
                 h('div', { style: S.muted }, `${workspace.path} · ${workspace.workspaceId}`),
               ),
-              h(Pill, { style: badgeStyle(workspace.mountCount > 0 ? T.success : T.labelSecondary) }, `${workspace.mountCount} 个组使用`),
+              h('span', { style: pillBase }, `${workspace.mountCount} 个组使用`),
             )),
         legacyProjects.length > 0 && h('div', { style: { marginTop: 8 } },
           h('div', { style: S.title }, '未匹配工作区的遗留项'),
@@ -987,18 +1186,24 @@ window.__ModuleLoader__.load({
         ),
 
         matrix && h('div', null,
-          h('div', { style: S.title }, '同步矩阵'),
-          h('table', { style: { borderCollapse: 'collapse', fontSize: 12, width: '100%' } },
-            h('thead', null, h('tr', null,
-              h('th', { style: { textAlign: 'left', padding: 4, borderBottom: `1px solid ${T.borderL1}`, color: T.labelSecondary } }, 'skill'),
-              matrix.columns.map((column) => h('th', { key: column.key, style: { textAlign: 'left', padding: 4, borderBottom: `1px solid ${T.borderL1}`, color: T.labelSecondary } }, column.label)),
-            )),
-            h('tbody', null, matrix.rows.map((row) => h('tr', { key: row.dir },
-              h('td', { style: { padding: 4, borderBottom: `1px solid ${T.borderL1}` } }, row.name),
-              row.cells.map((cell, index) => h('td', { key: index, style: { padding: 4, borderBottom: `1px solid ${T.borderL1}` } },
-                h(Pill, { style: badgeStyle(cellColor(cell)) }, cell),
+          h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 } },
+            h('div', { style: S.title }, '同步矩阵'),
+            h('span', { style: S.muted }, '项目较多时可左右滚动'),
+          ),
+          // DSR-008：列多时横向滚动，Skill 列冻结在左侧（sticky 需不透明底色）
+          h('div', { style: { overflowX: 'auto' } },
+            h('table', { style: { borderCollapse: 'separate', borderSpacing: 0, fontSize: 12, minWidth: '100%' } },
+              h('thead', null, h('tr', null,
+                h('th', { style: { textAlign: 'left', padding: 4, borderBottom: `1px solid ${T.borderL1}`, color: T.labelSecondary, position: 'sticky', left: 0, background: T.bgLayer3, zIndex: 1 } }, 'skill'),
+                matrix.columns.map((column) => h('th', { key: column.key, style: { textAlign: 'left', padding: 4, borderBottom: `1px solid ${T.borderL1}`, color: T.labelSecondary, whiteSpace: 'nowrap' } }, column.label)),
               )),
-            ))),
+              h('tbody', null, matrix.rows.map((row) => h('tr', { key: row.dir },
+                h('td', { style: { padding: 4, borderBottom: `1px solid ${T.borderL1}`, whiteSpace: 'nowrap', position: 'sticky', left: 0, background: T.bgLayer3, zIndex: 1 } }, row.name),
+                row.cells.map((cell, index) => h('td', { key: index, style: { padding: 4, borderBottom: `1px solid ${T.borderL1}` } },
+                  h(Pill, { style: badgeStyle(cellColor(cell)) }, cell),
+                )),
+              ))),
+            ),
           ),
         ),
       )
