@@ -31,6 +31,12 @@ test('loadState/saveState：投影往返（projects/mounts/synced）', async () 
   const projectRec = back.synced.pdf.find((r) => r.scope === 'project')
   assert.equal(projectRec.project, 'w1')
   assert.equal(projectRec.method, 'copy')
+  // global 记录往返后仍归一为 project:null——syncedKey 的 'global' 哨兵 ↔
+  // parseSyncedKey 归一的桥接必须闭合（targetKey 用 '' 与 syncedKey 用 'global'
+  // 是分层设计，非不一致）。
+  const globalRec = back.synced.pdf.find((r) => r.scope === 'global')
+  assert.equal(globalRec.project, null)
+  assert.equal(globalRec.method, 'junction')
 })
 
 test('loadState：空域按空骨架', async () => {
