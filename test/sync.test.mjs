@@ -137,6 +137,7 @@ test('reconcile：project 物化 → health 收敛 → 摘除', async () => {
     assert.ok(r1.results.some((x) => x.name === 'pdf' && x.action === 'synced'))
     assert.ok(await isLink(join(proj, '.dsh', 'skills', 'pdf')))
     assert.equal(state.synced.pdf.length, 1)
+    assert.equal(typeof state.synced.pdf[0].at, 'string') // 写入端补齐物化时间（rc.7 修复）
     // 再对账 → ok 幂等，health 无 missing-link
     await reconcile({ root, state, apps, groups: {}, skills: ['pdf'], workspaceIds: new Set(['w1']), save })
     const issues = await health({ root, state, apps, groups: {}, skills: ['pdf'], workspaceIds: new Set(['w1']) })

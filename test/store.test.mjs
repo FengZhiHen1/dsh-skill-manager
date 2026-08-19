@@ -23,6 +23,14 @@ test('mountKey / syncedKey / backupId 格式', () => {
   assert.match(id, /^pdf-\d{8}\d{6}\d{3}$/)
 })
 
+test('syncedRecord：存量记录缺 at 放行、新记录带 at 通过（打开校验不炸域）', () => {
+  const schema = skillManagerSpec.tables.synced.valueSchema
+  // 存量记录（早期写入端漏写 at）必须通过——否则 storage-domain 打开即整体失败
+  assert.equal(schema.safeParse({ method: 'junction', dir: 'C:\\x' }).success, true)
+  // 新记录（sync.js 已补齐 at）同样通过
+  assert.equal(schema.safeParse({ method: 'copy', dir: 'C:\\x', at: '2026-08-20T00:00:00.000Z' }).success, true)
+})
+
 test('门面：skills/groups/mounts/synced/projects/check/backups 读写往返', async () => {
   const store = createStore(fakeDomain())
   await store.putSkill('pdf', skillRecord({ origin: 'github', repo: 'a/b', commit: 'x'.repeat(40) }))
