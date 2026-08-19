@@ -280,6 +280,7 @@ window.__ModuleLoader__.load({
     function SkillManagerCard({ scope, workspaces }) {
       const [open, setOpen] = useState(false)
       const [draft, setDraft] = useState('')
+      const [touched, setTouched] = useState(false) // 用户是否编辑过草稿
       const [busy, setBusy] = useState(false)
       const [failed, setFailed] = useState(null)
       const [focused, setFocused] = useState(false)
@@ -301,7 +302,13 @@ window.__ModuleLoader__.load({
       const current = typeof section.skillsDir === 'string' ? section.skillsDir : ''
       const overridden = Boolean(snap && snap.user && typeof snap.user === 'object' && 'skillsDir' in snap.user)
 
-      const dirty = draft !== current
+      // 权威值（首次加载 / 外部保存 / 重置）变化时，若用户没有未保存草稿，
+      // 草稿跟随之——否则 dirty 会误判（draft 初始为空、current 为真实路径）。
+      useEffect(() => {
+        if (!touched) setDraft(current)
+      }, [current, touched])
+
+      const dirty = touched && draft !== current
 
       const save = async () => {
         if (!ready) return
@@ -312,6 +319,7 @@ window.__ModuleLoader__.load({
           const fresh = scope.getSnapshot()
           const v = fresh.value && typeof fresh.value === 'object' ? fresh.value : {}
           setDraft(typeof v.skillsDir === 'string' ? v.skillsDir : '')
+          setTouched(false)
         } catch (e) {
           // Host 校验拒绝（如非绝对路径）以错误回显，草稿保留供修改
           setFailed(e && e.message ? e.message : '保存失败')
@@ -322,6 +330,7 @@ window.__ModuleLoader__.load({
       const discard = () => {
         setFailed(null)
         setDraft(current)
+        setTouched(false)
       }
       const reset = async () => {
         if (!ready) return
@@ -334,6 +343,7 @@ window.__ModuleLoader__.load({
           const fresh = scope.getSnapshot()
           const v = fresh.value && typeof fresh.value === 'object' ? fresh.value : {}
           setDraft(typeof v.skillsDir === 'string' ? v.skillsDir : '')
+          setTouched(false)
         } catch (e) {
           setFailed(e && e.message ? e.message : '重置失败')
         } finally {
@@ -348,7 +358,7 @@ window.__ModuleLoader__.load({
         setFailed(null)
         try {
           const path = await workspaces.pickDirectory()
-          if (path) setDraft(path)
+          if (path) { setDraft(path); setTouched(true) }
         } catch (e) {
           setFailed(e && e.message ? `选择目录失败：${e.message}` : '选择目录失败')
         } finally {
@@ -418,7 +428,7 @@ window.__ModuleLoader__.load({
                     type: 'text',
                     value: draft,
                     placeholder: '例如 E:\\Project\\Skills（默认为空 = 未配置）',
-                    onChange: (e) => { setDraft(e.target.value); setFailed(null) },
+                    onChange: (e) => { setDraft(e.target.value); setTouched(true); setFailed(null) },
                     onFocus: () => setFocused(true),
                     onBlur: () => setFocused(false),
                     style: {
