@@ -52,10 +52,11 @@ test('scanLibrary：平铺目录成员；未登记目录补登记 self', async (
     assert.equal(items[0].group, '默认')
     assert.equal(items[0].commit, null)
     assert.equal(items[0].description, '自研技能')
-    // 副作用：补登记
+    // 副作用：补登记（含立即建立内容基线）
     const rec = store.getSkill('mine')
     assert.equal(rec.origin, 'self')
     assert.equal(rec.disabled, false)
+    assert.match(rec.content_hash, /^[0-9a-f]{64}$/)
   } finally {
     await cleanup(root)
   }
