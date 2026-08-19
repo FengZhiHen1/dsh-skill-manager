@@ -7,11 +7,11 @@
 //   check_cache/backups 七表，DSR-010）；打开失败只记日志，API 统一回 internal，
 //   不拖垮 Host。
 // - 注册 /skill-manager/api 路由（受信请求围栏 + 单飞队列 + 统一信封）。
-// - 注册 connection 配置 RPC 通道 /dsh-skill-manager（endpoint config：
-//   get/set/reset），供浏览器端配置卡片读写 skillsDir——settings 网关只对
-//   硬编码白名单开放，第三方命名空间会被 settings-not-exposed 拒绝，因此
-//   浏览器端不走 ctx.settingsScope，改用自定义通道 + 进程内 scope.update/replace
-//   持久化（对齐 dsh-background）。
+// - settings 命名空间注册：rc.7 起注册即暴露，浏览器端配置卡片经标准
+//   settings 域（ctx.settingsScope → settings.describe/mutate）直读直写
+//   skillsDir，Host 侧仅注册并在写路径上执行 validate（非空必须绝对路径）。
+//   （旧版因 settings-not-exposed 白名单改走 /dsh-skill-manager 自定义
+//   connection RPC 通道，已在 rc.7 迁移中移除。）
 // - 未配置 skills 目录时所有方法统一返回 skilldir-unconfigured。
 // - 备份树根：ctx.dshHomePath('skill-manager', 'backups')（DSR-010 D5）。
 //
@@ -34,25 +34,18 @@
 //
 // 权威语义：docs/design/dsh-skill-manager/（本仓库）。
 
-import { registerConfig, CONFIG_NS, SKILLS_DIR_FIELD } from './lib/dir.js'
+import { registerConfig } from './lib/dir.js'
 import { openStore } from './lib/store.js'
 import { ApiError, buildApi, createQueue, readJsonBody, writeJson, writeOk, writeError } from './lib/api.js'
 import { isTrustedApiRequest, trustedHostsOf } from './lib/fence.js'
 
-/** RPC 信封错误（connection 通道返回形态，对齐 dsh-background）。 */
-function rpcError(code, message) {
-  return { ok: false, error: { code, message, details: {} } }
-}
-
 export default {
   name: 'skill-manager',
-  inject: ['webServer', 'loader', 'connection', 'workspaceRegistry', 'storage', 'dshHomePath'],
+  inject: ['webServer', 'loader', 'workspaceRegistry', 'storage', 'dshHomePath'],
   apply(ctx) {
     // settings 命名空间注册；scope 在 apply 期间同步就位（settings 为硬依赖）。
     let scope
-    let settingsSvc
     ctx.inject(['settings'], (sctx) => {
-      settingsSvc = sctx.settings
       scope = registerConfig(sctx)
     })
 
@@ -116,46 +109,5 @@ export default {
         }
       },
     }), 'dsh-skill-manager: /skill-manager/api route')
-
-    // 配置 RPC 通道（plugin-runtime.md：settings 网关不对第三方命名空间开放，
-    // 浏览器端经此通道读写 skillsDir；持久化走进程内 settings seam）。
-    ctx.inject(['connection'], (connCtx) => {
-      connCtx.effect(() => connCtx.connection.rpc.handle('/dsh-skill-manager', async (endpoint, payload) => {
-        if (endpoint !== 'config') {
-          return rpcError('not-found', `dsh-skill-manager: unknown endpoint "${endpoint}"`)
-        }
-        if (scope === undefined) {
-          return rpcError('service-unavailable', 'dsh-skill-manager: settings 服务未挂载')
-        }
-        /** 当前解析值 + 用户层覆盖标记（与设置页卡片语义一致）。 */
-        const snapshot = () => {
-          const section = scope.get()
-          const user = settingsSvc.describe({ redactSecrets: true })
-            .find((d) => d.ns === CONFIG_NS)?.user
-          return {
-            skillsDir: typeof section?.[SKILLS_DIR_FIELD] === 'string' ? section[SKILLS_DIR_FIELD] : '',
-            overridden: Boolean(user && typeof user === 'object' && SKILLS_DIR_FIELD in user),
-          }
-        }
-        try {
-          if (payload?.op === 'get') return { ok: true, value: snapshot() }
-          if (payload?.op === 'set') {
-            // 形式校验交给注册期 validate（非空必须是绝对路径），拒绝不落盘。
-            await scope.update({
-              [SKILLS_DIR_FIELD]: typeof payload.skillsDir === 'string' ? payload.skillsDir.trim() : '',
-            })
-            return { ok: true, value: snapshot() }
-          }
-          if (payload?.op === 'reset') {
-            // 整体重置用户段：清空即回到未配置（默认空串），去掉覆盖标记。
-            await scope.replace({})
-            return { ok: true, value: snapshot() }
-          }
-          return rpcError('bad-request', 'dsh-skill-manager: op 必须是 get/set/reset')
-        } catch (error) {
-          return rpcError('rejected', error instanceof Error ? error.message : String(error))
-        }
-      }, {}), 'dsh-skill-manager: config rpc channel')
-    })
   },
 }

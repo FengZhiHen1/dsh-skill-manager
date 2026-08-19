@@ -3,14 +3,13 @@
 // 注册两个槽位：
 //   settings.section   id=skills  order=16  标签「技能」——管理/搜索/同步三视图；
 //                      library 返回 skilldir-unconfigured 时显示未配置引导。
-//   settings.plugin.item id=skill-manager order=30 ——「本地 skills 目录」配置卡片
+//   settings.plugin.item key=skill-manager ——「本地 skills 目录」配置卡片
 //                      （R-22：默认为空即未配置；保存立即生效，清空回到未配置）。
 //
-// 配置卡片的数据通道：不走 ctx.settingsScope——settings 网关只对硬编码白名单
-// （api-proxy WEB_SETTINGS_NAMESPACES）开放，第三方命名空间读写会被
-// settings-not-exposed 拒绝；卡片改经 connection RPC 通道
-// /dsh-skill-manager（endpoint config：get/set/reset）读写，Host 进程内持久化到
-// settings.yaml 的 skill-manager 段（对齐 dsh-background）。
+// 配置卡片的数据通道：rc.7 起 settings 网关注册即暴露（settings-not-exposed
+// 白名单已移除），卡片经标准 ctx.settingsScope（settings.describe/mutate）
+// 直读直写 skill-manager 命名空间；不再需要自定义 connection RPC 通道
+// （旧版因白名单绕行 /dsh-skill-manager，已在 rc.7 迁移中移除）。
 //
 // 样式对齐 DSH 原生：主题 token 使用 --dsw-alias-* 系列（ui-theme 定义），
 // 按钮/输入/徽章复用 @deepseek-ai/dsh-client-ui-primitives 的 Button/Input/Pill
@@ -277,44 +276,44 @@ window.__ModuleLoader__.load({
     // ---------- 插件配置卡片（设置 → 插件 → skill-manager） ----------
     // 与 DSH 原生 PluginCard 同构：li > header（名称/描述/未保存标记/折叠箭头）
     // + body（字段 + footer：放弃/保存）；token 与几何对齐 PluginCard.module.css。
-    // 数据经 connection RPC 通道读写（settings 网关不对第三方命名空间开放）。
-    function SkillManagerCard({ config, workspaces }) {
+    // 数据经 settings 域（ctx.settingsScope）直读直写。
+    function SkillManagerCard({ scope, workspaces }) {
       const [open, setOpen] = useState(false)
       const [draft, setDraft] = useState('')
       const [busy, setBusy] = useState(false)
       const [failed, setFailed] = useState(null)
       const [focused, setFocused] = useState(false)
-      // Host 权威值（解析后）与用户层覆盖标记；保存/重置后按返回值回填。
-      const [current, setCurrent] = useState('')
-      const [overridden, setOverridden] = useState(false)
+      // Host 权威快照：value=解析值、user=用户层；user 层含 skillsDir 即「已覆盖」。
+      const [snap, setSnap] = useState(() => scope.getSnapshot())
 
+      // 订阅 settings 语义快照（文档 commit / 本卡写后由 scope 主动发布）。
       useEffect(() => {
         let alive = true
-        config.get()
-          .then((v) => {
-            if (!alive) return
-            const dir = v && typeof v.skillsDir === 'string' ? v.skillsDir : ''
-            setCurrent(dir)
-            setOverridden(Boolean(v && v.overridden))
-            setDraft(dir)
-          })
-          .catch((e) => { if (alive) setFailed(e && e.message ? e.message : '读取配置失败') })
-        return () => { alive = false }
-      }, [config])
+        const apply = () => { if (alive) setSnap(scope.getSnapshot()) }
+        const off = scope.subscribe(apply)
+        apply()
+        return () => { alive = false; off() }
+      }, [scope])
+
+      // 首次 Host 应答前不渲染「未配置」，也不允许写入（避免读前写）。
+      const ready = Boolean(snap) && snap.status !== 'loading'
+      const section = snap.value && typeof snap.value === 'object' ? snap.value : {}
+      const current = typeof section.skillsDir === 'string' ? section.skillsDir : ''
+      const overridden = Boolean(snap && snap.user && typeof snap.user === 'object' && 'skillsDir' in snap.user)
 
       const dirty = draft !== current
 
       const save = async () => {
+        if (!ready) return
         setBusy(true)
         setFailed(null)
         try {
-          const v = await config.set(draft.trim())
-          const dir = v && typeof v.skillsDir === 'string' ? v.skillsDir : ''
-          setCurrent(dir)
-          setOverridden(Boolean(v && v.overridden))
-          setDraft(dir)
+          await scope.set('skillsDir', draft.trim())
+          const fresh = scope.getSnapshot()
+          const v = fresh.value && typeof fresh.value === 'object' ? fresh.value : {}
+          setDraft(typeof v.skillsDir === 'string' ? v.skillsDir : '')
         } catch (e) {
-          // Host 校验拒绝（如非绝对路径）会以信封错误回显，草稿保留供修改
+          // Host 校验拒绝（如非绝对路径）以错误回显，草稿保留供修改
           setFailed(e && e.message ? e.message : '保存失败')
         } finally {
           setBusy(false)
@@ -325,14 +324,16 @@ window.__ModuleLoader__.load({
         setDraft(current)
       }
       const reset = async () => {
+        if (!ready) return
         setBusy(true)
         setFailed(null)
         try {
-          const v = await config.reset()
-          const dir = v && typeof v.skillsDir === 'string' ? v.skillsDir : ''
-          setCurrent(dir)
-          setOverridden(Boolean(v && v.overridden))
-          setDraft(dir)
+          // unset 该字段：等价原 replace({})——命名空间只有这一个字段，
+          // value 回落到默认空串、user 层 key 消失 → 去掉「已覆盖」标记。
+          await scope.unset('skillsDir')
+          const fresh = scope.getSnapshot()
+          const v = fresh.value && typeof fresh.value === 'object' ? fresh.value : {}
+          setDraft(typeof v.skillsDir === 'string' ? v.skillsDir : '')
         } catch (e) {
           setFailed(e && e.message ? e.message : '重置失败')
         } finally {
@@ -405,7 +406,7 @@ window.__ModuleLoader__.load({
                   overridden
                     ? h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 8 } },
                         h('span', { style: { borderRadius: 999, padding: '1px 8px', fontSize: 11, lineHeight: '17px', whiteSpace: 'nowrap', fontWeight: 500, background: T.bgModulePlatform, color: T.labelSecondary } }, '已覆盖'),
-                        h('button', { type: 'button', disabled: busy, onClick: reset, style: { border: 'none', background: 'none', padding: 0, font: 'inherit', fontSize: 12, lineHeight: 1.5, color: T.labelSecondary, cursor: 'pointer' } }, '重置'),
+                        h('button', { type: 'button', disabled: busy || !ready, onClick: reset, style: { border: 'none', background: 'none', padding: 0, font: 'inherit', fontSize: 12, lineHeight: 1.5, color: T.labelSecondary, cursor: 'pointer' } }, '重置'),
                       )
                     : null,
                 ),
@@ -436,7 +437,7 @@ window.__ModuleLoader__.load({
                       boxSizing: 'border-box',
                     },
                   }),
-                  h(GhostBtn, { disabled: busy, onClick: pickDirectory }, '选择…'),
+                  h(GhostBtn, { disabled: busy || !ready, onClick: pickDirectory }, '选择…'),
                 ),
                 h('p', { style: { margin: 0, fontSize: 12, lineHeight: 1.5, color: T.labelTertiary } }, '绝对路径；保存后立即生效，无需重启。'),
               ),
@@ -445,7 +446,7 @@ window.__ModuleLoader__.load({
                 failed ? h('p', { style: { flex: 1, minWidth: 0, margin: 0, fontSize: 12, lineHeight: 1.5, color: T.error } }, failed) : null,
                 h('button', {
                   type: 'button',
-                  disabled: !dirty || busy,
+                  disabled: !dirty || busy || !ready,
                   onClick: discard,
                   style: {
                     appearance: 'none',
@@ -462,7 +463,7 @@ window.__ModuleLoader__.load({
                 }, '放弃'),
                 h('button', {
                   type: 'button',
-                  disabled: !dirty || busy,
+                  disabled: !dirty || busy || !ready,
                   onClick: save,
                   style: {
                     appearance: 'none',
@@ -1400,27 +1401,14 @@ window.__ModuleLoader__.load({
     }
 
     // ---------- 插件入口 ----------
-    const inject = ['slots', 'connection', 'workspaces']
-
-    // 配置卡片经 connection RPC 通道读写 skillsDir（settings 网关不对
-    // 第三方命名空间开放，见文件头注释）。返回 { skillsDir, overridden }。
-    const createConfigClient = (connection) => {
-      const call = async (op, payload = {}) => {
-        const r = await connection.rpc.call('/dsh-skill-manager', 'config', { op, ...payload })
-        if (!r.ok) throw new Error(r.error && r.error.message ? r.error.message : (op === 'set' ? '保存失败' : '配置操作失败'))
-        return r.value
-      }
-      return {
-        get: () => call('get'),
-        set: (skillsDir) => call('set', { skillsDir }),
-        reset: () => call('reset'),
-      }
-    }
+    // rc.7 官方配置面：设置卡片经 ctx.settingsScope 直读直写 skill-manager
+    // 命名空间（settings 域 wire），不再需要自定义 connection RPC 通道。
+    const inject = ['slots', 'workspaces', 'settingsScope', 'remote']
 
     function apply(ctx) {
       const call = createCall()
       const workspaces = ctx.workspaces
-      const config = createConfigClient(ctx.connection)
+      const scope = ctx.settingsScope.bind({ namespace: 'skill-manager' })
 
       ctx.effect(() => {
         const offSection = ctx.slots.inject('settings.section', () =>
@@ -1432,7 +1420,7 @@ window.__ModuleLoader__.load({
         const offCard = ctx.slots.inject('settings.plugin.item', () =>
           ctx.slots.register(
             // rc.7 起该槽为 keyed：key = 本卡片编辑的 settings 命名空间
-            { name: 'settings.plugin.item', key: 'skill-manager', order: 30, label: '技能目录', inject: () => ({ config, workspaces }) },
+            { name: 'settings.plugin.item', key: 'skill-manager', inject: () => ({ scope, workspaces }) },
             SkillManagerCard,
           ),
         )
