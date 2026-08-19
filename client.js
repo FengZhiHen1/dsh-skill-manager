@@ -531,7 +531,12 @@ window.__ModuleLoader__.load({
       ]
       const activeTab = TABS.find((t) => t.key === tab)
       return h('div', null,
-        h('div', { style: { display: 'flex', gap: 20, padding: '4px 12px 0', borderBottom: `1px solid ${T.borderL1}` } },
+        // 01–05 帧：内容顶部为「技能」标题 + 当前页副标题（壳层只渲染导航，内容标题归本区）
+        h('div', { style: { padding: '4px 12px 0', marginBottom: 12 } },
+          h('div', { style: { fontSize: 20, fontWeight: 600, color: T.labelPrimary } }, '技能'),
+          h('div', { style: { fontSize: 13, color: T.labelTertiary, marginTop: 4 } }, activeTab ? activeTab.sub : ''),
+        ),
+        h('div', { style: { display: 'flex', gap: 20, padding: '0 12px', borderBottom: `1px solid ${T.borderL1}` } },
           TABS.map((t) => h('button', {
             key: t.key,
             type: 'button',
@@ -545,7 +550,6 @@ window.__ModuleLoader__.load({
             },
           }, t.label)),
         ),
-        h('div', { style: { padding: '8px 12px 0', fontSize: 12, color: T.labelTertiary } }, activeTab ? activeTab.sub : ''),
         h(ErrorLine, { error }),
         tab === 'manage' && h(ManageView, { call, workspaces: props.workspaces, data, reload, onGoSync: () => setTab('sync') }),
         tab === 'search' && h(SearchView, { call, data, reload }),
@@ -1305,19 +1309,6 @@ window.__ModuleLoader__.load({
           setBusy(false)
         }
       }
-      const claimEmpty = async (workspaceId, name) => {
-        setBusy(true)
-        setError(null)
-        try {
-          await call('claim-empty', { workspaceId, name })
-          reload()
-          bumpTick()
-        } catch (e) {
-          setError(e.message || String(e))
-        } finally {
-          setBusy(false)
-        }
-      }
       const cellColor = (cell) => (
         cell === '生效' ? T.success : cell === '错误' ? T.error : cell === 'shadowed' ? T.warn : T.labelSecondary
       )
@@ -1382,25 +1373,6 @@ window.__ModuleLoader__.load({
         legacyProjects.length > 0 && h('div', { style: { marginTop: 4, marginBottom: 8 } },
           h('div', { style: { ...cardTitle, marginBottom: 6 } }, '未匹配工作区的遗留项'),
           legacyProjects.map((legacy) => healthCard(T.warn, `workspace-unmatched · ${legacy.project}`, `${legacy.path} · 保留 ${legacy.syncedCount} 个既有链接`, legacy.project)),
-        ),
-
-        Object.keys(projectEntries).length > 0 && h('div', { style: { marginBottom: 8 } },
-          h('div', { style: { ...sectionHead, margin: '6px 0 8px' } }, '工作区本地条目'),
-          workspaceProjects.map((workspace) => {
-            const entries = projectEntries[workspace.workspaceId]?.entries || []
-            const visible = entries.filter((entry) => entry.kind !== 'managed-ok')
-            if (visible.length === 0) return null
-            return h('div', { key: `${workspace.workspaceId}-entries`, style: { marginBottom: 8 } },
-              h('div', { style: { ...noteText, marginBottom: 4 } }, workspace.title),
-              visible.map((entry) => h('div', { key: entry.name, style: { ...subCardStyle, padding: '8px 12px', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 } },
-                h('span', { style: { flex: 1, color: T.labelPrimary } }, entry.name),
-                h('span', { style: pillBase }, entry.kind),
-                entry.kind === 'local-empty'
-                  ? h(OutlineBtn, { onClick: () => claimEmpty(workspace.workspaceId, entry.name), disabled: busy }, '清理并接管')
-                  : null,
-              )),
-            )
-          }),
         ),
 
         matrix && h('div', null,
