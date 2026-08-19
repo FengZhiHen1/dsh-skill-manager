@@ -225,3 +225,24 @@ test('health：报告项目 local-skill/local-empty/local-foreign', async () => 
   assert.equal(kinds.includes('target-exists'), false)
   await rm(project, { recursive: true, force: true })
 })
+
+test('未匹配遗留工作区：普通对账保留既有链接且仅报告 workspace-unmatched', async () => {
+  const legacy = await mkdtemp(join(tmpdir(), 'dsh-sm-legacy-'))
+  const base = join(legacy, '.dsh', 'skills')
+  await mkdir(base, { recursive: true })
+  const dst = join(base, 'alpha')
+  await symlink(join(root, 'skills', 'alpha'), dst, 'junction')
+  const state = baseState()
+  state.projects = { auteur: legacy }
+  state.mounts = [{ group: '默认', app: 'dsh', scope: 'project', project: 'auteur' }]
+  state.synced = { alpha: [{ app: 'dsh', scope: 'project', project: 'auteur', method: 'junction', dir: dst }] }
+
+  const result = await reconcile({ root, state, apps, groups: {}, skills: ['alpha'], workspaceIds: new Set(), save: async () => {} })
+  assert.equal(result.errors.length, 0)
+  assert.equal(state.synced.alpha.length, 1)
+  assert.equal((await realpath(dst)).toLowerCase(), (await realpath(join(root, 'skills', 'alpha'))).toLowerCase())
+  const issues = await health({ root, state, apps, groups: {}, skills: ['alpha'], workspaceIds: new Set() })
+  assert.ok(issues.some((issue) => issue.issue === 'workspace-unmatched' && issue.name === 'auteur'))
+  assert.equal(issues.some((issue) => issue.issue === 'extra-link'), false)
+  await rm(legacy, { recursive: true, force: true })
+})

@@ -166,10 +166,49 @@ test('update：锁记录 path_in_repo 失效时报 path-stale（不静默回退�
   })
   // 上游 zipball 只在仓库根有 SKILL.md（old/dir 已失效）
   mockGitHub('owner/repo', 'main', '---\nname: my-skill\n---\n')
-  const r = await update({ root, names: ['my-skill'], ctx: fakeCtx })
+  const r = await update({ root, names: ['my-skill'], confirmLocalChanges: true, ctx: fakeCtx })
   assert.equal(r.results.length, 1)
   assert.equal(r.results[0].status, 'skipped')
   assert.match(r.results[0].reason, /已失效/)
+  await rm(root, { recursive: true, force: true })
+})
+
+test('update：存在本地修改时必须明确确认才允许覆盖', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-sm-test-'))
+  await mkdir(join(root, 'skills', 'my-skill'), { recursive: true })
+  await writeFile(join(root, 'skills', 'my-skill', 'SKILL.md'), '---\nname: my-skill\n---\n本地修改', 'utf8')
+  await writeJson(root, 'skills.lock.json', {
+    version: 1,
+    skills: {
+      'my-skill': { repo: 'owner/repo', branch: 'main', commit: SHA, path_in_repo: null, installed_at: '', content_hash: '0'.repeat(64) },
+    },
+  })
+  await assert.rejects(
+    () => update({ root, names: ['my-skill'], ctx: fakeCtx }),
+    (error) => error?.code === 'local-changes-confirmation-required',
+  )
+  await rm(root, { recursive: true, force: true })
+})
+
+test('update：缺少内容基线时同样必须确认，check 不得静默建立基线', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-sm-test-'))
+  await mkdir(join(root, 'skills', 'my-skill'), { recursive: true })
+  await writeFile(join(root, 'skills', 'my-skill', 'SKILL.md'), '---\nname: my-skill\n---\n旧内容', 'utf8')
+  await writeJson(root, 'skills.lock.json', {
+    version: 1,
+    skills: {
+      'my-skill': { repo: 'owner/repo', branch: 'main', commit: SHA, path_in_repo: null, installed_at: '', content_hash: null },
+    },
+  })
+  mockGitHub('owner/repo', 'main', '---\nname: my-skill\n---\n新内容')
+  const checkResult = await check({ root, names: ['my-skill'] })
+  assert.equal(checkResult[0].baseline_missing, true)
+  assert.equal((await loadLock(root)).skills['my-skill'].content_hash, null)
+  await assert.rejects(
+    () => update({ root, names: ['my-skill'], ctx: fakeCtx }),
+    (error) => error?.code === 'local-changes-confirmation-required',
+  )
+  assert.equal((await loadLock(root)).skills['my-skill'].content_hash, null)
   await rm(root, { recursive: true, force: true })
 })
 

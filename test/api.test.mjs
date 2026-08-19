@@ -89,6 +89,24 @@ test('groups/op create：复制默认组挂载规则作为起步', async () => {
   await rm(root, { recursive: true, force: true })
 })
 
+test('groups/op：改名同步迁移挂载，删除组清除其规则', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-sm-test-'))
+  await mkdir(join(root, 'skills', 'alpha'), { recursive: true })
+  await writeFile(join(root, 'skills', 'alpha', 'SKILL.md'), '---\nname: alpha\n---\n', 'utf8')
+  const api = buildApi(() => scopeOf(root), {
+    listWorkspaces: () => [{ id: 'ws-1', title: '测试工作区', path: root }],
+  })
+  await api.library({})
+  await api['groups/op']({ action: 'create', name: '写作' })
+  await api['groups/op']({ action: 'rename', name: '写作', newName: '创作' })
+  let groups = await api.groups()
+  assert.ok(groups.mounts.some((mount) => mount.group === '创作' && mount.scope === 'global'))
+  await api['groups/op']({ action: 'delete', name: '创作' })
+  groups = await api.groups()
+  assert.equal(groups.mounts.some((mount) => mount.group === '创作'), false)
+  await rm(root, { recursive: true, force: true })
+})
+
 test('writeError：WorkshopError → 信封；未知错误 → internal 500', () => {
   const res1 = captureResponse()
   writeError(res1, new WorkshopError('workshop-corrupt', '损坏'))
@@ -123,4 +141,43 @@ test('readJsonBody：边界与非法 JSON', async () => {
   await assert.rejects(() => readJsonBody(bad), (e) => e instanceof ApiError && e.code === 'bad-request')
   const empty = { [Symbol.asyncIterator]: async function* () {} }
   assert.deepEqual(await readJsonBody(empty), {})
+})
+
+test('工作区镜像：Host 投影迁移旧项目并移除手工 projects API', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'dsh-sm-test-'))
+  const workspace = await mkdtemp(join(tmpdir(), 'dsh-sm-workspace-'))
+  const orphan = join(tmpdir(), 'dsh-sm-unmatched-' + Date.now())
+  await mkdir(join(root, 'skills', 'alpha'), { recursive: true })
+  await writeFile(join(root, 'skills', 'alpha', 'SKILL.md'), '---\nname: alpha\n---\n', 'utf8')
+  await mkdir(join(root, 'distributor'), { recursive: true })
+  await writeFile(join(root, 'distributor', 'state.json'), JSON.stringify({
+    projects: { '旧项目': workspace, auteur: orphan },
+    mounts: [{ group: '默认', app: 'dsh', scope: 'project', project: '旧项目' }],
+    synced: { alpha: [{ app: 'dsh', scope: 'project', project: '旧项目', method: 'junction', dir: join(workspace, '.dsh', 'skills', 'alpha') }] },
+  }), 'utf8')
+  const api = buildApi(() => scopeOf(root), {
+    listWorkspaces: () => [{ id: 'workspace-1', title: 'Aurora Web', path: workspace }],
+  })
+
+  const groups = await api.groups()
+  assert.equal('projects' in api, false)
+  assert.deepEqual(groups.workspaceProjects.map((item) => item.workspaceId), ['workspace-1'])
+  assert.deepEqual(groups.legacyProjects.map((item) => item.project), ['auteur'])
+  assert.equal(groups.mounts[0].project, 'workspace-1')
+  const projection = await api['workspace-projects']()
+  assert.equal(projection.workspaceProjects[0].title, 'Aurora Web')
+  const projectSkills = await api['project-skills']()
+  assert.deepEqual(Object.keys(projectSkills.entries), ['workspace-1'])
+  assert.deepEqual(projectSkills.legacyProjects.map((item) => item.project), ['auteur'])
+  const persisted = JSON.parse(await readFile(join(root, 'distributor', 'state.json'), 'utf8'))
+  assert.equal(persisted.projects['workspace-1'], workspace)
+  assert.equal(persisted.projects.auteur, orphan)
+  assert.equal(persisted.mounts[0].project, 'workspace-1')
+  assert.equal(persisted.synced.alpha[0].project, 'workspace-1')
+  await assert.rejects(
+    () => api.mounts({ action: 'add', group: '默认', app: 'dsh', scope: 'project', workspaceId: 'missing' }),
+    (error) => error instanceof WorkshopError && error.code === 'workspace-not-found',
+  )
+  await rm(root, { recursive: true, force: true })
+  await rm(workspace, { recursive: true, force: true })
 })
