@@ -106,20 +106,23 @@ window.__ModuleLoader__.load({
       row: { display: 'flex', alignItems: 'center', gap: '8px', padding: '9px 12px', border: `1px solid ${T.borderL1}`, borderRadius: 12, marginBottom: 8, fontSize: 13 },
       select: { padding: '4px 8px', borderRadius: 6, border: `1px solid ${T.borderL1}`, background: T.bgBase, color: T.labelPrimary, fontSize: 12 },
       panel: { padding: '10px 12px' },
-      title: { fontSize: 13, fontWeight: 600, margin: '8px 0 6px', color: T.labelPrimary },
       error: { color: T.error, fontSize: 12, padding: '6px 8px' },
       muted: { color: T.labelSecondary, fontSize: 12 },
       guide: { padding: '24px 16px', textAlign: 'center', color: T.labelSecondary, fontSize: 13 },
       dangerText: { color: T.error },
-      field: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: T.labelSecondary },
       toolbar: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 },
     }
+    // ---------- 设计稿样式基元（01–09 帧视觉语言；色值全部走 token） ----------
+    // 白底描边卡（范围卡/表单卡/对话框）；浅色底卡（仓库卡/项目卡/信息条）；状态点
+    const cardStyle = { border: `1px solid ${T.borderL1}`, borderRadius: 12, background: T.bgLayer3 }
+    const subCardStyle = { borderRadius: 10, background: T.bgModulePlatform }
+    const dotStyle = (color) => ({ width: 7, height: 7, borderRadius: 4, background: color, flex: 'none' })
+    const sectionHead = { fontSize: 14, fontWeight: 600, color: T.labelPrimary }
+    const cardTitle = { fontSize: 13, fontWeight: 600, color: T.labelPrimary }
+    const noteText = { fontSize: 11, color: T.labelSecondary }
+    const dividerStyle = { height: 1, background: T.borderL1, flex: 'none' }
 
     // ---------- 通用小组件 ----------
-    function Field({ label, children }) {
-      return h('label', { style: S.field }, h('span', null, label), children)
-    }
-
     function ErrorLine({ error }) {
       if (!error) return null
       return h('div', { style: S.error }, String(error.message || error))
@@ -520,21 +523,38 @@ window.__ModuleLoader__.load({
         )
       }
 
+      // 文字页签（设计稿 01–05 帧：激活下划线 + 每页一句副标题）
+      const TABS = [
+        { key: 'manage', label: '管理', sub: '先为分组配置可用范围，再管理其中的 Skill。' },
+        { key: 'search', label: '搜索', sub: '从 skills.sh 搜索，或直接从 GitHub 仓库入库。' },
+        { key: 'sync', label: '同步', sub: '查看 DSH 工作区与各 Skill 的挂载状态。' },
+      ]
+      const activeTab = TABS.find((t) => t.key === tab)
       return h('div', null,
-        h('div', { style: { display: 'flex', gap: 4, padding: '8px 12px 0' } },
-          h(Pill, { active: tab === 'manage', onClick: () => setTab('manage') }, '管理'),
-          h(Pill, { active: tab === 'search', onClick: () => setTab('search') }, '搜索'),
-          h(Pill, { active: tab === 'sync', onClick: () => setTab('sync') }, '同步'),
+        h('div', { style: { display: 'flex', gap: 20, padding: '4px 12px 0', borderBottom: `1px solid ${T.borderL1}` } },
+          TABS.map((t) => h('button', {
+            key: t.key,
+            type: 'button',
+            onClick: () => setTab(t.key),
+            style: {
+              border: 'none', background: 'none', padding: '6px 2px 8px', font: 'inherit', fontSize: 13,
+              cursor: 'pointer', marginBottom: -1,
+              color: tab === t.key ? T.labelPrimary : T.labelSecondary,
+              fontWeight: tab === t.key ? 500 : 400,
+              borderBottom: tab === t.key ? `2px solid ${T.labelPrimary}` : '2px solid transparent',
+            },
+          }, t.label)),
         ),
+        h('div', { style: { padding: '8px 12px 0', fontSize: 12, color: T.labelTertiary } }, activeTab ? activeTab.sub : ''),
         h(ErrorLine, { error }),
-        tab === 'manage' && h(ManageView, { call, data, reload, onGoSync: () => setTab('sync') }),
+        tab === 'manage' && h(ManageView, { call, workspaces: props.workspaces, data, reload, onGoSync: () => setTab('sync') }),
         tab === 'search' && h(SearchView, { call, data, reload }),
         tab === 'sync' && h(SyncView, { call, data, reload }),
       )
     }
 
     // ---------- 管理视图 ----------
-    function ManageView({ call, data, reload, onGoSync }) {
+    function ManageView({ call, workspaces, data, reload, onGoSync }) {
       const [origin, setOrigin] = useState('')
       const [groupFilter, setGroupFilter] = useState('默认')
       const [q, setQ] = useState('')
@@ -672,11 +692,27 @@ window.__ModuleLoader__.load({
         reload()
       }
 
+      // 04 帧：导入打开时整页切换为导入卡片（含「导入后」说明区），取消返回管理页
+      if (importOpen) {
+        return h('div', { style: S.panel },
+          h(ImportPanel, {
+            call,
+            workspaces,
+            busy,
+            onDone: () => { setImportOpen(false); setNotice('导入完成'); reload() },
+            onCancel: () => setImportOpen(false),
+          }),
+        )
+      }
+
       return h('div', { style: S.panel },
         // 分组优先：先选择当前组并配置它的全局/工作区使用范围，再浏览技能库。
-        h('div', { style: { marginBottom: 10 } },
-          h('div', { style: S.title }, '分组'),
-          h('div', { style: { display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginBottom: 7 } },
+        h('div', { style: { marginBottom: 14 } },
+          h('div', { style: { display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 } },
+            h('span', { style: sectionHead }, '分组'),
+            h('span', { style: noteText }, `${data.lib.skills.length} 个 Skill`),
+          ),
+          h('div', { style: { display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 } },
             h(Pill, { active: groupFilter === '', onClick: () => setGroupFilter('') }, `全部 · ${data.lib.skills.length}`),
             h(Pill, { active: groupFilter === '默认', onClick: () => setGroupFilter('默认') }, `默认 · ${countForGroup('默认')}`),
             data.grp.groups.map((group) =>
@@ -685,7 +721,10 @@ window.__ModuleLoader__.load({
             h(Pill, { active: false, onClick: () => setCreateOpen(true) }, '＋ 新建分组'),
           ),
           groupFilter === ''
-            ? h('div', { style: { ...S.muted, padding: '8px 0' } }, '当前查看全部技能。选择一个分组后可配置它的全局和 DSH 工作区使用范围。')
+            ? h('div', { style: { ...cardStyle, padding: '12px 14px' } },
+                h('div', { style: cardTitle }, '当前查看：全部技能'),
+                h('div', { style: { ...noteText, marginTop: 4 } }, '选择一个分组后，可配置它在 DSH 全局与各工作区的可用范围。'),
+              )
             : h(GroupScopePanel, {
                 call,
                 group: groupFilter,
@@ -697,39 +736,42 @@ window.__ModuleLoader__.load({
                 onGroupOp: groupOp,
               }),
         ),
-        // 同步健康提示（对齐 01 帧）：有问题时给出去往「同步」页的入口
-        (data.health || []).length > 0 && h('div', { style: { ...statusPillStyle('warn'), borderRadius: 10, padding: '8px 12px', marginBottom: 8, fontSize: 12, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 } },
-          h('span', null, `发现 ${data.health.length} 个同步问题${data.health.some((i) => i.issue === 'workspace-unmatched') ? '；含未匹配工作区的遗留项' : ''}。`),
-          h(GhostBtn, { onClick: onGoSync }, '查看'),
+        // 同步健康提示（对齐 01 帧）：琥珀底 + 状态点 + 右侧「查看」文字入口
+        (data.health || []).length > 0 && h('div', { style: { ...badgeStyle(T.warn), borderRadius: 10, padding: '9px 12px', marginBottom: 14, fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 } },
+          h('span', { style: dotStyle(T.warn) }),
+          h('span', { style: { flex: 1 } }, `发现 ${data.health.length} 个同步问题${data.health.some((i) => i.issue === 'workspace-unmatched') ? '；含未匹配工作区的遗留项' : ''}。`),
+          h('button', {
+            type: 'button',
+            onClick: onGoSync,
+            style: { border: 'none', background: 'none', padding: 0, font: 'inherit', fontSize: 12, fontWeight: 500, color: 'inherit', cursor: 'pointer' },
+          }, '查看'),
         ),
-        h('div', { style: { display: 'flex', alignItems: 'baseline', gap: 8 } },
-          h('div', { style: S.title }, '技能库'),
-          h('span', { style: S.muted }, `${groupFilter === '' ? '全部' : groupFilter} · ${list.length} 个`),
-          data.lib.checkedAt ? h('span', { style: S.muted }, `上游状态检查于 ${fmtCheckedAt(data.lib.checkedAt)}`) : null,
+        h('div', { style: { display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 10 } },
+          h('span', { style: sectionHead }, '技能库'),
+          h('span', { style: noteText }, `${groupFilter === '' ? '全部' : groupFilter} · ${list.length} 个`),
+          data.lib.checkedAt ? h('span', { style: noteText }, `上游状态检查于 ${fmtCheckedAt(data.lib.checkedAt)}`) : null,
         ),
-        // 工具条（对齐 01/07 帧：搜索在前，来源筛选其后，操作靠右）
-        h('div', { style: S.toolbar },
+        // 工具条（对齐 01/07 帧：搜索在前，来源筛选其后，操作靠右；导入为主按钮）
+        h('div', { style: { ...S.toolbar, marginBottom: 12 } },
           h(Input, { style: { flex: 1, minWidth: 140 }, placeholder: '搜索名称 / 描述…', value: q, onChange: (e) => setQ(e.target.value) }),
-          h('select', { style: S.select, value: origin, onChange: (e) => setOrigin(e.target.value) },
+          h('select', { style: { ...S.select, border: 'none', background: T.bgModulePlatform, borderRadius: 8, padding: '5px 10px' }, value: origin, onChange: (e) => setOrigin(e.target.value) },
             h('option', { value: '' }, '全部来源'),
             h('option', { value: 'github' }, 'GitHub'),
             h('option', { value: 'local' }, '本地'),
             h('option', { value: 'self' }, '自研'),
           ),
           h(GhostBtn, { onClick: refreshAll, disabled: busy, title: '重新扫描列表并检查全部上游状态' }, '↻ 刷新'),
-          h(OutlineBtn, { onClick: () => setImportOpen(!importOpen), disabled: busy }, '导入 skill'),
+          h(Button, { size: 'sm', onClick: () => setImportOpen(true), disabled: busy }, '＋ 导入 skill'),
         ),
         // 检查/更新结果提示
-        notice ? h('div', { style: { ...S.muted, marginBottom: 4 } }, notice) : null,
-        // 导入面板
-        importOpen && h(ImportPanel, { call, reload, onDone: () => setImportOpen(false) }),
-        // 行
+        notice ? h('div', { style: { ...S.muted, marginBottom: 6 } }, notice) : null,
+        // 行（01/07 帧：描边卡片，名称 13/600 + meta 11 弱化）
         list.length === 0
           ? h('div', { style: { ...S.muted, padding: 12 } }, '库为空（无匹配 skill）')
           : list.map((it) => h('div', { key: it.dir, style: { ...S.row, position: 'relative' } },
               h('div', { style: { flex: 1, minWidth: 0 }, title: it.description || '' },
                 h('div', { style: { fontWeight: 600, color: T.labelPrimary } }, it.name),
-                h('div', { style: S.muted },
+                h('div', { style: noteText },
                   `${ORIGIN_LABEL[it.origin] || it.origin} · ${it.group}${(it.targets || []).length > 0 ? ' · ' + it.targets.join(' ') : ''}${it.fingerprint ? ' · ' + it.fingerprint.slice(0, 7) : ''}`,
                 ),
               ),
@@ -880,7 +922,12 @@ window.__ModuleLoader__.load({
         setRenaming(false)
         if (trimmed && trimmed !== group) onGroupOp('rename', group, trimmed)
       }
-      return h('div', { style: { border: `1px solid ${T.borderL1}`, borderRadius: 10, padding: '9px 10px', background: T.bgLayer2 } },
+      const entryStyle = (danger) => ({
+        border: 'none', background: 'none', padding: 0, font: 'inherit', fontSize: 11,
+        color: danger ? T.error : T.labelSecondary, cursor: disabled ? 'default' : 'pointer',
+      })
+      // 07/09 帧：白底描边卡；标题行（改名中变内联编辑）；行间分隔线；底部后果注释
+      return h('div', { style: { ...cardStyle, padding: '12px 14px' } },
         renaming
           ? h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 } },
               h(Input, {
@@ -896,41 +943,50 @@ window.__ModuleLoader__.load({
               h(Button, { size: 'sm', onClick: submitRename, disabled }, '保存'),
               h(GhostBtn, { onClick: () => setRenaming(false) }, '取消'),
             )
-          : h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7 } },
-              h('span', { style: { fontSize: 12, fontWeight: 600, color: T.labelPrimary } }, `当前分组：${group}`),
+          : h('div', { style: { display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 } },
+              h('span', { style: cardTitle }, `当前分组：${group}`),
               manageable && h('span', { style: { flex: 1 } }),
-              manageable && h(GhostBtn, { onClick: () => { setNewName(group); setRenaming(true) }, disabled }, '改名'),
-              manageable && h(GhostBtn, { onClick: () => onGroupOp('delete', group), disabled, style: S.dangerText }, '删除'),
+              manageable && h('button', { type: 'button', style: entryStyle(false), disabled, onClick: () => { setNewName(group); setRenaming(true) } }, '改名'),
+              manageable && h('button', { type: 'button', style: entryStyle(true), disabled, onClick: () => onGroupOp('delete', group) }, '删除'),
             ),
-        renaming && h('div', { style: { ...S.muted, marginBottom: 7, fontSize: 11 } }, '改名立即生效：分组成员与挂载规则同步改名，Skill 本体不受影响。'),
-        h('label', { style: { display: 'flex', alignItems: 'center', gap: 7, marginBottom: workspaceProjects.length ? 6 : 0, fontSize: 12, color: T.labelSecondary, cursor: disabled ? 'default' : 'pointer' } },
+        renaming && h('div', { style: { ...noteText, marginBottom: 8 } }, '改名立即生效：分组成员与挂载规则同步改名，Skill 本体不受影响。'),
+        h('div', { style: dividerStyle }),
+        h('label', { style: { display: 'flex', alignItems: 'center', gap: 8, padding: '9px 0', fontSize: 12, cursor: disabled ? 'default' : 'pointer' } },
           h('input', {
             type: 'checkbox',
             checked: enabled('global'),
             disabled,
             onChange: (event) => toggle('global', null, event.target.checked),
           }),
-          'DSH 全局',
+          h('span', { style: { fontWeight: 500, color: T.labelPrimary } }, 'DSH 全局'),
+          h('span', { style: noteText }, '对所有 DSH 项目生效'),
         ),
+        h('div', { style: dividerStyle }),
         workspaceProjects.length === 0
-          ? h('div', { style: S.muted }, '当前没有 DSH 工作区；请在 DSH 原生工作区界面创建或打开项目。')
-          : workspaceProjects.map((workspace) => h('label', {
-              key: workspace.workspaceId,
-              style: { display: 'flex', alignItems: 'center', gap: 7, padding: '4px 0', fontSize: 12, color: T.labelSecondary, cursor: disabled ? 'default' : 'pointer' },
-            },
-              h('input', {
-                type: 'checkbox',
-                checked: enabled('project', workspace.workspaceId),
-                disabled,
-                onChange: (event) => toggle('project', workspace.workspaceId, event.target.checked),
-              }),
-              h('span', { style: { color: T.labelPrimary, fontWeight: 500 } }, workspace.title),
-              h('span', { style: S.muted }, workspace.path),
-            )),
+          ? h('div', { style: { ...S.muted, padding: '8px 0' } }, '当前没有 DSH 工作区；请在 DSH 原生工作区界面创建或打开项目。')
+          : h(React.Fragment, null,
+              h('div', { style: { fontSize: 10, color: T.labelTertiary, padding: '7px 0 1px' } }, '工作区项目'),
+              workspaceProjects.map((workspace) => h('label', {
+                key: workspace.workspaceId,
+                style: { display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0', fontSize: 12, cursor: disabled ? 'default' : 'pointer' },
+              },
+                h('input', {
+                  type: 'checkbox',
+                  checked: enabled('project', workspace.workspaceId),
+                  disabled,
+                  onChange: (event) => toggle('project', workspace.workspaceId, event.target.checked),
+                }),
+                h('span', { style: { fontWeight: 500, color: T.labelPrimary } }, workspace.title),
+                h('span', { style: noteText }, `${workspace.path} · workspaceId: ${workspace.workspaceId.slice(0, 8)}…`),
+              )),
+            ),
+        h('div', { style: dividerStyle }),
+        h('div', { style: { ...noteText, paddingTop: 8 } }, '取消勾选会移除该分组在该目标下的全部 Skill 链接。'),
+        manageable && h('div', { style: { ...noteText, paddingTop: 4 } }, '删除组：成员回落「默认」组，执行前需确认。'),
       )
     }
 
-    function ImportPanel({ call, reload, onDone }) {
+    function ImportPanel({ call, workspaces, onDone, onCancel }) {
       const [path, setPath] = useState('')
       const [as, setAs] = useState('')
       const [busy, setBusy] = useState(false)
@@ -941,18 +997,55 @@ window.__ModuleLoader__.load({
         try {
           await call('import', { path, as: as || undefined })
           onDone()
-          reload()
         } catch (e) {
           setError(e.message || String(e))
         } finally {
           setBusy(false)
         }
       }
-      return h('div', { style: { border: `1px solid ${T.borderL1}`, borderRadius: 8, padding: 8, marginBottom: 6, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' } },
-        h(Field, { label: '目录或 .zip 路径' }, h(Input, { style: { width: 260 }, value: path, onChange: (e) => setPath(e.target.value), placeholder: 'E:\\path\\skill-dir 或 .zip' })),
-        h(Field, { label: '改名(可选)' }, h(Input, { style: { width: 120 }, value: as, onChange: (e) => setAs(e.target.value) })),
-        h(OutlineBtn, { onClick: doImport, disabled: busy || !path.trim() }, '导入'),
-        h(ErrorLine, { error }),
+      // 04 帧：整页导入卡片（字段纵排 + 底部按钮）+「导入后」说明区
+      const browse = async () => {
+        if (!workspaces || typeof workspaces.pickDirectory !== 'function') return
+        try {
+          const picked = await workspaces.pickDirectory()
+          if (picked) setPath(picked)
+        } catch (e) {
+          setError(e && e.message ? `选择目录失败：${e.message}` : '选择目录失败')
+        }
+      }
+      return h('div', null,
+        h('div', { style: { ...cardStyle, borderRadius: 14, padding: 16, marginBottom: 18 } },
+          h('div', { style: { fontSize: 15, fontWeight: 600, color: T.labelPrimary, marginBottom: 4 } }, '导入本地 Skill'),
+          h('div', { style: { ...noteText, marginBottom: 14 } }, '选择包含 SKILL.md 的目录，或导入 .zip 压缩包。'),
+          h('div', { style: { fontSize: 11, fontWeight: 500, color: T.labelPrimary, marginBottom: 6 } }, '目录或 .zip 路径'),
+          h('div', { style: { display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 } },
+            h(Input, { style: { flex: 1 }, value: path, onChange: (e) => setPath(e.target.value), placeholder: 'E:\\path\\skill-dir 或 .zip' }),
+            h(OutlineBtn, { onClick: browse, disabled: busy || !workspaces }, '浏览…'),
+          ),
+          h('div', { style: { fontSize: 11, fontWeight: 500, color: T.labelPrimary, marginBottom: 6 } }, '安装名称（可选）'),
+          h(Input, { style: { width: 230, marginBottom: 6 }, value: as, onChange: (e) => setAs(e.target.value), placeholder: '留空使用 SKILL.md 中的名称' }),
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: 12, marginTop: 10 } },
+            h('span', { style: { flex: 1, fontSize: 10, color: T.labelTertiary } }, '仅允许小写字母、数字和连字符；留空则使用 SKILL.md 中的名称。'),
+            error ? h('span', { style: { fontSize: 12, color: T.error } }, error) : null,
+            h(OutlineBtn, { onClick: onCancel, disabled: busy }, '取消'),
+            h(Button, { size: 'sm', onClick: doImport, disabled: busy || !path.trim() }, busy ? '导入中…' : '导入'),
+          ),
+        ),
+        h('div', { style: { ...sectionHead, marginBottom: 8 } }, '导入后'),
+        h('div', { style: { ...subCardStyle, padding: '10px 12px', marginBottom: 8, display: 'flex', gap: 8 } },
+          h('span', { style: { ...dotStyle(T.success), marginTop: 5 } }),
+          h('div', null,
+            h('div', { style: { fontSize: 12, color: T.labelPrimary } }, '创建本地来源锁记录，并将文件复制到技能车间。'),
+            h('div', { style: { ...noteText, marginTop: 2 } }, '自动忽略 .git 与 __pycache__。'),
+          ),
+        ),
+        h('div', { style: { ...subCardStyle, padding: '10px 12px', display: 'flex', gap: 8 } },
+          h('span', { style: { ...dotStyle(T.success), marginTop: 5 } }),
+          h('div', null,
+            h('div', { style: { fontSize: 12, color: T.labelPrimary } }, '写入 Git 历史，并按分组挂载到 DSH Skills 目录。'),
+            h('div', { style: { ...noteText, marginTop: 2 } }, '目标已存在时会拒绝并提示改名。'),
+          ),
+        ),
       )
     }
 
@@ -1039,22 +1132,31 @@ window.__ModuleLoader__.load({
       }
 
       return h('div', { style: S.panel },
-        h('div', { style: S.toolbar },
-          h(Input, { style: { width: 240 }, placeholder: 'skills.sh 关键词', value: query, onChange: (e) => setQuery(e.target.value) }),
-          h(OutlineBtn, { onClick: doSearch, disabled: busy }, '搜索'),
-          h(Field, { label: '直接添加' },
-            h(DirectAdd, { call, reload, busy, setBusy, setError, onCandidates: showCandidates, onAdded: () => setNotice('已入库') }),
-          ),
+        // 02 帧：搜索 skills.sh（搜索为主按钮）
+        h('div', { style: { ...cardTitle, marginBottom: 8 } }, '搜索 skills.sh'),
+        h('div', { style: { display: 'flex', gap: 8, alignItems: 'center', marginBottom: 14 } },
+          h(Input, {
+            style: { flex: 1 },
+            placeholder: 'skills.sh 关键词',
+            value: query,
+            onChange: (e) => setQuery(e.target.value),
+            onKeyDown: (e) => { if (e.key === 'Enter') doSearch() },
+          }),
+          h(Button, { size: 'sm', onClick: doSearch, disabled: busy || !query.trim() }, busy ? '搜索中…' : '搜索'),
         ),
+        // 02 帧：GitHub 仓库探测卡片（DSR-007）
+        h(DirectAdd, { call, reload, busy, setBusy, setError, onCandidates: showCandidates, onAdded: () => setNotice('已入库') }),
         h(ErrorLine, { error }),
-        notice ? h('div', { style: { ...S.muted, marginBottom: 4 } }, notice) : null,
-        candidates && h('div', { style: { marginBottom: 8 } },
+        notice ? h('div', { style: { ...S.muted, marginBottom: 6 } }, notice) : null,
+        candidates && h('div', { style: { marginBottom: 10 } },
           h(GhostBtn, { onClick: () => { setCandidates(null); setSelected(new Set()) }, disabled: busy }, '← 返回搜索'),
-          h('div', { style: { border: `1px solid ${T.borderL1}`, borderRadius: 10, padding: '8px 10px', margin: '6px 0', background: T.bgLayer2 } },
-            h('div', { style: { fontWeight: 600, color: T.labelPrimary, fontSize: 13 } }, candidates.repo),
-            h('div', { style: S.muted }, `${candidates.branch} · 发现 ${candidates.list.length} 个含 SKILL.md 的目录，可多选入库。`),
+          // 03 帧：仓库信息用浅底卡
+          h('div', { style: { ...subCardStyle, padding: '10px 12px', margin: '8px 0 12px' } },
+            h('div', { style: { fontWeight: 500, color: T.labelPrimary, fontSize: 13 } }, candidates.repo),
+            h('div', { style: { ...noteText, marginTop: 2 } }, `${candidates.branch} · GitHub Trees API`),
+            h('div', { style: { ...noteText, marginTop: 2 } }, `发现 ${candidates.list.length} 个含 SKILL.md 的目录，可多选入库。`),
           ),
-          h('div', { style: S.title }, '选择要入库的 Skill（可多选）'),
+          h('div', { style: { ...cardTitle, marginBottom: 8 } }, '选择要入库的 Skill（可多选）'),
           candidates.list.map((c) => {
             const key = c.path || ''
             const checked = selected.has(key)
@@ -1071,28 +1173,37 @@ window.__ModuleLoader__.load({
                 },
               }),
               h('span', { style: { flex: 1, minWidth: 0 } },
-                h('div', { style: { color: T.labelPrimary, fontWeight: 500 } }, c.path || '（仓库根）'),
-                h('div', { style: S.muted }, `建议名称：${suggestName(c)}`),
+                h('div', { style: { color: T.labelPrimary, fontWeight: 500, fontSize: 12 } }, c.path || '（仓库根）'),
+                h('div', { style: noteText }, `建议名称：${suggestName(c)}`),
               ),
             )
           }),
-          h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, margin: '8px 0' } },
-            h('span', { style: { ...S.muted, flex: 1 } }, `已选 ${selected.size} 个 · 共 ${candidates.list.length} 个候选`),
+          h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, margin: '10px 0' } },
+            h('span', { style: { ...noteText, flex: 1 } }, `已选 ${selected.size} 个 · 共 ${candidates.list.length} 个候选`),
             h(Button, { size: 'sm', onClick: addSelected, disabled: busy || selected.size === 0 }, busy ? '入库中…' : '入库所选'),
           ),
-          h('div', { style: { ...badgeStyle(T.warn), borderRadius: 8, padding: '7px 10px', fontSize: 12, lineHeight: 1.55 } },
-            '同名且同仓库时改用更新；同名异源时需先出库。分支按指定值 → main → master 回退。',
+          h('div', { style: { ...badgeStyle(T.warn), borderRadius: 10, padding: '9px 12px', fontSize: 11, lineHeight: 1.6, display: 'flex', gap: 8 } },
+            h('span', { style: { ...dotStyle(T.warn), marginTop: 5 } }),
+            h('div', null,
+              h('div', null, '同名且同仓库时改用更新；同名异源时需先出库。'),
+              h('div', null, '分支按指定值 → main → master 回退。'),
+            ),
           ),
         ),
         results && results.skills.length === 0
           ? h('div', { style: S.muted }, '无结果')
-          : (results ? results.skills : []).map((s) => h('div', { key: s.key, style: S.row },
-              h('div', { style: { flex: 1, minWidth: 0 } },
-                h('div', { style: { fontWeight: 600, color: T.labelPrimary } }, s.name),
-                h('div', { style: S.muted }, `${s.repo}${s.directory ? ' / ' + s.directory : ''} · 安装 ${s.installs}`),
-              ),
-              h(OutlineBtn, { onClick: () => addFrom(s.repo, s.directory, ''), disabled: busy }, '入库'),
-            )),
+          : (results && results.skills.length > 0
+              ? h('div', null,
+                  h('div', { style: { ...cardTitle, margin: '4px 0 8px' } }, `“${results.query || query}” 的搜索结果 · ${results.skills.length} 个`),
+                  results.skills.map((s) => h('div', { key: s.key, style: S.row },
+                    h('div', { style: { flex: 1, minWidth: 0 } },
+                      h('div', { style: { fontWeight: 600, color: T.labelPrimary } }, s.name),
+                      h('div', { style: noteText }, `${s.repo}${s.directory ? ' / ' + s.directory : ''} · 安装 ${s.installs}`),
+                    ),
+                    h(OutlineBtn, { onClick: () => addFrom(s.repo, s.directory, ''), disabled: busy }, '入库'),
+                  )),
+                )
+              : null),
       )
     }
 
@@ -1119,10 +1230,14 @@ window.__ModuleLoader__.load({
           setBusy(false)
         }
       }
-      return h('span', { style: { display: 'inline-flex', gap: 4, alignItems: 'center' } },
-        h(Input, { style: { width: 180 }, placeholder: 'owner/repo', value: repo, onChange: (e) => setRepo(e.target.value) }),
-        h(Input, { style: { width: 70 }, placeholder: '分支', value: branch, onChange: (e) => setBranch(e.target.value) }),
-        h(OutlineBtn, { onClick: add, disabled: busy }, '探测仓库'),
+      // 02 帧：白底描边卡「从 GitHub 仓库添加」，探测为浅色按钮
+      return h('div', { style: { ...cardStyle, padding: '12px 14px', marginBottom: 14 } },
+        h('div', { style: { ...cardTitle, marginBottom: 10 } }, '从 GitHub 仓库添加'),
+        h('div', { style: { display: 'flex', gap: 8, alignItems: 'center' } },
+          h(Input, { style: { flex: 1 }, placeholder: 'owner/repo', value: repo, onChange: (e) => setRepo(e.target.value) }),
+          h(Input, { style: { width: 110 }, placeholder: '分支（可选）', value: branch, onChange: (e) => setBranch(e.target.value) }),
+          h(OutlineBtn, { onClick: add, disabled: busy || !repo.trim() }, '探测仓库'),
+        ),
       )
     }
 
@@ -1216,49 +1331,70 @@ window.__ModuleLoader__.load({
         return target || '—'
       }
 
+      // 05 帧：健康问题按严重级着色卡片（状态点 + 加粗标题 + 后果说明）
+      const ISSUE_DESC = {
+        'wrong-target': '目标指向错误；修复会重建受管链接。',
+        'workspace-unmatched': '旧记录已保留；普通修复不会删除其既有链接。',
+      }
+      const healthCard = (color, title, desc, key) => h('div', {
+        key,
+        style: { ...badgeStyle(color), borderRadius: 10, padding: '9px 12px', marginBottom: 8, fontSize: 12, display: 'flex', gap: 8 },
+      },
+        h('span', { style: { ...dotStyle(color), marginTop: 5 } }),
+        h('div', { style: { minWidth: 0 } },
+          h('div', { style: { fontWeight: 600 } }, title),
+          desc ? h('div', { style: { fontSize: 11, marginTop: 2 } }, desc) : null,
+        ),
+      )
+
       return h('div', { style: S.panel },
-        h('div', { style: S.toolbar },
-          h('span', { style: { fontWeight: 600, color: T.labelPrimary } }, `健康问题 ${health.length} 项`),
-          h(OutlineBtn, { onClick: fix, disabled: busy || health.length === 0 }, '应用并修复'),
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 } },
+          h('span', { style: cardTitle }, `健康问题 ${health.length} 项`),
+          h('span', { style: { flex: 1 } }),
+          h(Button, { size: 'sm', onClick: fix, disabled: busy || health.length === 0 }, busy ? '修复中…' : '应用并修复'),
         ),
         h(ErrorLine, { error }),
         health.length === 0
-          ? h('div', { style: { ...S.muted, marginBottom: 8 } }, '健康：无问题')
-          : health.map((issue, index) => h('div', { key: `${issue.issue}-${index}`, style: S.row },
-              h(Pill, { style: badgeStyle(issue.issue === 'workspace-unmatched' ? T.warn : T.error) }, issue.issue),
-              h('span', { style: { flex: 1 } }, `${issue.name} @ ${describeTarget(issue.target)}`),
+          ? h('div', { style: { ...subCardStyle, padding: '10px 12px', marginBottom: 16, fontSize: 12, color: T.labelSecondary, display: 'flex', gap: 8, alignItems: 'center' } },
+              h('span', { style: dotStyle(T.success) }),
+              '各项目录与挂载期望一致，无需修复。',
+            )
+          : health.map((issue, index) => healthCard(
+              issue.issue === 'workspace-unmatched' ? T.warn : T.error,
+              `${issue.issue} · ${issue.name} @ ${describeTarget(issue.target)}`,
+              ISSUE_DESC[issue.issue] || null,
+              `${issue.issue}-${index}`,
             )),
 
-        h('div', { style: S.title }, 'DSH 工作区项目'),
-        h('div', { style: { ...S.muted, marginBottom: 5 } }, '自动从 DSH 工作区获取；请在 DSH 原生工作区界面创建、改名或移除项目。'),
+        h('div', { style: { display: 'flex', alignItems: 'baseline', gap: 8, margin: '8px 0 8px' } },
+          h('span', { style: sectionHead }, 'DSH 工作区项目'),
+          h('span', { style: noteText }, '自动获取，不在此页注册或编辑'),
+        ),
         workspaceProjects.length === 0
-          ? h('div', { style: S.muted }, '当前没有 DSH 工作区')
-          : workspaceProjects.map((workspace) => h('div', { key: workspace.workspaceId, style: S.row },
+          ? h('div', { style: { ...S.muted, marginBottom: 14 } }, '当前没有 DSH 工作区')
+          : workspaceProjects.map((workspace) => h('div', { key: workspace.workspaceId, style: { ...subCardStyle, padding: '10px 12px', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8 } },
               h('div', { style: { flex: 1, minWidth: 0 } },
-                h('div', { style: { fontWeight: 600, color: T.labelPrimary } }, workspace.title),
-                h('div', { style: S.muted }, `${workspace.path} · ${workspace.workspaceId}`),
+                h('div', { style: { fontWeight: 500, fontSize: 12, color: T.labelPrimary } }, workspace.title),
+                h('div', { style: noteText }, `${workspace.path} · workspaceId: ${workspace.workspaceId.slice(0, 8)}…`),
               ),
               h('span', { style: pillBase }, `${workspace.mountCount} 个组使用`),
             )),
-        legacyProjects.length > 0 && h('div', { style: { marginTop: 8 } },
-          h('div', { style: S.title }, '未匹配工作区的遗留项'),
-          legacyProjects.map((legacy) => h('div', { key: legacy.project, style: { ...S.row, color: T.warn } },
-            h(Pill, { style: badgeStyle(T.warn) }, 'workspace-unmatched'),
-            h('span', { style: { flex: 1 } }, `${legacy.project} · ${legacy.path}`),
-            h('span', { style: S.muted }, `保留 ${legacy.syncedCount} 个既有链接`),
-          )),
+        legacyProjects.length > 0 && h('div', { style: { marginTop: 4, marginBottom: 8 } },
+          h('div', { style: { ...cardTitle, marginBottom: 6 } }, '未匹配工作区的遗留项'),
+          legacyProjects.map((legacy) => healthCard(T.warn, `workspace-unmatched · ${legacy.project}`, `${legacy.path} · 保留 ${legacy.syncedCount} 个既有链接`, legacy.project)),
         ),
 
-        Object.keys(projectEntries).length > 0 && h('div', null,
-          h('div', { style: S.title }, '工作区本地条目'),
+        Object.keys(projectEntries).length > 0 && h('div', { style: { marginBottom: 8 } },
+          h('div', { style: { ...sectionHead, margin: '6px 0 8px' } }, '工作区本地条目'),
           workspaceProjects.map((workspace) => {
             const entries = projectEntries[workspace.workspaceId]?.entries || []
             const visible = entries.filter((entry) => entry.kind !== 'managed-ok')
             if (visible.length === 0) return null
-            return h('div', { key: `${workspace.workspaceId}-entries`, style: { marginBottom: 6 } },
-              h('div', { style: { ...S.muted, marginBottom: 2 } }, workspace.title),
-              visible.map((entry) => h('div', { key: entry.name, style: S.row },
-                h('span', { style: { flex: 1 } }, `${entry.name} · ${entry.kind}`),
+            return h('div', { key: `${workspace.workspaceId}-entries`, style: { marginBottom: 8 } },
+              h('div', { style: { ...noteText, marginBottom: 4 } }, workspace.title),
+              visible.map((entry) => h('div', { key: entry.name, style: { ...subCardStyle, padding: '8px 12px', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 } },
+                h('span', { style: { flex: 1, color: T.labelPrimary } }, entry.name),
+                h('span', { style: pillBase }, entry.kind),
                 entry.kind === 'local-empty'
                   ? h(OutlineBtn, { onClick: () => claimEmpty(workspace.workspaceId, entry.name), disabled: busy }, '清理并接管')
                   : null,
@@ -1268,21 +1404,21 @@ window.__ModuleLoader__.load({
         ),
 
         matrix && h('div', null,
-          h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 } },
-            h('div', { style: S.title }, '同步矩阵'),
-            h('span', { style: S.muted }, '项目较多时可左右滚动'),
+          h('div', { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, margin: '6px 0 8px' } },
+            h('span', { style: sectionHead }, '同步矩阵'),
+            h('span', { style: noteText }, '项目较多时可左右滚动'),
           ),
           // DSR-008：列多时横向滚动，Skill 列冻结在左侧（sticky 需不透明底色）
-          h('div', { style: { overflowX: 'auto' } },
-            h('table', { style: { borderCollapse: 'separate', borderSpacing: 0, fontSize: 12, minWidth: '100%' } },
+          h('div', { style: { overflowX: 'auto', paddingBottom: 4 } },
+            h('table', { style: { borderCollapse: 'separate', borderSpacing: '0 4px', fontSize: 12, minWidth: '100%' } },
               h('thead', null, h('tr', null,
-                h('th', { style: { textAlign: 'left', padding: 4, borderBottom: `1px solid ${T.borderL1}`, color: T.labelSecondary, position: 'sticky', left: 0, background: T.bgLayer3, zIndex: 1 } }, 'skill'),
-                matrix.columns.map((column) => h('th', { key: column.key, style: { textAlign: 'left', padding: 4, borderBottom: `1px solid ${T.borderL1}`, color: T.labelSecondary, whiteSpace: 'nowrap' } }, column.label)),
+                h('th', { style: { textAlign: 'left', padding: '5px 12px', background: T.bgModulePlatform, color: T.labelSecondary, fontWeight: 400, fontSize: 11, whiteSpace: 'nowrap', position: 'sticky', left: 0, zIndex: 1, borderRadius: '8px 0 0 8px' } }, 'Skill'),
+                matrix.columns.map((column, ci) => h('th', { key: column.key, style: { textAlign: 'left', padding: '5px 12px', background: T.bgModulePlatform, color: T.labelSecondary, fontWeight: 400, fontSize: 11, whiteSpace: 'nowrap', borderRadius: ci === matrix.columns.length - 1 ? '0 8px 8px 0' : undefined } }, column.label)),
               )),
               h('tbody', null, matrix.rows.map((row) => h('tr', { key: row.dir },
-                h('td', { style: { padding: 4, borderBottom: `1px solid ${T.borderL1}`, whiteSpace: 'nowrap', position: 'sticky', left: 0, background: T.bgLayer3, zIndex: 1 } }, row.name),
-                row.cells.map((cell, index) => h('td', { key: index, style: { padding: 4, borderBottom: `1px solid ${T.borderL1}` } },
-                  h(Pill, { style: badgeStyle(cellColor(cell)) }, cell),
+                h('td', { style: { padding: '4px 12px', whiteSpace: 'nowrap', position: 'sticky', left: 0, background: T.bgLayer3, zIndex: 1, color: T.labelPrimary } }, row.name),
+                row.cells.map((cell, index) => h('td', { key: index, style: { padding: '4px 12px' } },
+                  h('span', { style: cell === '不适用' ? pillBase : { ...pillBase, ...badgeStyle(cellColor(cell)), fontWeight: 500 } }, cell),
                 )),
               ))),
             ),
@@ -1317,7 +1453,7 @@ window.__ModuleLoader__.load({
       ctx.effect(() => {
         const offSection = ctx.slots.inject('settings.section', () =>
           ctx.slots.register(
-            { name: 'settings.section', id: 'skills', order: 16, label: '技能', inject: () => ({ call }) },
+            { name: 'settings.section', id: 'skills', order: 16, label: '技能', inject: () => ({ call, workspaces }) },
             SkillsSection,
           ),
         )
