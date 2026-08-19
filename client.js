@@ -2,8 +2,8 @@
 //
 // 注册两个槽位：
 //   settings.section   id=skills  order=16  标签「技能」——管理/搜索/同步三视图；
-//                      library 返回 workshop-unconfigured 时显示未配置引导。
-//   settings.plugin.item id=skill-manager order=30 ——「本地 skill 目录」配置卡片
+//                      library 返回 skilldir-unconfigured 时显示未配置引导。
+//   settings.plugin.item id=skill-manager order=30 ——「本地 skills 目录」配置卡片
 //                      （R-22：默认为空即未配置；保存立即生效，清空回到未配置）。
 //
 // 配置卡片的数据通道：不走 ctx.settingsScope——settings 网关只对硬编码白名单
@@ -293,7 +293,7 @@ window.__ModuleLoader__.load({
         config.get()
           .then((v) => {
             if (!alive) return
-            const dir = v && typeof v.workshopDir === 'string' ? v.workshopDir : ''
+            const dir = v && typeof v.skillsDir === 'string' ? v.skillsDir : ''
             setCurrent(dir)
             setOverridden(Boolean(v && v.overridden))
             setDraft(dir)
@@ -309,7 +309,7 @@ window.__ModuleLoader__.load({
         setFailed(null)
         try {
           const v = await config.set(draft.trim())
-          const dir = v && typeof v.workshopDir === 'string' ? v.workshopDir : ''
+          const dir = v && typeof v.skillsDir === 'string' ? v.skillsDir : ''
           setCurrent(dir)
           setOverridden(Boolean(v && v.overridden))
           setDraft(dir)
@@ -329,7 +329,7 @@ window.__ModuleLoader__.load({
         setFailed(null)
         try {
           const v = await config.reset()
-          const dir = v && typeof v.workshopDir === 'string' ? v.workshopDir : ''
+          const dir = v && typeof v.skillsDir === 'string' ? v.skillsDir : ''
           setCurrent(dir)
           setOverridden(Boolean(v && v.overridden))
           setDraft(dir)
@@ -341,7 +341,7 @@ window.__ModuleLoader__.load({
       }
       // 原生目录选择：系统选择器（Host native capability）返回绝对路径；
       // 取消返回 null 不动草稿；失败提示在 footer。不用浏览器 showDirectoryPicker——
-      // File System Access API 不暴露绝对路径，而车间配置需要绝对路径。
+      // File System Access API 不暴露绝对路径，而目录配置需要绝对路径。
       const pickDirectory = async () => {
         setBusy(true)
         setFailed(null)
@@ -367,7 +367,7 @@ window.__ModuleLoader__.load({
         h('button', {
           type: 'button',
           'aria-expanded': open,
-          'aria-label': `${open ? '收起' : '展开'}: 技能车间（skill-manager）`,
+          'aria-label': `${open ? '收起' : '展开'}: 技能管理（skill-manager）`,
           onClick: () => setOpen(!open),
           style: {
             width: '100%',
@@ -386,8 +386,8 @@ window.__ModuleLoader__.load({
           },
         },
           h('span', { style: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 } },
-            h('span', { style: { fontSize: 15, fontWeight: 600, lineHeight: 1.4, color: T.labelPrimary } }, '技能车间（skill-manager）'),
-            h('span', { style: { fontSize: 13, lineHeight: 1.5, color: T.labelTertiary } }, '配置本地 skill 车间根目录（默认为空即未配置）'),
+            h('span', { style: { fontSize: 15, fontWeight: 600, lineHeight: 1.4, color: T.labelPrimary } }, '技能管理（skill-manager）'),
+            h('span', { style: { fontSize: 13, lineHeight: 1.5, color: T.labelTertiary } }, '配置本地 skills 目录（纯 skill 保存目录，默认为空即未配置）'),
           ),
           dirty
             ? h('span', { style: { flex: 'none', borderRadius: 999, padding: '1px 8px', fontSize: 11, lineHeight: '17px', fontWeight: 500, whiteSpace: 'nowrap', background: T.bgModulePlatform, color: T.labelSecondary } }, '未保存')
@@ -401,7 +401,7 @@ window.__ModuleLoader__.load({
               // 字段（对齐 ValueField 形态：label/input/hint 纵排）
               h('div', { style: { display: 'flex', flexDirection: 'column', gap: 6, padding: '12px 0' } },
                 h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
-                  h('label', { htmlFor: 'skill-manager-workshop-dir', style: { flex: 1, minWidth: 0, fontSize: 13, fontWeight: 500, lineHeight: 1.5, color: T.labelPrimary } }, '本地 skill 目录'),
+                  h('label', { htmlFor: 'skill-manager-skills-dir', style: { flex: 1, minWidth: 0, fontSize: 13, fontWeight: 500, lineHeight: 1.5, color: T.labelPrimary } }, '本地 skills 目录'),
                   overridden
                     ? h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 8 } },
                         h('span', { style: { borderRadius: 999, padding: '1px 8px', fontSize: 11, lineHeight: '17px', whiteSpace: 'nowrap', fontWeight: 500, background: T.bgModulePlatform, color: T.labelSecondary } }, '已覆盖'),
@@ -413,7 +413,7 @@ window.__ModuleLoader__.load({
                 // Input——其 wrap 自带边框/圆角，再传几何会叠成"两个框"）
                 h('div', { style: { display: 'flex', gap: 8, alignItems: 'center' } },
                   h('input', {
-                    id: 'skill-manager-workshop-dir',
+                    id: 'skill-manager-skills-dir',
                     type: 'text',
                     value: draft,
                     placeholder: '例如 E:\\Project\\Skills（默认为空 = 未配置）',
@@ -503,7 +503,7 @@ window.__ModuleLoader__.load({
           })
           .catch((e) => {
             if (!alive) return
-            if (e && e.code === 'workshop-unconfigured') setUnconfigured(true)
+            if (e && e.code === 'skilldir-unconfigured') setUnconfigured(true)
             else setError(e.message || String(e))
           })
         return () => { alive = false }
@@ -512,7 +512,7 @@ window.__ModuleLoader__.load({
       if (unconfigured) {
         return h('div', { style: S.guide },
           h('div', { style: { fontSize: 14, marginBottom: 8, color: T.labelPrimary } }, '尚未配置本地 skill 目录'),
-          h('div', null, '请到 设置 → 插件 → skill-manager 卡片 配置车间根（默认为空即未配置），配置后本页自动可用。'),
+          h('div', null, '请到 设置 → 插件 → skill-manager 卡片 配置本地 skills 目录（默认为空即未配置），配置后本页自动可用。'),
           h(OutlineBtn, { style: { marginTop: 12 }, onClick: reload }, '刷新'),
         )
       }
@@ -619,7 +619,7 @@ window.__ModuleLoader__.load({
           } else if (action === 'disable') await call('disable', { name })
           else if (action === 'enable') await call('enable', { name })
           else if (action === 'remove') {
-            if (!window.confirm(`确认删除 ${name}？（先备份到车间 distributor/backups）`)) return
+            if (!window.confirm(`确认删除 ${name}？（删除前自动备份，可在行菜单恢复）`)) return
             await call('remove', { name, keepFiles: false })
           } else if (action === 'restore') {
             const id = window.prompt('输入备份 id（备份列表见下方提示）')
@@ -776,7 +776,7 @@ window.__ModuleLoader__.load({
               h('div', { style: { flex: 1, minWidth: 0 }, title: it.description || '' },
                 h('div', { style: { fontWeight: 600, color: T.labelPrimary } }, it.name),
                 h('div', { style: noteText },
-                  `${ORIGIN_LABEL[it.origin] || it.origin} · ${it.group}${(it.targets || []).length > 0 ? ' · ' + it.targets.join(' ') : ''}${it.fingerprint ? ' · ' + it.fingerprint.slice(0, 7) : ''}`,
+                  `${ORIGIN_LABEL[it.origin] || it.origin} · ${it.group}${(it.targets || []).length > 0 ? ' · ' + it.targets.join(' ') : ''}${it.commit ? ' · ' + it.commit.slice(0, 7) : ''}`,
                 ),
               ),
               h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 } },
@@ -1039,7 +1039,7 @@ window.__ModuleLoader__.load({
         h('div', { style: { ...subCardStyle, padding: '10px 12px', marginBottom: 8, display: 'flex', gap: 8 } },
           h('span', { style: { ...dotStyle(T.success), marginTop: 5 } }),
           h('div', null,
-            h('div', { style: { fontSize: 12, color: T.labelPrimary } }, '创建本地来源锁记录，并将文件复制到技能车间。'),
+            h('div', { style: { fontSize: 12, color: T.labelPrimary } }, '登记本地来源记录，并将文件复制到本地 skills 目录。'),
             h('div', { style: { ...noteText, marginTop: 2 } }, '自动忽略 .git 与 __pycache__。'),
           ),
         ),
@@ -1402,8 +1402,8 @@ window.__ModuleLoader__.load({
     // ---------- 插件入口 ----------
     const inject = ['slots', 'connection', 'workspaces']
 
-    // 配置卡片经 connection RPC 通道读写 workshopDir（settings 网关不对
-    // 第三方命名空间开放，见文件头注释）。返回 { workshopDir, overridden }。
+    // 配置卡片经 connection RPC 通道读写 skillsDir（settings 网关不对
+    // 第三方命名空间开放，见文件头注释）。返回 { skillsDir, overridden }。
     const createConfigClient = (connection) => {
       const call = async (op, payload = {}) => {
         const r = await connection.rpc.call('/dsh-skill-manager', 'config', { op, ...payload })
@@ -1412,7 +1412,7 @@ window.__ModuleLoader__.load({
       }
       return {
         get: () => call('get'),
-        set: (workshopDir) => call('set', { workshopDir }),
+        set: (skillsDir) => call('set', { skillsDir }),
         reset: () => call('reset'),
       }
     }

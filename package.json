@@ -2,7 +2,7 @@
   "name": "dsh-skill-manager",
   "version": "0.1.0",
   "private": true,
-  "description": "DSH 设置页技能管理插件：配置本地 skill 目录（车间根）后，管理库、分组与 DSH 挂载，支持 skills.sh 搜索下载、GitHub 入库、本地导入、检查更新、备份恢复与禁用启用。",
+  "description": "DSH 设置页技能管理插件：配置本地 skills 目录（纯 skill 平铺目录）后，管理库、分组与 DSH 挂载，支持 skills.sh 搜索下载、GitHub 入库、本地导入、检查更新、备份恢复与禁用启用；状态存于 DSH storage 域。",
   "type": "module",
   "main": "index.js",
   "exports": {
@@ -18,10 +18,12 @@
   ],
   "scripts": {
     "test": "node --test test/*.test.mjs",
-    "check": "node --check index.js && node --check client.js && node --check lib/api.js && node --check lib/workshop.js && node --check lib/library.js && node --check lib/groups.js && node --check lib/state.js && node --check lib/sync.js && node --check lib/inbound.js && node --check lib/net.js && node --check lib/git.js && node --check lib/zip.js && node --check lib/fence.js && node --check lib/errors.js && node --test test/*.test.mjs"
+    "check": "node --check index.js && node --check client.js && node --check lib/api.js && node --check lib/dir.js && node --check lib/store.js && node --check lib/library.js && node --check lib/groups.js && node --check lib/state.js && node --check lib/sync.js && node --check lib/inbound.js && node --check lib/net.js && node --check lib/zip.js && node --check lib/fence.js && node --check lib/errors.js && node --test test/*.test.mjs"
   },
   "dependencies": {
-    "schemastery": "^3.18.0"
+    "schemastery": "^3.18.0",
+    "zod": "^3.25.0",
+    "@deepseek-ai/dsh-storage-domain": "0.1.0-rc.7"
   },
   "dsh": {
     "client": {
