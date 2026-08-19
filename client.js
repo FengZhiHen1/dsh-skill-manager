@@ -1241,7 +1241,8 @@ window.__ModuleLoader__.load({
         )
         const offCard = ctx.slots.inject('settings.plugin.item', () =>
           ctx.slots.register(
-            { name: 'settings.plugin.item', id: 'skill-manager', order: 30, label: '技能目录', inject: () => ({ config, workspaces }) },
+            // rc.7 起该槽为 keyed：key = 本卡片编辑的 settings 命名空间
+            { name: 'settings.plugin.item', key: 'skill-manager', order: 30, label: '技能目录', inject: () => ({ config, workspaces }) },
             SkillManagerCard,
           ),
         )
