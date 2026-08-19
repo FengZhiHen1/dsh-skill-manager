@@ -103,7 +103,7 @@ window.__ModuleLoader__.load({
     }
 
     const S = {
-      row: { display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 8px', borderBottom: `1px solid ${T.borderL1}`, fontSize: 13 },
+      row: { display: 'flex', alignItems: 'center', gap: '8px', padding: '9px 12px', border: `1px solid ${T.borderL1}`, borderRadius: 12, marginBottom: 8, fontSize: 13 },
       select: { padding: '4px 8px', borderRadius: 6, border: `1px solid ${T.borderL1}`, background: T.bgBase, color: T.labelPrimary, fontSize: 12 },
       panel: { padding: '10px 12px' },
       title: { fontSize: 13, fontWeight: 600, margin: '8px 0 6px', color: T.labelPrimary },
@@ -545,6 +545,7 @@ window.__ModuleLoader__.load({
       const [notice, setNotice] = useState(null)
       const [pendingUpdate, setPendingUpdate] = useState(null)
       const [menuFor, setMenuFor] = useState(null)
+      const [createOpen, setCreateOpen] = useState(false)
 
       // data.lib 变化（含全局刷新后）按当前筛选重新拉取，保留 origin/group/q 过滤条件
       useEffect(() => { refresh() }, [data.lib])
@@ -662,6 +663,15 @@ window.__ModuleLoader__.load({
         }
       }
 
+      // DSR-009：新建成功后跳到新组，便于立即配置它的使用范围；失败抛回对话框内联显示
+      const createGroup = async (name) => {
+        await call('groups/op', { action: 'create', name })
+        setCreateOpen(false)
+        setGroupFilter(name)
+        setNotice(`已创建分组「${name}」`)
+        reload()
+      }
+
       return h('div', { style: S.panel },
         // 分组优先：先选择当前组并配置它的全局/工作区使用范围，再浏览技能库。
         h('div', { style: { marginBottom: 10 } },
@@ -669,12 +679,10 @@ window.__ModuleLoader__.load({
           h('div', { style: { display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginBottom: 7 } },
             h(Pill, { active: groupFilter === '', onClick: () => setGroupFilter('') }, `全部 · ${data.lib.skills.length}`),
             h(Pill, { active: groupFilter === '默认', onClick: () => setGroupFilter('默认') }, `默认 · ${countForGroup('默认')}`),
-            data.grp.groups.map((group) => h('span', { key: group.name, style: { display: 'inline-flex', alignItems: 'center', gap: 2 } },
-              h(Pill, { active: groupFilter === group.name, onClick: () => setGroupFilter(group.name) }, `${group.name} · ${group.count}`),
-              h(GhostBtn, { onClick: () => groupOp('rename', group.name, window.prompt('新组名', group.name)), disabled: busy }, '改名'),
-              h(GhostBtn, { onClick: () => groupOp('delete', group.name), disabled: busy, style: S.dangerText }, '删'),
-            )),
-            h(GroupCreate, { call, reload }),
+            data.grp.groups.map((group) =>
+              h(Pill, { key: group.name, active: groupFilter === group.name, onClick: () => setGroupFilter(group.name) }, `${group.name} · ${group.count}`)),
+            // DSR-009：胶囊行只保留新建入口；改名/删除收进「当前分组」卡片
+            h(Pill, { active: false, onClick: () => setCreateOpen(true) }, '＋ 新建分组'),
           ),
           groupFilter === ''
             ? h('div', { style: { ...S.muted, padding: '8px 0' } }, '当前查看全部技能。选择一个分组后可配置它的全局和 DSH 工作区使用范围。')
@@ -686,6 +694,7 @@ window.__ModuleLoader__.load({
                 busy,
                 onError: setError,
                 onChanged: reload,
+                onGroupOp: groupOp,
               }),
         ),
         // 同步健康提示（对齐 01 帧）：有问题时给出去往「同步」页的入口
@@ -695,17 +704,18 @@ window.__ModuleLoader__.load({
         ),
         h('div', { style: { display: 'flex', alignItems: 'baseline', gap: 8 } },
           h('div', { style: S.title }, '技能库'),
+          h('span', { style: S.muted }, `${groupFilter === '' ? '全部' : groupFilter} · ${list.length} 个`),
           data.lib.checkedAt ? h('span', { style: S.muted }, `上游状态检查于 ${fmtCheckedAt(data.lib.checkedAt)}`) : null,
         ),
-        // 工具条
+        // 工具条（对齐 01/07 帧：搜索在前，来源筛选其后，操作靠右）
         h('div', { style: S.toolbar },
+          h(Input, { style: { flex: 1, minWidth: 140 }, placeholder: '搜索名称 / 描述…', value: q, onChange: (e) => setQ(e.target.value) }),
           h('select', { style: S.select, value: origin, onChange: (e) => setOrigin(e.target.value) },
             h('option', { value: '' }, '全部来源'),
             h('option', { value: 'github' }, 'GitHub'),
             h('option', { value: 'local' }, '本地'),
             h('option', { value: 'self' }, '自研'),
           ),
-          h(Input, { style: { width: 140 }, placeholder: '过滤名称/描述', value: q, onChange: (e) => setQ(e.target.value) }),
           h(GhostBtn, { onClick: refreshAll, disabled: busy, title: '重新扫描列表并检查全部上游状态' }, '↻ 刷新'),
           h(OutlineBtn, { onClick: () => setImportOpen(!importOpen), disabled: busy }, '导入 skill'),
         ),
@@ -752,6 +762,10 @@ window.__ModuleLoader__.load({
                 onClose: () => setMenuFor(null),
               }),
             )),
+        createOpen && h(CreateGroupDialog, {
+          onCancel: () => setCreateOpen(false),
+          onCreate: createGroup,
+        }),
         pendingUpdate && h(UpdateConfirmationDialog, {
           name: pendingUpdate.name,
           detail: pendingUpdate.detail,
@@ -766,34 +780,74 @@ window.__ModuleLoader__.load({
       )
     }
 
-    function GroupCreate({ call, reload }) {
+    /** DSR-009：新建分组走模态对话框（与更新确认同一遮罩语言）；新组复制「默认」组挂载规则起步。 */
+    function CreateGroupDialog({ onCancel, onCreate }) {
       const [name, setName] = useState('')
-      const [busy, setBusy] = useState(false)
       const [error, setError] = useState(null)
-      const create = async () => {
-        if (!name.trim()) return
+      const [busy, setBusy] = useState(false)
+      const submit = async () => {
+        const trimmed = name.trim()
+        if (!trimmed) {
+          setError('请输入组名')
+          return
+        }
         setBusy(true)
         setError(null)
         try {
-          await call('groups/op', { action: 'create', name: name.trim() })
-          setName('')
-          reload()
+          await onCreate(trimmed)
         } catch (e) {
           setError(e.message || String(e))
-        } finally {
           setBusy(false)
         }
       }
-      return h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 4 } },
-        h(Input, { style: { width: 90 }, placeholder: '新组名', value: name, onChange: (e) => setName(e.target.value) }),
-        h(OutlineBtn, { onClick: create, disabled: busy }, '新建组'),
-        h(ErrorLine, { error }),
+      return h('div', {
+        role: 'presentation',
+        style: {
+          position: 'fixed', inset: 0, zIndex: 1000,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: 'rgba(15, 17, 21, .42)', padding: 20,
+        },
+        onClick: onCancel,
+      },
+        h('div', {
+          role: 'dialog',
+          'aria-modal': true,
+          'aria-labelledby': 'skill-manager-create-group-title',
+          style: {
+            width: 'min(400px, 100%)', borderRadius: 16, padding: 20,
+            border: `1px solid ${T.borderL2}`, background: T.bgLayer3, color: T.labelPrimary,
+            boxShadow: '0 18px 48px rgba(0,0,0,.28)',
+          },
+          onClick: (e) => e.stopPropagation(),
+        },
+          h('div', { id: 'skill-manager-create-group-title', style: { fontSize: 16, fontWeight: 600, marginBottom: 8 } }, '新建分组'),
+          h('div', { style: { color: T.labelSecondary, fontSize: 13, lineHeight: 1.55, marginBottom: 12 } }, '创建命名分组，按主题组织 Skill 并配置其可用范围。'),
+          h('div', { style: { fontSize: 12, fontWeight: 500, marginBottom: 6 } }, '组名'),
+          h(Input, {
+            value: name,
+            autoFocus: true,
+            placeholder: '新组名',
+            onChange: (e) => setName(e.target.value),
+            onKeyDown: (e) => {
+              if (e.key === 'Enter') submit()
+              if (e.key === 'Escape') onCancel()
+            },
+          }),
+          error ? h('div', { style: { fontSize: 12, color: T.error, marginTop: 6 } }, error) : null,
+          h('div', { style: { fontSize: 11, color: T.labelSecondary, marginTop: 8 } }, '新组复制「默认」组的挂载规则作为起步；组名 1–30 字符。'),
+          h('div', { style: { display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 } },
+            h(OutlineBtn, { onClick: onCancel, disabled: busy }, '取消'),
+            h(Button, { size: 'sm', onClick: submit, disabled: busy }, busy ? '新建中…' : '新建'),
+          ),
+        ),
       )
     }
 
     /** 当前分组的使用范围：只对 DSH 全局与 Host 返回的活动工作区写挂载规则。 */
-    function GroupScopePanel({ call, group, mounts, workspaceProjects, busy, onError, onChanged }) {
+    function GroupScopePanel({ call, group, mounts, workspaceProjects, busy, onError, onChanged, onGroupOp }) {
       const [scopeBusy, setScopeBusy] = useState(false)
+      const [renaming, setRenaming] = useState(false)
+      const [newName, setNewName] = useState('')
       const disabled = busy || scopeBusy
       const enabled = (scope, workspaceId) => mounts.some((mount) => (
         mount.group === group
@@ -819,8 +873,36 @@ window.__ModuleLoader__.load({
           setScopeBusy(false)
         }
       }
+      // DSR-009：改名/删除入口收进当前分组卡片；「默认」是虚拟组，不可管理
+      const manageable = group !== '默认'
+      const submitRename = () => {
+        const trimmed = newName.trim()
+        setRenaming(false)
+        if (trimmed && trimmed !== group) onGroupOp('rename', group, trimmed)
+      }
       return h('div', { style: { border: `1px solid ${T.borderL1}`, borderRadius: 10, padding: '9px 10px', background: T.bgLayer2 } },
-        h('div', { style: { fontSize: 12, fontWeight: 600, color: T.labelPrimary, marginBottom: 7 } }, `当前分组：${group}`),
+        renaming
+          ? h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 } },
+              h(Input, {
+                style: { width: 160 },
+                value: newName,
+                autoFocus: true,
+                onChange: (e) => setNewName(e.target.value),
+                onKeyDown: (e) => {
+                  if (e.key === 'Enter') submitRename()
+                  if (e.key === 'Escape') setRenaming(false)
+                },
+              }),
+              h(Button, { size: 'sm', onClick: submitRename, disabled }, '保存'),
+              h(GhostBtn, { onClick: () => setRenaming(false) }, '取消'),
+            )
+          : h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 7 } },
+              h('span', { style: { fontSize: 12, fontWeight: 600, color: T.labelPrimary } }, `当前分组：${group}`),
+              manageable && h('span', { style: { flex: 1 } }),
+              manageable && h(GhostBtn, { onClick: () => { setNewName(group); setRenaming(true) }, disabled }, '改名'),
+              manageable && h(GhostBtn, { onClick: () => onGroupOp('delete', group), disabled, style: S.dangerText }, '删除'),
+            ),
+        renaming && h('div', { style: { ...S.muted, marginBottom: 7, fontSize: 11 } }, '改名立即生效：分组成员与挂载规则同步改名，Skill 本体不受影响。'),
         h('label', { style: { display: 'flex', alignItems: 'center', gap: 7, marginBottom: workspaceProjects.length ? 6 : 0, fontSize: 12, color: T.labelSecondary, cursor: disabled ? 'default' : 'pointer' } },
           h('input', {
             type: 'checkbox',
