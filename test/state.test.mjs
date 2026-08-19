@@ -39,6 +39,27 @@ test('loadState/saveState：投影往返（projects/mounts/synced）', async () 
   assert.equal(globalRec.method, 'junction')
 })
 
+test('parseSyncedKey 桥接：project 作用域工作区 id 恰为 global 时不被误还原', async () => {
+  const store = fakeStore()
+  const state = {
+    projects: { global: 'E:/proj' },
+    mounts: [],
+    synced: {
+      pdf: [
+        { app: 'dsh', scope: 'project', project: 'global', method: 'junction', dir: 'E:/proj/.dsh/skills/pdf', at: 't1' },
+      ],
+    },
+    proxy: null,
+  }
+  await saveState(store, state)
+  const back = await loadState(store)
+  assert.equal(back.synced.pdf.length, 1)
+  const rec = back.synced.pdf[0]
+  assert.equal(rec.scope, 'project')
+  assert.equal(rec.project, 'global') // 真实工作区 id，不被当作 global 哨兵
+  assert.equal(rec.method, 'junction')
+})
+
 test('loadState：空域按空骨架', async () => {
   const state = await loadState(fakeStore())
   assert.deepEqual(state, { projects: {}, mounts: [], synced: {}, proxy: null })
