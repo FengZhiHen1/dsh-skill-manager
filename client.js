@@ -6,6 +6,10 @@
 //   settings.plugin.item key=skill-manager ——「本地 skills 目录」配置卡片
 //                      （R-22：默认为空即未配置；保存立即生效，清空回到未配置）。
 //
+// 另含设置导航图标补丁：宿主外壳按 section id 硬编码图标且未开放注册，
+// 「技能」默认齿轮与「通用」撞图标，客户端就地改写为 ✦ 星形（详见下方
+// 「设置导航图标」一节；宿主 DOM 变化时静默回退，不影响功能）。
+//
 // 配置卡片的数据通道：rc.7 起 settings 网关注册即暴露（settings-not-exposed
 // 白名单已移除），卡片经标准 ctx.settingsScope（settings.describe/mutate）
 // 直读直写 skill-manager 命名空间；不再需要自定义 connection RPC 通道
@@ -1410,6 +1414,43 @@ window.__ModuleLoader__.load({
       )
     }
 
+    // ---------- 设置导航图标（✦ 星形） ----------
+    // 宿主设置外壳按 section id 硬编码导航图标，未登记的 id（含本插件 skills）
+    // 一律落到默认齿轮，与「通用」和侧栏设置按钮撞图标；rc.7 注册项没有
+    // icon 字段，无法经官方接口指定。这里在客户端找到本插件导航行，把齿轮
+    // svg 就地改写为 ✦ 星形（对齐设计稿 skill-manager-management.op 导航行
+    // 的 ✦ 符号）。保留 svg 节点本身（React 持有其引用），仅改写子节点；
+    // 宿主 DOM 结构变化导致找不到目标时静默保持原图标，不影响任何功能。
+    const NAV_STAR_PATH = 'M8 1.6 L9.85 6.15 L14.4 8 L9.85 9.85 L8 14.4 L6.15 9.85 L1.6 8 L6.15 6.15 Z'
+
+    const patchSkillsNavIcon = () => {
+      for (const label of document.querySelectorAll('span[class*="navLabel"]')) {
+        if (label.textContent !== '技能') continue
+        const cell = label.closest('button')
+        const svg = cell ? cell.querySelector('svg') : null
+        if (!svg) continue
+        // 已是星形则跳过（React 重渲染还原内容时会自动重新改写）
+        const first = svg.firstElementChild
+        if (first && first.tagName === 'path' && first.getAttribute('d') === NAV_STAR_PATH) continue
+        while (svg.firstChild) svg.removeChild(svg.firstChild)
+        const path = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+        path.setAttribute('d', NAV_STAR_PATH)
+        path.setAttribute('fill', 'currentColor')
+        svg.appendChild(path)
+      }
+    }
+
+    // 设置面板为模态挂载，导航行随面板开关反复出现，用 MutationObserver 跟随
+    // （仅在有新节点挂载时扫描，避免聊天流式文本等纯文本变更触发无谓查询）
+    const observeSkillsNavIcon = () => {
+      patchSkillsNavIcon()
+      const observer = new MutationObserver((mutations) => {
+        if (mutations.some((m) => m.addedNodes.length > 0)) patchSkillsNavIcon()
+      })
+      observer.observe(document.body, { childList: true, subtree: true })
+      return () => observer.disconnect()
+    }
+
     // ---------- 插件入口 ----------
     // rc.7 官方配置面：设置卡片经 ctx.settingsScope 直读直写 skill-manager
     // 命名空间（settings 域 wire），不再需要自定义 connection RPC 通道。
@@ -1434,7 +1475,8 @@ window.__ModuleLoader__.load({
             SkillManagerCard,
           ),
         )
-        return () => { offSection(); offCard() }
+        const offNavIcon = observeSkillsNavIcon()
+        return () => { offSection(); offCard(); offNavIcon() }
       }, 'dsh-skill-manager: settings slots')
     }
 
