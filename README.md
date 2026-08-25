@@ -9,7 +9,7 @@ DSH 设置页技能管理插件：在设置「插件」区配置「本地 skills
 - **目录配置**（R-22）：设置 → 插件 → skill-manager 卡片，单字段「本地 skills 目录」，默认空串 = 未配置；保存立即生效，无需重启。未配置时所有管理操作返回 `skilldir-unconfigured`；配置的目录缺失时返回 `skilldir-missing`（插件保持存活）。
 - **库管理**：扫描配置目录直接子目录（frontmatter、来源 self/github/local、上游 commit、所属组、缺失/禁用状态），分组创建/重命名/删除/换组，本地导入目录或 .zip。
 - **获取**：skills.sh 搜索、GitHub 仓库探测（Trees API → zipball 回退）、入库（分支 branch → main → master 回退）、检查三态、更新（上游路径失效报候选，不静默回退；本地修改需显式确认）。
-- **挂载**：分组挂载到 dsh 全局根 `~/.dsh/skills` 与当前 DSH 工作区 `.dsh/skills`，junction 优先/copy 回退；对账、健康检查、孤儿清扫（只清理指向本配置目录的链接）、项目级既有条目五类分类与遮蔽语义。
+- **挂载**：分组挂载到 dsh 全局根 `$DSH_HOME/skills`（Host `dshHomePath` 解析，默认 `~/.dsh/skills`）与当前 DSH 工作区 `.dsh/skills`，junction 优先/copy 回退；对账、健康检查、孤儿清扫（只清理指向本配置目录的链接）、项目级既有条目五类分类与遮蔽语义。
 - **维护**：出库（备份到 `$DSH_HOME/skill-manager/backups/`）、恢复、禁用/启用（标记位，目录原地不动）。
 
 ## 模块布局
@@ -46,5 +46,5 @@ npm run check     # 语法检查 + 单测
 ## 部署
 
 - **test（试验）profile**：`link:` 依赖 + 用户层 insert 行（见 `~/.dsh/profiles/test/` 的 package.json 与 cordis.patch.yml），源码改动重启即生效；新增依赖需在 profile 执行 `pnpm install`（自定义 store 见仓库 AGENTS.md）。
-- **web（稳定）profile**：按 `docs/design/dsh-skill-manager/technical-details/plugin-runtime.md` 部署步骤——复制包到 profile、`file:` 依赖、insert 行、`pnpm install`、重启。禁止 bundle 层与 insert 行同时挂载（duplicate loader entry id）。
+- **web（稳定）profile**：`dsh plugin --profile web add github:FengZhiHen1/dsh-skill-manager#<commit>`（钉 commit；当前挂载见 `~/.dsh/profiles/web/package.json`）。仓库红线禁止 `file:`/`link:` 直挂 web，也禁止 bundle 层与 insert 行同时挂载（duplicate loader entry id）；发布/换钉前必须先过 test 实测门禁（仓库 AGENTS.md §插件加载规则）。
 - 首次使用：设置 → 插件 → skill-manager 卡片 配置本地 skills 目录（如 `E:\Project\Skills\skills`），配置后技能页自动可用。

@@ -72,6 +72,9 @@ export default {
 
     // 备份树根（$DSH_HOME/skill-manager/backups/）。
     const backupsRoot = ctx.dshHomePath('skill-manager', 'backups')
+    // DSH 全局 skill 根（$DSH_HOME/skills）：与 dsh-skill-filesystem 的
+    // resolveDshHome 同源，不再由 homedir 硬编码推导（mount-sync.md）。
+    const globalRootPath = ctx.dshHomePath('skills')
 
     const queue = createQueue()
     const trustedHosts = trustedHostsOf(ctx)
@@ -81,6 +84,7 @@ export default {
       listWorkspaces: () => ctx.workspaceRegistry.list(),
       getStore,
       backupsRoot,
+      globalRoot: globalRootPath,
     })
 
     ctx.effect(() => ctx.webServer.register({

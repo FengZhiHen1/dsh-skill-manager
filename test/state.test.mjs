@@ -3,6 +3,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { join } from 'node:path'
+import { homedir } from 'node:os'
 import {
   loadState, saveState, ensureSeedMounts, loadCheckCache, saveCheckCache,
   normalizeWorkspaceProjects, mirrorWorkspaceProjects, validateMountShape,
@@ -186,6 +187,9 @@ test('addMount/removeMount：重复与不存在', () => {
 
 test('globalRoot/projectRootOf：路径事实', () => {
   assert.match(globalRoot(), /\.dsh[/\\]skills$/)
+  // 注入 DSH home 时以其为准（与 dsh-skill-filesystem 的 resolveDshHome 对齐）
+  assert.equal(globalRoot('D:/dsh-home'), join('D:/dsh-home', 'skills'))
+  assert.equal(globalRoot(''), join(homedir(), '.dsh', 'skills'))
   const state = { projects: { w1: 'E:/repo' }, mounts: [], synced: {}, proxy: null }
   assert.equal(projectRootOf(state, 'w1'), join('E:/repo', '.dsh', 'skills'))
   assert.equal(projectRootOf(state, 'gone'), undefined)

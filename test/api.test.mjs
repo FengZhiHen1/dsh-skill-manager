@@ -1,4 +1,5 @@
 // HTTP API 传输层与编排（plugin-runtime.md）：信封、单飞队列、未配置门禁、方法语义。
+// 触发对账的用例一律注入临时 globalRoot，真实用户根（~/.dsh/skills）不被测试触碰。
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -22,12 +23,13 @@ function fakeRes() {
   }
 }
 
-function makeApi({ root = '', workspaces = [], store = fakeStore(), backupsRoot = '' } = {}) {
+function makeApi({ root = '', workspaces = [], store = fakeStore(), backupsRoot = '', globalRoot } = {}) {
   return {
     api: buildApi(() => fakeScope(root), {
       listWorkspaces: () => workspaces,
       getStore: () => store,
       backupsRoot,
+      globalRoot,
     }),
     store,
   }
@@ -131,9 +133,10 @@ test('library：origin/group/q 过滤与缓存下发', async () => {
 
 test('groups/op：create 复制默认组挂载；rename 迁移挂载；delete 清规则；move 换组', async () => {
   const root = await mkTmp()
+  const groot = await mkTmp()
   try {
     await writeSkill(root, 'pdf')
-    const { api, store } = makeApi({ root })
+    const { api, store } = makeApi({ root, globalRoot: groot })
     await api.library({}) // 触发种子 + self 登记
     const created = await api['groups/op']({ action: 'create', name: '办公' })
     assert.deepEqual(created.groups, [{ name: '办公', count: 0 }])
@@ -141,6 +144,8 @@ test('groups/op：create 复制默认组挂载；rename 迁移挂载；delete �
       store.mountEntries().map(([, m]) => m.group).sort(),
       ['办公', '默认'],
     )
+    // 种子挂载（默认组 → dsh 全局）经对账物化到注入的临时全局根
+    assert.ok(await isLink(join(groot, 'pdf')))
     await api['groups/op']({ action: 'move', dir: 'pdf', group: '办公' })
     assert.equal(store.getSkill('pdf').group, '办公')
     await api['groups/op']({ action: 'rename', name: '办公', newName: '文档' })
@@ -153,20 +158,24 @@ test('groups/op：create 复制默认组挂载；rename 迁移挂载；delete �
     await assertRejectsCode(api['groups/op']({ action: 'wat' }), 'bad-request')
   } finally {
     await cleanup(root)
+    await cleanup(groot)
   }
 })
 
 test('mounts：项目级挂载校验 + reconcile 物化到工作区', async () => {
   const root = await mkTmp()
   const proj = await mkTmp()
+  const groot = await mkTmp()
   try {
     await writeSkill(root, 'pdf')
     const workspaces = [{ id: 'w1', path: proj, title: '项目' }]
-    const { api } = makeApi({ root, workspaces })
+    const { api } = makeApi({ root, workspaces, globalRoot: groot })
     await assertRejectsCode(api.mounts({ action: 'add', group: '默认', scope: 'project', workspaceId: 'gone' }), 'workspace-not-found')
     const r = await api.mounts({ action: 'add', group: '默认', scope: 'project', workspaceId: 'w1' })
     assert.equal(r.sync.errors.length, 0)
     assert.ok(await isLink(join(proj, '.dsh', 'skills', 'pdf')))
+    // 种子挂载同时物化到注入的临时全局根
+    assert.ok(await isLink(join(groot, 'pdf')))
     await assertRejectsCode(api.mounts({ action: 'add', group: '默认', scope: 'project', workspaceId: 'w1' }), 'mount-exists')
     const r2 = await api.mounts({ action: 'remove', group: '默认', scope: 'project', workspaceId: 'w1' })
     assert.equal(r2.sync.errors.length, 0)
@@ -174,16 +183,18 @@ test('mounts：项目级挂载校验 + reconcile 物化到工作区', async () =
   } finally {
     await cleanup(root)
     await cleanup(proj)
+    await cleanup(groot)
   }
 })
 
 test('disable/enable：禁用退出期望集，启用重新物化', async () => {
   const root = await mkTmp()
   const proj = await mkTmp()
+  const groot = await mkTmp()
   try {
     await writeSkill(root, 'pdf')
     const workspaces = [{ id: 'w1', path: proj, title: '项目' }]
-    const { api } = makeApi({ root, workspaces })
+    const { api } = makeApi({ root, workspaces, globalRoot: groot })
     await api.mounts({ action: 'add', group: '默认', scope: 'project', workspaceId: 'w1' })
     assert.ok(await isLink(join(proj, '.dsh', 'skills', 'pdf')))
     await api.disable({ name: 'pdf' })
@@ -195,16 +206,18 @@ test('disable/enable：禁用退出期望集，启用重新物化', async () => 
   } finally {
     await cleanup(root)
     await cleanup(proj)
+    await cleanup(groot)
   }
 })
 
 test('claim-empty：空目录现场清理并接管', async () => {
   const root = await mkTmp()
   const proj = await mkTmp()
+  const groot = await mkTmp()
   try {
     await writeSkill(root, 'pdf')
     const workspaces = [{ id: 'w1', path: proj, title: '项目' }]
-    const { api } = makeApi({ root, workspaces })
+    const { api } = makeApi({ root, workspaces, globalRoot: groot })
     await mkdir(join(proj, '.dsh', 'skills', 'pdf'), { recursive: true }) // 空目录现场
     await api.mounts({ action: 'add', group: '默认', scope: 'project', workspaceId: 'w1' })
     // 现场仍在（target-exists 不自动接管）
@@ -217,16 +230,18 @@ test('claim-empty：空目录现场清理并接管', async () => {
   } finally {
     await cleanup(root)
     await cleanup(proj)
+    await cleanup(groot)
   }
 })
 
 test('health 与 workspace-projects 方法端到端', async () => {
   const root = await mkTmp()
   const proj = await mkTmp()
+  const groot = await mkTmp()
   try {
     await writeSkill(root, 'pdf')
     const workspaces = [{ id: 'w1', path: proj, title: '项目' }]
-    const { api } = makeApi({ root, workspaces })
+    const { api } = makeApi({ root, workspaces, globalRoot: groot })
     await api.library({})
     const wp = await api['workspace-projects']({})
     assert.equal(wp.workspaceProjects.length, 1)
@@ -241,6 +256,7 @@ test('health 与 workspace-projects 方法端到端', async () => {
   } finally {
     await cleanup(root)
     await cleanup(proj)
+    await cleanup(groot)
   }
 })
 
