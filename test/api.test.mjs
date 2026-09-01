@@ -1,4 +1,4 @@
-// HTTP API 传输层与编排（plugin-runtime.md）：信封、队列、未配置门禁、
+// HTTP API 传输层与编排（插件运行时.md）：信封、队列、未配置门禁、
 // 配置意图驱动的只读视图与对账（意图在 settings，方法只读/文件/网络）。
 
 import test from 'node:test'

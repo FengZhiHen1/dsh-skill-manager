@@ -1,4 +1,4 @@
-// 挂载状态投影、工作区镜像（mount-sync.md；storage-model.md）。
+// 挂载状态投影、工作区镜像（挂载与同步.md；目录配置与状态存储.md）。
 // 挂载规则不再入 storage（意图在配置），mounts 仅以参数参与统计。
 
 import test from 'node:test'

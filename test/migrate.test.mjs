@@ -1,4 +1,4 @@
-// 旧 storage 意图一次性迁移（plugin-runtime.md「迁移」）：groups/mounts/
+// 旧 storage 意图一次性迁移（插件运行时.md「迁移」）：groups/mounts/
 // skills 意图 → settings；self 不迁移；幂等（intentMigrated）。
 
 import test from 'node:test'

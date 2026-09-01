@@ -1,4 +1,4 @@
-// 配置命名空间与目录门禁（requirements.md R-22；plugin-runtime.md「配置即意图」）。
+// 配置命名空间与目录门禁（需求.md R-22；插件运行时.md「配置即意图」）。
 
 import test from 'node:test'
 import assert from 'node:assert/strict'

@@ -1,4 +1,4 @@
-// Host 入口装配（plugin-runtime.md）：硬依赖声明与模块形态。
+// Host 入口装配（插件运行时.md）：硬依赖声明与模块形态。
 
 import test from 'node:test'
 import assert from 'node:assert/strict'

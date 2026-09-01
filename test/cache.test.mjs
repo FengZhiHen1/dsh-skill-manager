@@ -1,4 +1,4 @@
-// 低延迟路径（plugin-runtime.md「低延迟路径」）：bundle 缓存一致性、overview
+// 低延迟路径（插件运行时.md「低延迟路径」）：bundle 缓存一致性、overview
 // 聚合、meta 缓存复用、哈希门面、队列 busy/idle 语义。
 
 import test from 'node:test'

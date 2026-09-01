@@ -11,7 +11,7 @@
 
 ## 最终决定
 
-采用方向 A。共享文件形状与写入规则由 [storage-model.md](../technical-details/storage-model.md)（原 workshop-files.md，后更名）统一；原子写加进程内单飞队列缓解并发，不追求严格跨进程锁。
+采用方向 A。共享文件形状与写入规则由 [目录配置与状态存储.md](../technical-details/目录配置与状态存储.md)（原 workshop-files.md，后更名）统一；原子写加进程内单飞队列缓解并发，不追求严格跨进程锁。
 
 ## 直接后果
 

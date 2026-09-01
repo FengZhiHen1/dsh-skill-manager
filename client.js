@@ -1,4 +1,4 @@
-// dsh-skill-manager — Client 侧（plugin-runtime.md Client 入口与视图设计）。
+// dsh-skill-manager — Client 侧（插件运行时.md Client 入口与视图设计）。
 //
 // 注册两个槽位：
 //   settings.section   id=skills  order=16  标签「技能」——管理/搜索/同步三视图；

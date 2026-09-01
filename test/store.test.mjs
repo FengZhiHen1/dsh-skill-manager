@@ -1,4 +1,4 @@
-// storage 域 spec 与门面（storage-model.md）：五表投影 + 旧七表迁移 spec。
+// storage 域 spec 与门面（目录配置与状态存储.md）：五表投影 + 旧七表迁移 spec。
 
 import test from 'node:test'
 import assert from 'node:assert/strict'

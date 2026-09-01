@@ -33,7 +33,7 @@ lib/inbound.js  搜索/探测/入库/检查（repo 级去重）/更新/导入/�
 lib/api.js      HTTP 信封、三路队列、只读视图与文件/网络操作
 ```
 
-低延迟路径：配置渲染永不等待网络（settings mirror 页面启动即加载）；读请求走进程内 bundle 缓存快照（缓存热时零扫描）；写操作串行并在收尾预热缓存；网络慢操作独立队列不阻塞读写；技能页单请求 `overview` 出只读视图。详见 `docs/technical-details/plugin-runtime.md`。
+低延迟路径：配置渲染永不等待网络（settings mirror 页面启动即加载）；读请求走进程内 bundle 缓存快照（缓存热时零扫描）；写操作串行并在收尾预热缓存；网络慢操作独立队列不阻塞读写；技能页单请求 `overview` 出只读视图。详见 `docs/technical-details/插件运行时.md`。
 
 ## 开发
 

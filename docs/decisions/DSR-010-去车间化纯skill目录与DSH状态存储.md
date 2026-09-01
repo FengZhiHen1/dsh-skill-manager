@@ -23,7 +23,7 @@
 
 ## 直接后果
 
-- `technical-details/workshop-files.md` 就地重写为「目录与状态存储」；`requirements.md`、`inbound-operations.md`、`mount-sync.md`、`plugin-runtime.md` 同步重写受影响条目。
+- `technical-details/workshop-files.md` 就地重写为「目录与状态存储」；`需求.md`、`入站操作.md`、`挂载与同步.md`、`插件运行时.md` 同步重写受影响条目。
 - Host：`lib/git.js` 删除；`lib/workshop.js` 瘦身为目录门禁；新增 storage 层；`state.js`/`groups.js`/`inbound.js`/`sync.js`/`library.js` 改读写域。
 - 部署：test profile 需 `pnpm add @deepseek-ai/dsh-storage-domain zod` 后生效。
 

@@ -12,12 +12,12 @@
 
 ## 最终决定
 
-采用方向 A。以 `distributor/cli/distributor/core/` 为参考基线，Node 模块按既定的 `lib/` 模块边界重写（模块边界规范当时归 `project-structure.md`，现于本仓库 `docs/project-structure.md` 以 DSR-015 目标形态续存）；运行时不调用 Python。
+采用方向 A。以 `distributor/cli/distributor/core/` 为参考基线，Node 模块按既定的 `lib/` 模块边界重写（模块边界规范当时归 `项目结构设计.md`，现于本仓库 `docs/项目结构设计.md` 以 DSR-015 目标形态续存）；运行时不调用 Python。
 
 ## 直接后果
 
 - 关键语义必须与参考实现逐项对齐：目录哈希、三态检查、zipball 定位、对账安全边界、备份元数据。
-- 本仓库需要实现阶段补充对齐测试，覆盖 [inbound-operations.md](../technical-details/inbound-operations.md) 与 [mount-sync.md](../technical-details/mount-sync.md) 的失败表。
+- 本仓库需要实现阶段补充对齐测试，覆盖 [入站操作.md](../technical-details/入站操作.md) 与 [挂载与同步.md](../technical-details/挂载与同步.md) 的失败表。
 - Python 侧修复不会自动流入 Node 实现，需要人工同步。
 
 ## 重访条件

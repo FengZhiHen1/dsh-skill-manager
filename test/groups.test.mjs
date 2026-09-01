@@ -1,4 +1,4 @@
-// 分组（plugin-runtime.md「配置即意图」）：组集合/成员来自配置的纯推导。
+// 分组（插件运行时.md「配置即意图」）：组集合/成员来自配置的纯推导。
 
 import test from 'node:test'
 import assert from 'node:assert/strict'

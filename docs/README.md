@@ -9,13 +9,13 @@
 - 设计基线已经用户确认；DSR-001~DSR-013 全部落地到 `plugins/dsh-skill-manager/` 源码。
 - 单元测试 88 项全绿（`node --test test/*.test.mjs`，2026-09-01 实测）。
 - 部署（DSR-012）：test profile 经 `link:` 源码直挂；web profile 经 `github:FengZhiHen1/dsh-skill-manager` git 依赖挂载。
-- 2026-09-01 新增已确认决策（design-spec-workshop）：DSR-014（传输层迁到官方 `connection.rpc` 通道）、DSR-015（core/adapter 分层与模块领域重划）、DSR-016（Client 引入 esbuild 构建）。**代码实施待执行**；实施完成前 `project-structure.md`、`plugin-runtime.md`、`technology-stack.md` 描述目标形态，与源码现状（扁平 `lib/`、自建 `/skill-manager/api` 路由、单文件 `client.js`）存在有意的文档-代码窗口，实施项登记于 `TODO.md`。
-- 待验证项（未实测）：真实 DSH GUI 的客户端模块重建/遮罩交互、工作区镜像迁移与项目级链接的 test-profile 集成冒烟、skills.sh 匿名搜索——清单见 `requirements.md` 的 missing evidence。
+- 2026-09-01 新增已确认决策（design-spec-workshop）：DSR-014（传输层迁到官方 `connection.rpc` 通道）、DSR-015（core/adapter 分层与模块领域重划）、DSR-016（Client 引入 esbuild 构建）。**代码实施待执行**；实施完成前 `项目结构设计.md`、`插件运行时.md`、`技术栈设计.md` 描述目标形态，与源码现状（扁平 `lib/`、自建 `/skill-manager/api` 路由、单文件 `client.js`）存在有意的文档-代码窗口，实施项登记于 `TODO.md`。
+- 待验证项（未实测）：真实 DSH GUI 的客户端模块重建/遮罩交互、工作区镜像迁移与项目级链接的 test-profile 集成冒烟、skills.sh 匿名搜索——清单见 `需求.md` 的 missing evidence。
 - 待办与未决事项（DSR-014/015/016 实施、web 重挂等）登记于 `TODO.md`。
 
 ## 阅读顺序
 
-1. `requirements.md`：先确认范围、约束与验收。
+1. `需求.md`：先确认范围、约束与验收。
 2. `technical-details/README.md`：按机制阅读顺序展开技术细节。
 3. `decisions/`：需要了解决策理由时阅读。
 
@@ -23,12 +23,12 @@
 
 | 文档 | 唯一权威范围 |
 |---|---|
-| `requirements.md` | 目标、范围、功能需求、约束、非目标与验收条件 |
-| `project-structure.md` | 目标目录结构、模块边界、依赖方向与命名约定（DSR-015 目标形态） |
-| `technology-stack.md` | 本插件语言、运行时、依赖、构建与部署技术选型 |
+| `需求.md` | 目标、范围、功能需求、约束、非目标与验收条件 |
+| `项目结构设计.md` | 目标目录结构、模块边界、依赖方向与命名约定（DSR-015 目标形态） |
+| `技术栈设计.md` | 本插件语言、运行时、依赖、构建与部署技术选型 |
 | `TODO.md` | 本插件待办与未决事项（仅未完成项） |
-| `technical-details/storage-model.md` | 目录读取语义、settings 命名空间意图形状与校验、storage 域表形状、备份目录、并发策略与校验规则 |
-| `technical-details/inbound-operations.md` | 扫描、搜索、入库、检查、更新、导入、出库、备份恢复、禁用启用语义 |
-| `technical-details/mount-sync.md` | dsh App 语义、DSH 工作区项目镜像、挂载推导、物化、对账、健康与既有条目 |
-| `technical-details/plugin-runtime.md` | 插件包形态、组合挂载与部署、Host 服务、RPC 传输（DSR-014）、请求调度与缓存、Client 设置页与生命周期 |
+| `technical-details/目录配置与状态存储.md` | 目录读取语义、settings 命名空间意图形状与校验、storage 域表形状、备份目录、并发策略与校验规则 |
+| `technical-details/入站操作.md` | 扫描、搜索、入库、检查、更新、导入、出库、备份恢复、禁用启用语义 |
+| `technical-details/挂载与同步.md` | dsh App 语义、DSH 工作区项目镜像、挂载推导、物化、对账、健康与既有条目 |
+| `technical-details/插件运行时.md` | 插件包形态、组合挂载与部署、Host 服务、RPC 传输（DSR-014）、请求调度与缓存、Client 设置页与生命周期 |
 | `decisions/` | 真实重大取舍的备选、评价、后果与重访条件 |

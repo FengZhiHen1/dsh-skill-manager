@@ -1,4 +1,4 @@
-// dsh-skill-manager — DSH Host 插件入口（plugin-runtime.md）。
+// dsh-skill-manager — DSH Host 插件入口（插件运行时.md）。
 //
 // 职责（配置即意图）：
 // - 注册 settings 命名空间 skill-manager（skillsDir + groups + skills +
@@ -87,11 +87,11 @@ export default {
     // 备份树根（$DSH_HOME/skill-manager/backups/）。
     const backupsRoot = ctx.dshHomePath('skill-manager', 'backups')
     // DSH 全局 skill 根（$DSH_HOME/skills）：与 dsh-skill-filesystem 的
-    // resolveDshHome 同源，不再由 homedir 硬编码推导（mount-sync.md）。
+    // resolveDshHome 同源，不再由 homedir 硬编码推导（挂载与同步.md）。
     const globalRootPath = ctx.dshHomePath('skills')
 
     // 队列：文件写操作 FIFO 串行（R-17 写写互斥）；网络慢操作独立；
-    // 读请求不排队（bundle 缓存快照 + 写屏障对齐，plugin-runtime.md「低延迟路径」）。
+    // 读请求不排队（bundle 缓存快照 + 写屏障对齐，插件运行时.md「低延迟路径」）。
     const writeQueue = createQueue()
     const netQueue = createQueue()
     const sharedCache = createSharedCache()

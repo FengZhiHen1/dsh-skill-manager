@@ -1,4 +1,4 @@
-// 库扫描与内容基线（inbound-operations.md 库扫描；storage-model.md skills 表）。
+// 库扫描与内容基线（入站操作.md 库扫描；目录配置与状态存储.md skills 表）。
 // 本地 skill 无版本管理：未登记目录不写 storage、不回填内容基线；missing 仅 github。
 
 import test from 'node:test'

@@ -12,7 +12,7 @@ DSH 工作区项目的 `.dsh/skills` 可能已经存在链接、空目录或真�
 
 ## 最终决定
 
-采用方向 A。具体分类与动作归 [mount-sync.md](../technical-details/mount-sync.md)，用户可见行为与验收归 [requirements.md](../requirements.md) 的 R-21 与 AC-12。
+采用方向 A。具体分类与动作归 [挂载与同步.md](../technical-details/挂载与同步.md)，用户可见行为与验收归 [需求.md](../需求.md) 的 R-21 与 AC-12。
 
 ## 直接后果
 
