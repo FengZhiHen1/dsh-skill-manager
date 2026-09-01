@@ -28,7 +28,7 @@
 ## 直接后果
 
 - `technology-stack.md` 的 Client 形态/写法两行、「不启用任何构建产物」约束（改为 Host 无构建 + client 唯一例外 + 哨兵）、重访条件同步重写；TODO.md 勾销本重访项。
-- `plugin-runtime.md` Client 入口节按新形态重写；DSH_Plugins 仓库 AGENTS.md 的目录树与全局约定同步。
+- `plugin-runtime.md` Client 入口节按新形态重写；`project-structure.md` 目录树与全局约定同步。
 - 卸载与 HMR 语义不变：`dist/client.js` 内容变化触发 client-modules 增量重建，刷新生效。
 
 ## 重访条件

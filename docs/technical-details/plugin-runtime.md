@@ -2,7 +2,7 @@
 
 ## 权威范围
 
-本文唯一拥有 `dsh-skill-manager` 的包形态、组合挂载与部署、Host 服务与 RPC 传输（DSR-014）、请求调度与缓存、配置读写机制（配置即意图）、Client 设置页与生命周期。意图与状态的存储形状归 `storage-model.md`，业务操作语义归 `inbound-operations.md` 与 `mount-sync.md`，技术选型归 `technology-stack.md`，部署取舍归 DSR-012（`decisions/bundle-github-deployment-2026-09.md`）。模块划分归 DSH_Plugins 仓库 AGENTS.md 的 core/adapter 分层约定（DSR-015）。
+本文唯一拥有 `dsh-skill-manager` 的包形态、组合挂载与部署、Host 服务与 RPC 传输（DSR-014）、请求调度与缓存、配置读写机制（配置即意图）、Client 设置页与生命周期。意图与状态的存储形状归 `storage-model.md`，业务操作语义归 `inbound-operations.md` 与 `mount-sync.md`，技术选型归 `technology-stack.md`，部署取舍归 DSR-012（`decisions/bundle-github-deployment-2026-09.md`）。模块划分归 `project-structure.md`（DSR-015）。
 
 ## 平面划分
 
@@ -86,7 +86,7 @@
   - `storage`：域设施（`ctx.storage.domain.open(spec)`，域在 `apply` 后异步打开、Fiber 清理时关闭；打开失败只降级 API 为 `internal`，不拖垮 Host）。
   - `dshHomePath`：定位 `$DSH_HOME`（备份树根 `skill-manager/backups`、全局 skill 根 `skills`）。
   - `settings`：配置即意图的载体，命名空间注册的硬依赖。
-- adapter 五文件分工（模块边界归仓库 AGENTS.md 的 core/adapter 约定）：`index.js` 入口装配、`settings.js` 命名空间注册、`storage.js` spec 与开域、`migrate.js` 迁移编排、`rpc.js` 通道薄接线；全部领域逻辑在 `src/core/`。
+- adapter 五文件分工（模块边界归 `project-structure.md`）：`index.js` 入口装配、`settings.js` 命名空间注册、`storage.js` spec 与开域、`migrate.js` 迁移编排、`rpc.js` 通道薄接线；全部领域逻辑在 `src/core/`。
 - `apply` 内装配模块实例，所有可变状态（域句柄、队列、缓存、定时器）放在本次 Fiber 的局部对象中，不使用模块级可变单例。
 - settings 命名空间注册（`adapter/settings.js` 的 `registerConfig`，schema 与校验来自 `core/model/intent.js`）：形状归 `storage-model.md`；`applies` 取默认 `live`，保存后立即生效。旧 storage 意图的一次性迁移（`adapter/migrate.js`）先于新域打开执行，失败仅告警（语义归 `storage-model.md`）。
 - 目录解析：每次 RPC 从 settings scope 读当前 `skillsDir`，不做启动缓存；为空时所有方法统一返回 `skilldir-unconfigured`，不访问任何目录路径。
