@@ -12,7 +12,7 @@
 
 ## 最终决定
 
-采用方向 A。以 `distributor/cli/distributor/core/` 为参考基线，Node 模块按既定的 `lib/` 模块边界重写（模块边界规范当时归 `项目结构设计.md`，现于本仓库 `docs/项目结构设计.md` 以 DSR-015 目标形态续存）；运行时不调用 Python。
+采用方向 A。以 `distributor/cli/distributor/core/` 为参考基线，Node 模块按既定的 `lib/` 模块边界重写（模块边界规范当时归 `../项目结构设计.md`，现于本仓库 `../项目结构设计.md` 以 DSR-015 目标形态续存）；运行时不调用 Python。
 
 ## 直接后果
 

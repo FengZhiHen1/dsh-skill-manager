@@ -4,7 +4,7 @@
 
 ## 上下文
 
-`技术栈设计.md` 既定「单文件 `client.js` + `React.createElement` + 不做 client 构建」，重访条件为单文件超过约 1200 行。现已 ~1600 行 / 82.5KB（三视图 + 配置卡片 + 遮罩 + 菜单 + 图标补丁），阈值触发，重访项登记于设计根目录 TODO.md。
+`../技术栈设计.md` 既定「单文件 `client.js` + `React.createElement` + 不做 client 构建」，重访条件为单文件超过约 1200 行。现已 ~1600 行 / 82.5KB（三视图 + 配置卡片 + 遮罩 + 菜单 + 图标补丁），阈值触发，重访项登记于设计根目录 TODO.md。
 
 结构性事实：DSH 模块加载器只服务**单文件产物**（惰性 CJS 工厂 + `window.__ModuleLoader__.load({ id, factory })` banner，`react` 与 `dsh.client.inject` 声明包由运行时 `require` 回答，知识库 `client/14` §3）——「多文件」与「无构建」不可兼得。官方 `tsdown.client.ts` 预设未发布，仓库外包须自行复刻输出格式。
 
@@ -27,8 +27,8 @@
 
 ## 直接后果
 
-- `技术栈设计.md` 的 Client 形态/写法两行、「不启用任何构建产物」约束（改为 Host 无构建 + client 唯一例外 + 哨兵）、重访条件同步重写；TODO.md 勾销本重访项。
-- `插件运行时.md` Client 入口节按新形态重写；`项目结构设计.md` 目录树与全局约定同步。
+- `../技术栈设计.md` 的 Client 形态/写法两行、「不启用任何构建产物」约束（改为 Host 无构建 + client 唯一例外 + 哨兵）、重访条件同步重写；TODO.md 勾销本重访项。
+- `../technical-details/插件运行时.md` Client 入口节按新形态重写；`../项目结构设计.md` 目录树与全局约定同步。
 - 卸载与 HMR 语义不变：`dist/client.js` 内容变化触发 client-modules 增量重建，刷新生效。
 
 ## 重访条件

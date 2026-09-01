@@ -1,6 +1,6 @@
 # DSR-014：传输层迁移到官方 connection.rpc 通道
 
-> 状态：已确认（2026-09-01，design-spec-workshop D1），代码实施待执行；实施前 `插件运行时.md` 等文档按目标形态描述。
+> 状态：已确认（2026-09-01，design-spec-workshop D1），代码实施待执行；实施前 `../technical-details/插件运行时.md` 等文档按目标形态描述。
 
 ## 上下文
 
@@ -29,7 +29,7 @@
 
 ## 直接后果
 
-- `技术栈设计.md` RPC 行重写；`插件运行时.md` 传输节、Host 入口节、生命周期表、验证计划同步重写。
+- `../技术栈设计.md` RPC 行重写；`../technical-details/插件运行时.md` 传输节、Host 入口节、生命周期表、验证计划同步重写。
 - `lib/fence.js` 与其测试 `test/fence.test.mjs` 删除；信封相关测试改写为 Result 形状断言。
 - 部署运行时 `0.1.1-rc.2` 下围栏语义与现状等价（同一算法、平台维护）；升级到 alpha.3+ 后自动获得 browser-auth。
 - 错误协议消费面只有本插件 Client（遮罩确认按 `code` 匹配，`retryable` 改读 `details`），无第三方破坏面。

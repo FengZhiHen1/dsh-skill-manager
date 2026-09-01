@@ -1,6 +1,6 @@
 # DSR-015：core/adapter 分层与模块领域重划
 
-> 状态：已确认（2026-09-01，design-spec-workshop D2′，含用户修订「按域分目录」），代码实施待执行；实施前 `项目结构设计.md` 等文档按目标形态描述。
+> 状态：已确认（2026-09-01，design-spec-workshop D2′，含用户修订「按域分目录」），代码实施待执行；实施前 `../项目结构设计.md` 等文档按目标形态描述。
 
 ## 上下文
 
@@ -51,7 +51,7 @@ src/client/     # 浏览器半区源码（构建形态归 DSR-016）
 
 ## 直接后果
 
-- `项目结构设计.md` 插件结构节整节重写（树、模块边界、依赖规则、全局约定）；本插件 README 模块布局节实施时重写。
+- `../项目结构设计.md` 插件结构节整节重写（树、模块边界、依赖规则、全局约定）；本插件 README 模块布局节实施时重写。
 - 测试按新模块边界重分布（`test/fence.test.mjs` 随 DSR-014 删除，信封测试改写 Result 断言）；`package.json` exports/files/scripts 更新，版本 `0.1.0 → 0.2.0`。
 - 门禁 `node tools/plugin-layering-check.mjs plugins/dsh-skill-manager` 首次真实生效；本插件成为全仓库首个 core/adapter 采用者。
 - 部署侧无路径破坏面：bundle patch 行经包名解析 `exports["."]`，profile 无感知；web 重挂前必须过 test 实测门禁（含 DSR-014 的 rpc 冒烟与围栏等价验证）。
