@@ -69,9 +69,18 @@ export async function writeSkill(root, name, meta = {}) {
   return dir
 }
 
-/** 假 settings scope：scope.get() 返回 { skillsDir }。 */
-export function fakeScope(skillsDir) {
-  return { get: () => ({ skillsDir }) }
+/**
+ * 假 settings scope：scope.get() 返回配置意图（skillsDir + 默认组种子 +
+ * 可选意图覆盖）。overrides 可传 { groups, skills, intentMigrated }。
+ */
+export function fakeScope(skillsDir, overrides = {}) {
+  const base = {
+    skillsDir,
+    intentMigrated: true,
+    groups: { 默认: { mounts: [{ scope: 'global', project: null }] } },
+    skills: {},
+  }
+  return { get: () => ({ ...base, ...overrides }) }
 }
 
 /** 标准 skills 记录（缺省 self；用 overrides 覆盖字段）。 */

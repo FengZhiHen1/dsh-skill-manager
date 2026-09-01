@@ -26,7 +26,7 @@ window.__ModuleLoader__.load({
     const module = { exports: {} }
     const exports = module.exports
     const React = require('react')
-    const { useState, useEffect } = React
+    const { useState, useEffect, useMemo } = React
     const primitives = require('@deepseek-ai/dsh-client-ui-primitives')
     const { Button, Input, Pill } = primitives
     // 防御：icon 为可选装饰，缺失时降级为文本箭头，绝不让整卡渲染失败
@@ -261,13 +261,13 @@ window.__ModuleLoader__.load({
           },
         },
           h('div', { id: 'skill-manager-update-confirm-title', style: { fontSize: 16, fontWeight: 600, marginBottom: 8 } }, `更新 ${name}？`),
-          h('div', { style: { color: T.labelSecondary, fontSize: 13, lineHeight: 1.55, marginBottom: 12 } }, detail || '检测到与锁基线不同的本地修改。'),
+          h('div', { style: { color: T.labelSecondary, fontSize: 13, lineHeight: 1.55, marginBottom: 12 } }, detail || '检测到与内容基线不同的本地修改。'),
           h('div', { style: { borderRadius: 10, padding: '10px 12px', marginBottom: 14, ...badgeStyle(T.warn), fontSize: 12, lineHeight: 1.55 } },
             '更新会替换此 Skill 目录；不会自动备份本地修改。请先自行备份需要保留的内容。',
           ),
           h('label', { style: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: T.labelSecondary, marginBottom: 16, cursor: 'pointer' } },
             h('input', { type: 'checkbox', checked: acknowledged, onChange: (event) => setAcknowledged(event.target.checked) }),
-            h('span', { style: { color: T.labelPrimary } }, '我已确认覆盖本地修改；继续后会刷新锁记录、Git 历史和 DSH 挂载。'),
+            h('span', { style: { color: T.labelPrimary } }, '我已确认覆盖本地修改；继续后会刷新上游基线与 DSH 挂载。'),
           ),
           h('div', { style: { display: 'flex', justifyContent: 'flex-end', gap: 8 } },
             h(OutlineBtn, { onClick: onCancel, disabled: busy }, '取消'),
@@ -499,32 +499,185 @@ window.__ModuleLoader__.load({
     }
 
     // ---------- 技能设置页 ----------
+    // 配置变更通知：设置卡片保存/重置 skills 目录（settings/document-updated）
+    // 时触发技能页自动刷新——配置后无需手动点「刷新」。
+    const settingsListeners = new Set()
+    const subscribeSkillSettings = (fn) => {
+      settingsListeners.add(fn)
+      return () => settingsListeners.delete(fn)
+    }
+    const bumpSkillSettings = () => {
+      for (const fn of [...settingsListeners]) fn()
+    }
+
+    /** 剪贴板写入（clipboard API 失败回退 execCommand）。 */
+    const copyText = (text) => {
+      const fallback = () => {
+        const ta = document.createElement('textarea')
+        ta.value = text
+        ta.style.position = 'fixed'
+        ta.style.opacity = '0'
+        document.body.appendChild(ta)
+        ta.select()
+        try { document.execCommand('copy') } catch { /* 忽略 */ }
+        document.body.removeChild(ta)
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).catch(fallback)
+      } else {
+        fallback()
+      }
+    }
+
+    /** 配置写拒绝的修复提示词：失败字段 + 尝试值 + 当前值 + 排查方向，一键复制给 Agent。 */
+    const buildRepairPrompt = (root, field, attempted, current) => {
+      const lines = [
+        '任务：修复 DSH 插件 dsh-skill-manager 的配置写拒绝（settings 校验失败）。',
+        '',
+        `配置目录：${root || '（未知，请从插件配置读取 skillsDir）'}`,
+        `被拒绝的配置字段：${field}`,
+        `尝试写入的值：${JSON.stringify(attempted ?? null)}`,
+        `当前生效的值：${JSON.stringify(current ?? null)}`,
+        '',
+        '可能原因：',
+        '1. 组名使用保留字（默认/全部）或包含非法字符（/ \\ : * ? " < > | 与控制字符）。',
+        '2. 配置形状不符合 skill-manager 命名空间的 schema（lib/dir.js 的 configSchema）。',
+        '',
+        '请检查 $DSH_HOME/settings.yaml 的 skill-manager 段与插件 lib/dir.js 的 validate 规则，修正后重试。',
+      ]
+      return lines.join('\n')
+    }
+
     function SkillsSection(props) {
       const call = props.call
+      const scope = props.scope
       const [tab, setTab] = useState('manage')
       const [unconfigured, setUnconfigured] = useState(false)
       const [error, setError] = useState(null)
       const [data, setData] = useState(null)
       const [reloadTick, reload] = useTick()
 
+      // ---------- 配置即意图（settings 域直读直写，与原生卡片同构） ----------
+      // 渲染即时：settings mirror 页面启动即加载，配置（groups/skills/skillsDir）
+      // 永不等待网络。写 = scope.set('groups'|'skills', next)（整字段替换），
+      // 校验失败由 settings 机制拒绝并回滚快照 → 本组件对比检测后提示 + 复制修复提示词。
+      const [snap, setSnap] = useState(() => scope.getSnapshot())
+      const [editError, setEditError] = useState(null) // { message, prompt }
+      const [pendingEdit, setPendingEdit] = useState(null) // { field, value }
       useEffect(() => {
         let alive = true
+        const apply = () => { if (alive) setSnap(scope.getSnapshot()) }
+        const off = scope.subscribe(apply)
+        apply()
+        return () => { alive = false; off() }
+      }, [scope])
+
+      const configReady = snap.status === 'ready' && snap.value && typeof snap.value === 'object'
+      const groups = configReady && snap.value.groups && typeof snap.value.groups === 'object' ? snap.value.groups : {}
+      const skillsIntent = configReady && snap.value.skills && typeof snap.value.skills === 'object' ? snap.value.skills : {}
+      const skillsDir = configReady && typeof snap.value.skillsDir === 'string' ? snap.value.skillsDir : ''
+
+      // 写被拒检测：scope.set 失败时 settings 客户端静默回滚（mirror 恢复服务端值）
+      useEffect(() => {
+        if (!pendingEdit) return
+        const current = configReady ? snap.value[pendingEdit.field] : undefined
+        const equal = JSON.stringify(current) === JSON.stringify(pendingEdit.value)
+        if (!equal) {
+          setEditError({
+            message: `配置「${pendingEdit.field}」被拒绝，已恢复原值（组名保留字/非法字符或格式不合法）。`,
+            prompt: buildRepairPrompt(data && data.root, pendingEdit.field, pendingEdit.value, current),
+          })
+          setPendingEdit(null)
+        } else {
+          setPendingEdit(null)
+        }
+      }, [snap])
+
+      const editConfig = (field, next) => {
+        setEditError(null)
+        setPendingEdit({ field, value: next })
+        scope.set(field, next).catch(() => {})
+      }
+      const intentOf = (dir) => skillsIntent[dir] || { disabled: false, group: '默认' }
+      const setSkillDisabled = (dir, disabled) => {
+        editConfig('skills', { ...skillsIntent, [dir]: { ...intentOf(dir), disabled } })
+      }
+      const moveSkill = (dir, group) => {
+        editConfig('skills', { ...skillsIntent, [dir]: { ...intentOf(dir), group } })
+      }
+      const toggleMount = (group, scopeKind, workspaceId, checked) => {
+        const mounts = (groups[group] && groups[group].mounts) || []
+        const key = `${scopeKind}|${workspaceId ?? ''}`
+        const exists = mounts.some((m) => `${m.scope}|${m.project ?? ''}` === key)
+        if (exists === checked) return
+        const next = checked
+          ? [...mounts.filter((m) => `${m.scope}|${m.project ?? ''}` !== key), { scope: scopeKind, project: scopeKind === 'project' ? workspaceId : null }]
+          : mounts.filter((m) => `${m.scope}|${m.project ?? ''}` !== key)
+        editConfig('groups', { ...groups, [group]: { ...groups[group], mounts: next } })
+      }
+      const createGroup = (name) => {
+        const baseMounts = ((groups['默认'] && groups['默认'].mounts) || []).map((m) => ({ ...m }))
+        editConfig('groups', { ...groups, [name]: { mounts: baseMounts } })
+      }
+      const renameGroup = (oldName, newName) => {
+        const nextGroups = {}
+        for (const [name, g] of Object.entries(groups)) nextGroups[name === oldName ? newName : name] = g
+        const nextSkills = {}
+        for (const [dir, intent] of Object.entries(skillsIntent)) {
+          nextSkills[dir] = intent.group === oldName ? { ...intent, group: newName } : intent
+        }
+        editConfig('groups', nextGroups)
+        editConfig('skills', nextSkills)
+      }
+      const deleteGroup = (name) => {
+        const nextGroups = {}
+        for (const [n, g] of Object.entries(groups)) if (n !== name) nextGroups[n] = g
+        const nextSkills = {}
+        for (const [dir, intent] of Object.entries(skillsIntent)) {
+          nextSkills[dir] = intent.group === name ? { ...intent, group: '默认' } : intent
+        }
+        editConfig('groups', nextGroups)
+        editConfig('skills', nextSkills)
+      }
+      const config = {
+        groups,
+        skillsIntent,
+        intentOf,
+        editConfig,
+        setSkillDisabled,
+        moveSkill,
+        toggleMount,
+        createGroup,
+        renameGroup,
+        deleteGroup,
+      }
+
+      // 单请求聚合读（低延迟路径）：overview 返回库列表/健康/工作区（只读视图，
+      // 配置经 settings 域直读）。缓存热时零扫描。
+      const load = () => {
         setError(null)
-        Promise.all([call('library', {}), call('groups'), call('health')])
-          .then(([lib, grp, health]) => {
-            if (!alive) return
-            setData({ lib, grp, health: health.issues })
+        return call('overview')
+          .then((r) => {
+            setData({ root: r.root, lib: r.lib, health: r.health.issues, workspaceProjects: r.workspaceProjects, legacyProjects: r.legacyProjects })
             setUnconfigured(false)
           })
           .catch((e) => {
-            if (!alive) return
             if (e && e.code === 'skilldir-unconfigured') setUnconfigured(true)
             else setError(e.message || String(e))
           })
-        return () => { alive = false }
+      }
+      useEffect(() => {
+        let alive = true
+        const off = subscribeSkillSettings(() => { if (alive) load() })
+        load()
+        return () => { alive = false; off() }
       }, [reloadTick])
 
-      if (unconfigured) {
+      // 配置未就绪（mirror 加载中）→ 骨架；未配置 → 直接引导（不等 overview）
+      if (!configReady) {
+        return h('div', { style: S.panel }, h('div', { style: S.muted }, '加载中…'))
+      }
+      if (!skillsDir) {
         return h('div', { style: S.guide },
           h('div', { style: { fontSize: 14, marginBottom: 8, color: T.labelPrimary } }, '尚未配置本地 skill 目录'),
           h('div', null, '请到 设置 → 插件 → skill-manager 卡片 配置本地 skills 目录（默认为空即未配置），配置后本页自动可用。'),
@@ -566,18 +719,21 @@ window.__ModuleLoader__.load({
           }, t.label)),
         ),
         h(ErrorLine, { error }),
-        tab === 'manage' && h(ManageView, { call, workspaces: props.workspaces, data, reload, onGoSync: () => setTab('sync') }),
+        editError ? h('div', { style: { ...badgeStyle(T.error), borderRadius: 10, padding: '8px 12px', marginBottom: 8, fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 } },
+          h('span', { style: { flex: 1 } }, editError.message),
+          h(Button, { size: 'sm', onClick: () => copyText(editError.prompt) }, '复制修复提示词'),
+        ) : null,
+        tab === 'manage' && h(ManageView, { call, workspaces: props.workspaces, data, config, reload, onGoSync: () => setTab('sync') }),
         tab === 'search' && h(SearchView, { call, data, reload }),
         tab === 'sync' && h(SyncView, { call, data, reload }),
       )
     }
 
     // ---------- 管理视图 ----------
-    function ManageView({ call, workspaces, data, reload, onGoSync }) {
+    function ManageView({ call, workspaces, data, config, reload, onGoSync }) {
       const [origin, setOrigin] = useState('')
       const [groupFilter, setGroupFilter] = useState('默认')
       const [q, setQ] = useState('')
-      const [list, setList] = useState(data.lib.skills)
       const [importOpen, setImportOpen] = useState(false)
       const [busy, setBusy] = useState(false)
       const [error, setError] = useState(null)
@@ -586,30 +742,34 @@ window.__ModuleLoader__.load({
       const [menuFor, setMenuFor] = useState(null)
       const [createOpen, setCreateOpen] = useState(false)
 
-      // data.lib 变化（含全局刷新后）按当前筛选重新拉取，保留 origin/group/q 过滤条件
-      useEffect(() => { refresh() }, [data.lib])
+      const {
+        groups, skillsIntent, setSkillDisabled, moveSkill, renameGroup, deleteGroup,
+      } = config
 
-      const refresh = async (extra = {}) => {
-        setBusy(true)
-        setError(null)
-        try {
-          const lib = await call('library', { origin, group: groupFilter, q, ...extra })
-          setList(lib.skills)
-        } catch (e) {
-          setError(e.message || String(e))
-        } finally {
-          setBusy(false)
-        }
-      }
-      // q 输入防抖：300ms 内连续输入只发一次请求
-      useEffect(() => {
-        const timer = setTimeout(() => { refresh() }, 300)
-        return () => clearTimeout(timer)
-      }, [origin, groupFilter, q])
+      // 显示行 = 库元数据（只读视图）叠加配置意图（settings，本地即时）
+      const displaySkills = useMemo(() => data.lib.skills.map((it) => {
+        const intent = skillsIntent[it.dir]
+        return intent
+          ? { ...it, disabled: intent.disabled === true, group: intent.group }
+          : it
+      }), [data.lib.skills, skillsIntent])
 
-      const groupNames = data.grp.groups.map((g) => g.name)
-      const countForGroup = (group) => data.lib.skills.filter((item) => (group === '默认' ? item.group === '默认' : item.group === group)).length
+      // 列表本地过滤（低延迟路径）：origin/group/q 均为纯前端条件，零请求零延迟。
+      const list = useMemo(() => {
+        const query = q.trim().toLowerCase()
+        return displaySkills.filter((it) =>
+          (origin === '' || it.origin === origin)
+          && (groupFilter === '' || it.group === groupFilter)
+          && (query === '' || it.name.toLowerCase().includes(query) || it.description.toLowerCase().includes(query))
+        )
+      }, [displaySkills, origin, groupFilter, q])
+
+      const groupNames = Object.keys(groups)
+      const countForGroup = (group) => displaySkills.filter((item) => item.group === group).length
       const rowAction = async (name, action, payload = {}) => {
+        // 配置层操作（禁用/启用）：settings 直写，本地即时生效（0 延迟）
+        if (action === 'disable') { setSkillDisabled(name, true); return }
+        if (action === 'enable') { setSkillDisabled(name, false); return }
         setBusy(true)
         setError(null)
         setNotice(null)
@@ -631,9 +791,7 @@ window.__ModuleLoader__.load({
             setNotice(it
               ? `${name}：${it.status}${it.reason ? '（' + it.reason + '）' : ''}`
               : `${name}：更新完成`)
-          } else if (action === 'disable') await call('disable', { name })
-          else if (action === 'enable') await call('enable', { name })
-          else if (action === 'remove') {
+          } else if (action === 'remove') {
             if (!window.confirm(`确认删除 ${name}？（删除前自动备份，可在行菜单恢复）`)) return
             await call('remove', { name, keepFiles: false })
           } else if (action === 'restore') {
@@ -651,17 +809,8 @@ window.__ModuleLoader__.load({
           setBusy(false)
         }
       }
-      const move = async (dir, group) => {
-        setBusy(true)
-        setError(null)
-        try {
-          await call('groups/op', { action: 'move', dir, group: group === '默认' ? null : group })
-          reload()
-        } catch (e) {
-          setError(e.message || String(e))
-        } finally {
-          setBusy(false)
-        }
+      const move = (dir, group) => {
+        moveSkill(dir, group === '默认' ? '默认' : group)
       }
       // DSR-008：全局刷新 = 重新扫描列表 + 并行检查全部上游，结果缓存后随 library 下发
       const refreshAll = async () => {
@@ -686,29 +835,23 @@ window.__ModuleLoader__.load({
         return `${pad(d.getHours())}:${pad(d.getMinutes())}`
       }
       const ORIGIN_LABEL = { github: 'GitHub', local: '本地', self: '自研' }
-      const groupOp = async (action, name, newName) => {
-        setBusy(true)
-        setError(null)
-        try {
-          if (action === 'delete' && !window.confirm(`删除组 ${name}？成员将回落「默认」组`)) return
-          await call('groups/op', { action, name, newName })
-          if (action === 'delete' && groupFilter === name) setGroupFilter('默认')
-          if (action === 'rename' && groupFilter === name && newName) setGroupFilter(newName)
-          reload()
-        } catch (e) {
-          setError(e.message || String(e))
-        } finally {
-          setBusy(false)
+      const groupOp = (action, name, newName) => {
+        if (action === 'delete') {
+          if (!window.confirm(`删除组 ${name}？成员将回落「默认」组`)) return
+          deleteGroup(name)
+          if (groupFilter === name) setGroupFilter('默认')
+        } else if (action === 'rename') {
+          renameGroup(name, newName)
+          if (groupFilter === name && newName) setGroupFilter(newName)
         }
       }
 
-      // DSR-009：新建成功后跳到新组，便于立即配置它的使用范围；失败抛回对话框内联显示
-      const createGroup = async (name) => {
-        await call('groups/op', { action: 'create', name })
+      // DSR-009：新建成功（settings 直写，本地即时生效）后跳到新组，便于立即配置它的使用范围
+      const createGroup = (name) => {
+        config.createGroup(name)
         setCreateOpen(false)
         setGroupFilter(name)
         setNotice(`已创建分组「${name}」`)
-        reload()
       }
 
       // 04 帧：导入打开时整页切换为导入卡片（含「导入后」说明区），取消返回管理页
@@ -734,8 +877,8 @@ window.__ModuleLoader__.load({
           h('div', { style: { display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 } },
             h(Pill, { active: groupFilter === '', onClick: () => setGroupFilter('') }, `全部 · ${data.lib.skills.length}`),
             h(Pill, { active: groupFilter === '默认', onClick: () => setGroupFilter('默认') }, `默认 · ${countForGroup('默认')}`),
-            data.grp.groups.map((group) =>
-              h(Pill, { key: group.name, active: groupFilter === group.name, onClick: () => setGroupFilter(group.name) }, `${group.name} · ${group.count}`)),
+            groupNames.map((group) =>
+              h(Pill, { key: group, active: groupFilter === group, onClick: () => setGroupFilter(group) }, `${group} · ${countForGroup(group)}`)),
             // DSR-009：胶囊行只保留新建入口；改名/删除收进「当前分组」卡片
             h(Pill, { active: false, onClick: () => setCreateOpen(true) }, '＋ 新建分组'),
           ),
@@ -745,13 +888,9 @@ window.__ModuleLoader__.load({
                 h('div', { style: { ...noteText, marginTop: 4 } }, '选择一个分组后，可配置它在 DSH 全局与各工作区的可用范围。'),
               )
             : h(GroupScopePanel, {
-                call,
+                config,
                 group: groupFilter,
-                mounts: data.grp.mounts,
-                workspaceProjects: data.grp.workspaceProjects || [],
-                busy,
-                onError: setError,
-                onChanged: reload,
+                workspaceProjects: data.workspaceProjects || [],
                 onGroupOp: groupOp,
               }),
         ),
@@ -845,21 +984,21 @@ window.__ModuleLoader__.load({
     function CreateGroupDialog({ onCancel, onCreate }) {
       const [name, setName] = useState('')
       const [error, setError] = useState(null)
-      const [busy, setBusy] = useState(false)
-      const submit = async () => {
+      const submit = () => {
         const trimmed = name.trim()
         if (!trimmed) {
           setError('请输入组名')
           return
         }
-        setBusy(true)
-        setError(null)
-        try {
-          await onCreate(trimmed)
-        } catch (e) {
-          setError(e.message || String(e))
-          setBusy(false)
+        if (trimmed.length > 30) {
+          setError('组名最长 30 字符')
+          return
         }
+        if (trimmed === '默认' || trimmed === '全部') {
+          setError('「默认」「全部」是保留字')
+          return
+        }
+        onCreate(trimmed)
       }
       return h('div', {
         role: 'presentation',
@@ -897,43 +1036,24 @@ window.__ModuleLoader__.load({
           error ? h('div', { style: { fontSize: 12, color: T.error, marginTop: 6 } }, error) : null,
           h('div', { style: { fontSize: 11, color: T.labelSecondary, marginTop: 8 } }, '新组复制「默认」组的挂载规则作为起步；组名 1–30 字符。'),
           h('div', { style: { display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 } },
-            h(OutlineBtn, { onClick: onCancel, disabled: busy }, '取消'),
-            h(Button, { size: 'sm', onClick: submit, disabled: busy }, busy ? '新建中…' : '新建'),
+            h(OutlineBtn, { onClick: onCancel }, '取消'),
+            h(Button, { size: 'sm', onClick: submit }, '新建'),
           ),
         ),
       )
     }
 
-    /** 当前分组的使用范围：只对 DSH 全局与 Host 返回的活动工作区写挂载规则。 */
-    function GroupScopePanel({ call, group, mounts, workspaceProjects, busy, onError, onChanged, onGroupOp }) {
-      const [scopeBusy, setScopeBusy] = useState(false)
+    /** 当前分组的使用范围：直接编辑 settings 配置（本地即时生效，后台对账收敛）。 */
+    function GroupScopePanel({ config, group, workspaceProjects, onGroupOp }) {
       const [renaming, setRenaming] = useState(false)
       const [newName, setNewName] = useState('')
-      const disabled = busy || scopeBusy
-      const enabled = (scope, workspaceId) => mounts.some((mount) => (
-        mount.group === group
-        && mount.app === 'dsh'
-        && mount.scope === scope
-        && (scope === 'global' || mount.project === workspaceId)
+      const { groups, toggleMount } = config
+      const mounts = (groups[group] && groups[group].mounts) || []
+      const enabled = (scopeKind, workspaceId) => mounts.some((mount) => (
+        mount.scope === scopeKind
+        && (scopeKind === 'global' || mount.project === workspaceId)
       ))
-      const toggle = async (scope, workspaceId, checked) => {
-        setScopeBusy(true)
-        onError(null)
-        try {
-          await call('mounts', {
-            action: checked ? 'add' : 'remove',
-            group,
-            app: 'dsh',
-            scope,
-            workspaceId: scope === 'project' ? workspaceId : undefined,
-          })
-          onChanged()
-        } catch (error) {
-          onError(error.message || String(error))
-        } finally {
-          setScopeBusy(false)
-        }
-      }
+      const toggle = (scopeKind, workspaceId, checked) => toggleMount(group, scopeKind, workspaceId, checked)
       // DSR-009：改名/删除入口收进当前分组卡片；「默认」是虚拟组，不可管理
       const manageable = group !== '默认'
       const submitRename = () => {
@@ -943,7 +1063,7 @@ window.__ModuleLoader__.load({
       }
       const entryStyle = (danger) => ({
         border: 'none', background: 'none', padding: 0, font: 'inherit', fontSize: 11,
-        color: danger ? T.error : T.labelSecondary, cursor: disabled ? 'default' : 'pointer',
+        color: danger ? T.error : T.labelSecondary, cursor: 'pointer',
       })
       // 07/09 帧：白底描边卡；标题行（改名中变内联编辑）；行间分隔线；底部后果注释
       return h('div', { style: { ...cardStyle, padding: '12px 14px' } },
@@ -959,22 +1079,21 @@ window.__ModuleLoader__.load({
                   if (e.key === 'Escape') setRenaming(false)
                 },
               }),
-              h(Button, { size: 'sm', onClick: submitRename, disabled }, '保存'),
+              h(Button, { size: 'sm', onClick: submitRename }, '保存'),
               h(GhostBtn, { onClick: () => setRenaming(false) }, '取消'),
             )
           : h('div', { style: { display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 } },
               h('span', { style: cardTitle }, `当前分组：${group}`),
               manageable && h('span', { style: { flex: 1 } }),
-              manageable && h('button', { type: 'button', style: entryStyle(false), disabled, onClick: () => { setNewName(group); setRenaming(true) } }, '改名'),
-              manageable && h('button', { type: 'button', style: entryStyle(true), disabled, onClick: () => onGroupOp('delete', group) }, '删除'),
+              manageable && h('button', { type: 'button', style: entryStyle(false), onClick: () => { setNewName(group); setRenaming(true) } }, '改名'),
+              manageable && h('button', { type: 'button', style: entryStyle(true), onClick: () => onGroupOp('delete', group) }, '删除'),
             ),
         renaming && h('div', { style: { ...noteText, marginBottom: 8 } }, '改名立即生效：分组成员与挂载规则同步改名，Skill 本体不受影响。'),
         h('div', { style: dividerStyle }),
-        h('label', { style: { display: 'flex', alignItems: 'center', gap: 8, padding: '9px 0', fontSize: 12, cursor: disabled ? 'default' : 'pointer' } },
+        h('label', { style: { display: 'flex', alignItems: 'center', gap: 8, padding: '9px 0', fontSize: 12, cursor: 'pointer' } },
           h('input', {
             type: 'checkbox',
             checked: enabled('global'),
-            disabled,
             onChange: (event) => toggle('global', null, event.target.checked),
           }),
           h('span', { style: { fontWeight: 500, color: T.labelPrimary } }, 'DSH 全局'),
@@ -987,12 +1106,11 @@ window.__ModuleLoader__.load({
               h('div', { style: { fontSize: 10, color: T.labelTertiary, padding: '7px 0 1px' } }, '工作区项目'),
               workspaceProjects.map((workspace) => h('label', {
                 key: workspace.workspaceId,
-                style: { display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0', fontSize: 12, cursor: disabled ? 'default' : 'pointer' },
+                style: { display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0', fontSize: 12, cursor: 'pointer' },
               },
                 h('input', {
                   type: 'checkbox',
                   checked: enabled('project', workspace.workspaceId),
-                  disabled,
                   onChange: (event) => toggle('project', workspace.workspaceId, event.target.checked),
                 }),
                 h('span', { style: { fontWeight: 500, color: T.labelPrimary } }, workspace.title),
@@ -1061,7 +1179,7 @@ window.__ModuleLoader__.load({
         h('div', { style: { ...subCardStyle, padding: '10px 12px', display: 'flex', gap: 8 } },
           h('span', { style: { ...dotStyle(T.success), marginTop: 5 } }),
           h('div', null,
-            h('div', { style: { fontSize: 12, color: T.labelPrimary } }, '写入 Git 历史，并按分组挂载到 DSH Skills 目录。'),
+            h('div', { style: { fontSize: 12, color: T.labelPrimary } }, '按所属分组的挂载配置在 DSH Skills 目录生效。'),
             h('div', { style: { ...noteText, marginTop: 2 } }, '目标已存在时会拒绝并提示改名。'),
           ),
         ),
@@ -1119,7 +1237,7 @@ window.__ModuleLoader__.load({
         }
       }
       const suggestName = (c) => (c.path ? c.path.split('/').pop() : (candidates.repo.split('/')[1] || candidates.repo))
-      // 批量入库：串行逐个 add（每次 add 自带锁/提交/同步），单条失败不中断批次
+      // 批量入库：串行逐个 add（每次 add 自带入库记录与对账），单条失败不中断批次
       const addSelected = async () => {
         if (!candidates || selected.size === 0) return
         setBusy(true)
@@ -1263,8 +1381,8 @@ window.__ModuleLoader__.load({
     // ---------- 同步视图 ----------
     function SyncView({ call, data, reload }) {
       const [health, setHealth] = useState(data.health)
-      const [workspaceProjects, setWorkspaceProjects] = useState(data.grp.workspaceProjects || [])
-      const [legacyProjects, setLegacyProjects] = useState(data.grp.legacyProjects || [])
+      const [workspaceProjects, setWorkspaceProjects] = useState(data.workspaceProjects || [])
+      const [legacyProjects, setLegacyProjects] = useState(data.legacyProjects || [])
       const [projectEntries, setProjectEntries] = useState({})
       const [busy, setBusy] = useState(false)
       const [error, setError] = useState(null)
@@ -1275,8 +1393,9 @@ window.__ModuleLoader__.load({
         let alive = true
         setBusy(true)
         setError(null)
-        Promise.all([call('health'), call('project-skills')])
-          .then(([healthResult, projectResult]) => {
+        // 健康问题已在 overview 中随页下发（低延迟路径）；此处只补拉项目条目分类。
+        call('project-skills')
+          .then((projectResult) => {
             if (!alive) return
             const active = projectResult.workspaceProjects || []
             const entries = projectResult.entries || {}
@@ -1300,7 +1419,7 @@ window.__ModuleLoader__.load({
                 return '生效'
               }),
             }))
-            setHealth(healthResult.issues || [])
+            setHealth(data.health || [])
             setWorkspaceProjects(active)
             setLegacyProjects(projectResult.legacyProjects || [])
             setProjectEntries(entries)
@@ -1309,7 +1428,7 @@ window.__ModuleLoader__.load({
           .catch((e) => { if (alive) setError(e.message || String(e)) })
           .finally(() => { if (alive) setBusy(false) })
         return () => { alive = false }
-      }, [tick, data.lib])
+      }, [tick, data])
 
       const fix = async () => {
         setBusy(true)
@@ -1464,7 +1583,7 @@ window.__ModuleLoader__.load({
       ctx.effect(() => {
         const offSection = ctx.slots.inject('settings.section', () =>
           ctx.slots.register(
-            { name: 'settings.section', id: 'skills', order: 16, label: '技能', inject: () => ({ call, workspaces }) },
+            { name: 'settings.section', id: 'skills', order: 16, label: '技能', inject: () => ({ call, workspaces, scope }) },
             SkillsSection,
           ),
         )
@@ -1475,8 +1594,12 @@ window.__ModuleLoader__.load({
             SkillManagerCard,
           ),
         )
+        // 配置变更（卡片保存/重置 skills 目录）→ 技能页自动刷新
+        const offSettings = ctx.remote.$on('settings/document-updated', (ns) => {
+          if (ns === 'skill-manager') bumpSkillSettings()
+        })
         const offNavIcon = observeSkillsNavIcon()
-        return () => { offSection(); offCard(); offNavIcon() }
+        return () => { offSection(); offCard(); offSettings(); offNavIcon() }
       }, 'dsh-skill-manager: settings slots')
     }
 

@@ -1,11 +1,13 @@
-// 入站操作（inbound-operations.md）：导入/出库/备份/恢复/禁用启用/更新门禁/检查跳态。
-// 网络路径（add/update 远程段、check 远端探测）不在单元测试内；本地语义全覆盖。
+// 入站操作（inbound-operations.md）：导入/出库/备份/恢复/更新门禁/检查跳态。
+// 本地 skill 无版本管理：导入不建内容基线、目录缺失不恢复；disable/enable 已
+// 归配置（settings），不再有独立操作。网络路径（add/update 远程段、check 远端
+// 探测）不在单元测试内；本地语义全覆盖。
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdir, readdir, readFile, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { importSkill, remove, backups, restore, disable, enable, update, check } from '../lib/inbound.js'
+import { importSkill, remove, backups, restore, update, check } from '../lib/inbound.js'
 import { isLink } from '../lib/sync.js'
 import { loadCheckCache } from '../lib/state.js'
 import { mkTmp, cleanup, writeSkill, fakeStore, skillRecord, assertRejectsCode } from './helpers.mjs'
@@ -13,7 +15,7 @@ import { mkTmp, cleanup, writeSkill, fakeStore, skillRecord, assertRejectsCode }
 const okSync = { results: [], warnings: [], errors: [] }
 const stubCtx = (calls = []) => ({ reconcile: async () => { calls.push('reconcile'); return okSync } })
 
-test('importSkill：本地目录导入 → local 记录与 reconcile', async () => {
+test('importSkill：本地目录导入 → local 记录（无内容基线）与 reconcile', async () => {
   const root = await mkTmp()
   const src = await mkTmp()
   try {
@@ -27,8 +29,8 @@ test('importSkill：本地目录导入 → local 记录与 reconcile', async () 
     const rec = store.getSkill('local-skill')
     assert.equal(rec.origin, 'local')
     assert.equal(rec.origin_path, join(src, 'local-skill'))
-    assert.match(rec.content_hash, /^[0-9a-f]{64}$/)
-    assert.equal(rec.group, '默认')
+    assert.equal(rec.content_hash, null) // 本地 skill 无版本管理
+    assert.equal(rec.group, undefined) // 意图归配置
     assert.match(await readFile(join(root, 'local-skill', 'SKILL.md'), 'utf8'), /name: local-skill/)
   } finally {
     await cleanup(root)
@@ -61,7 +63,7 @@ test('remove：备份 → 摘除物化 → 删目录 → 删记录 → 清缓存
   try {
     await writeSkill(root, 'pdf')
     const store = fakeStore()
-    await store.putSkill('pdf', skillRecord({ origin: 'github', repo: 'a/b', commit: 'c'.repeat(40), group: '办公' }))
+    await store.putSkill('pdf', skillRecord({ origin: 'github', repo: 'a/b', commit: 'c'.repeat(40) }))
     const parent = join(proj, '.dsh', 'skills')
     await mkdir(parent, { recursive: true })
     await symlink(join(root, 'pdf'), join(parent, 'pdf'), 'junction')
@@ -95,6 +97,23 @@ test('remove：备份 → 摘除物化 → 删目录 → 删记录 → 清缓存
   }
 })
 
+test('remove：无登记目录（自研本地文件）同样备份删除', async () => {
+  const root = await mkTmp()
+  const backupsRoot = await mkTmp()
+  try {
+    await writeSkill(root, 'mine')
+    const store = fakeStore()
+    const r = await remove({ root, store, name: 'mine', keepFiles: false, backupsRoot, ctx: stubCtx() })
+    assert.ok(r.backup)
+    await assert.rejects(readdir(join(root, 'mine')))
+    // 无记录可清，不报错
+    assert.equal(store.skillEntries().length, 0)
+  } finally {
+    await cleanup(root)
+    await cleanup(backupsRoot)
+  }
+})
+
 test('remove：keepFiles 跳过备份但仍出库', async () => {
   const root = await mkTmp()
   const backupsRoot = await mkTmp()
@@ -112,7 +131,7 @@ test('remove：keepFiles 跳过备份但仍出库', async () => {
   }
 })
 
-test('backups/restore：登记 ∪ 目录列表；恢复还原记录与分组', async () => {
+test('backups/restore：登记 ∪ 目录列表；恢复还原 github 记录（意图归配置）', async () => {
   const root = await mkTmp()
   const backupsRoot = await mkTmp()
   try {
@@ -125,7 +144,7 @@ test('backups/restore：登记 ∪ 目录列表；恢复还原记录与分组', 
     await writeFile(join(src, 'SKILL.md'), '---\nname: pdf\ndescription: 回来\n---\n', 'utf8')
     await writeFile(join(src, '_backup_meta.json'), JSON.stringify({
       name: 'pdf',
-      record: skillRecord({ origin: 'github', repo: 'a/b', commit: 'd'.repeat(40), group: '办公' }),
+      record: skillRecord({ origin: 'github', repo: 'a/b', commit: 'd'.repeat(40) }),
       created_at: '2026-08-20T00:00:00.000Z',
     }), 'utf8')
     await store.putBackup(id, { name: 'pdf', created_at: '2026-08-20T00:00:00.000Z' })
@@ -142,11 +161,33 @@ test('backups/restore：登记 ∪ 目录列表；恢复还原记录与分组', 
     const rec = store.getSkill('pdf')
     assert.equal(rec.origin, 'github')
     assert.equal(rec.repo, 'a/b')
-    assert.equal(rec.group, '办公')
-    assert.ok(store.getGroup('办公')) // 组不存在时自动重建
+    assert.equal(rec.commit, 'd'.repeat(40))
+    // 意图字段（disabled/group）不随记录恢复（组归属以配置为准）
+    assert.equal(rec.group, undefined)
     assert.match(await readFile(join(root, 'pdf', 'SKILL.md'), 'utf8'), /name: pdf/)
     // 备份内元数据文件不带回库目录
     await assert.rejects(readFile(join(root, 'pdf', '_backup_meta.json'), 'utf8'))
+  } finally {
+    await cleanup(root)
+    await cleanup(backupsRoot)
+  }
+})
+
+test('restore：无记录的备份 = 本地文件恢复，不写登记', async () => {
+  const root = await mkTmp()
+  const backupsRoot = await mkTmp()
+  try {
+    const store = fakeStore()
+    const id = 'mine-20260820000000000'
+    const src = join(backupsRoot, id)
+    await mkdir(src, { recursive: true })
+    await writeFile(join(src, 'SKILL.md'), '---\nname: mine\n---\n', 'utf8')
+    await writeFile(join(src, '_backup_meta.json'), JSON.stringify({ name: 'mine', record: null }), 'utf8')
+    await store.putBackup(id, { name: 'mine', created_at: '2026-08-20T00:00:00.000Z' })
+    const r = await restore({ root, store, id, backupsRoot, ctx: stubCtx() })
+    assert.equal(r.name, 'mine')
+    assert.equal(store.getSkill('mine'), undefined) // 本地文件恢复，无登记
+    assert.match(await readFile(join(root, 'mine', 'SKILL.md'), 'utf8'), /name: mine/)
   } finally {
     await cleanup(root)
     await cleanup(backupsRoot)
@@ -177,39 +218,16 @@ test('restore：未登记/越界 id 拒绝；目标已存在拒绝', async () =>
   }
 })
 
-test('disable/enable：disabled 标记翻转 + reconcile', async () => {
-  const root = await mkTmp()
-  try {
-    await writeSkill(root, 'pdf')
-    const store = fakeStore()
-    await store.putSkill('pdf', skillRecord())
-    const calls = []
-    const ctx = stubCtx(calls)
-    await disable({ root, store, name: 'pdf', ctx })
-    assert.equal(store.getSkill('pdf').disabled, true)
-    await enable({ root, store, name: 'pdf', ctx })
-    assert.equal(store.getSkill('pdf').disabled, false)
-    assert.deepEqual(calls, ['reconcile', 'reconcile'])
-    // 幂等：重复禁用不再 reconcile
-    await disable({ root, store, name: 'pdf', ctx })
-    await disable({ root, store, name: 'pdf', ctx })
-    assert.equal(calls.length, 3)
-    await assertRejectsCode(disable({ root, store, name: 'ghost', ctx }), 'not-found')
-  } finally {
-    await cleanup(root)
-  }
-})
-
 test('update：本地修改门禁 — 未确认抛 local-changes-confirmation-required', async () => {
   const root = await mkTmp()
   try {
     await writeSkill(root, 'pdf')
     const store = fakeStore()
-    // 先建立基线
-    const { scanLibrary } = await import('../lib/library.js')
-    await scanLibrary(root, store)
-    const base = store.getSkill('pdf')
-    await store.putSkill('pdf', { ...base, origin: 'github', repo: 'a/b', branch: 'main', commit: 'e'.repeat(40) })
+    // 手工构造入库基线（github 记录 + content_hash）
+    await store.putSkill('pdf', skillRecord({
+      origin: 'github', repo: 'a/b', branch: 'main', commit: 'e'.repeat(40),
+      content_hash: '0'.repeat(64),
+    }))
     // 改本地内容 → 与基线不符
     await writeFile(join(root, 'pdf', 'notes.txt'), '本地改动', 'utf8')
     await assertRejectsCode(update({ root, store, names: ['pdf'], confirmLocalChanges: false, ctx: stubCtx() }), 'local-changes-confirmation-required')

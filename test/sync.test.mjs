@@ -1,10 +1,11 @@
 // 挂载推导、物化、对账、健康、项目既有条目（mount-sync.md）。
-// 真实文件系统夹具：junction 在 Windows 无需特权；全局根一律注入临时
-// globalRootPath，真实用户根（~/.dsh/skills）不被测试触碰。
+// 意图（挂载规则）以参数注入（配置意图展平）；真实文件系统夹具：junction
+// 在 Windows 无需特权；全局根一律注入临时 globalRootPath，真实用户根
+// （~/.dsh/skills）不被测试触碰。
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdir, realpath, rm, symlink, lstat, writeFile, readFile } from 'node:fs/promises'
+import { mkdir, realpath, rm, symlink, writeFile, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   deriveDesired, materializeOne, detachOne, reconcile, health,
@@ -15,18 +16,19 @@ import { DSH_APP } from '../lib/state.js'
 import { mkTmp, cleanup, writeSkill } from './helpers.mjs'
 
 const apps = { dsh: { ...DSH_APP } }
-const emptyState = (projects = {}) => ({ projects, mounts: [], synced: {}, proxy: null })
+const emptyState = (projects = {}) => ({ projects, synced: {}, proxy: null })
+const g = (group, scope, project = null) => ({ group, app: 'dsh', scope, project })
 
-test('deriveDesired：组挂载推导与 warning', () => {
+test('deriveDesired：组挂载推导与 warning（挂载规则来自配置展平）', () => {
   const state = emptyState({ w1: 'E:/repo' })
-  state.mounts = [
-    { group: '默认', app: 'dsh', scope: 'global', project: null },
-    { group: '办公', app: 'dsh', scope: 'project', project: 'w1' },
-    { group: '办公', app: 'dsh', scope: 'project', project: 'gone' },
+  const mounts = [
+    g('默认', 'global'),
+    g('办公', 'project', 'w1'),
+    g('办公', 'project', 'gone'),
   ]
   const groups = { 办公: ['pdf'] }
   const { desired, warnings, legacyProjectIds } = deriveDesired({
-    state, apps, groups, skills: ['pdf', 'mine'], workspaceIds: new Set(['w1']),
+    state, apps, groups, mounts, skills: ['pdf', 'mine'], workspaceIds: new Set(['w1']),
   })
   assert.deepEqual(desired.get('pdf').map(targetKey), ['dsh|project|w1'])
   assert.deepEqual(desired.get('mine').map(targetKey), ['dsh|global|'])
@@ -37,9 +39,9 @@ test('deriveDesired：组挂载推导与 warning', () => {
 
 test('deriveDesired：未匹配遗留项目键标注「未匹配工作区」', () => {
   const state = emptyState({ legacy1: 'E:/gone' })
-  state.mounts = [{ group: '默认', app: 'dsh', scope: 'project', project: 'legacy1' }]
+  const mounts = [g('默认', 'project', 'legacy1')]
   const { warnings, legacyProjectIds } = deriveDesired({
-    state, apps, groups: {}, skills: ['pdf'], workspaceIds: new Set(),
+    state, apps, groups: {}, mounts, skills: ['pdf'], workspaceIds: new Set(),
   })
   assert.match(warnings[0], /未匹配工作区: legacy1/)
   assert.ok(legacyProjectIds.has('legacy1'))
@@ -204,22 +206,21 @@ test('reconcile：project 物化 → health 收敛 → 摘除', async () => {
   try {
     await writeSkill(root, 'pdf')
     const state = emptyState({ w1: proj })
-    state.mounts = [{ group: '默认', app: 'dsh', scope: 'project', project: 'w1' }]
+    const mounts = [g('默认', 'project', 'w1')]
     const saved = []
     const save = async (s) => saved.push(JSON.parse(JSON.stringify(s)))
-    const r1 = await reconcile({ root, state, apps, groups: {}, skills: ['pdf'], workspaceIds: new Set(['w1']), save, globalRootPath: groot })
+    const r1 = await reconcile({ root, state, apps, groups: {}, mounts, skills: ['pdf'], workspaceIds: new Set(['w1']), save, globalRootPath: groot })
     assert.equal(r1.errors.length, 0)
     assert.ok(r1.results.some((x) => x.name === 'pdf' && x.action === 'synced'))
     assert.ok(await isLink(join(proj, '.dsh', 'skills', 'pdf')))
     assert.equal(state.synced.pdf.length, 1)
     assert.equal(typeof state.synced.pdf[0].at, 'string') // 写入端补齐物化时间（rc.7 修复）
     // 再对账 → ok 幂等，health 无 missing-link
-    await reconcile({ root, state, apps, groups: {}, skills: ['pdf'], workspaceIds: new Set(['w1']), save, globalRootPath: groot })
-    const issues = await health({ root, state, apps, groups: {}, skills: ['pdf'], workspaceIds: new Set(['w1']), globalRootPath: groot })
+    await reconcile({ root, state, apps, groups: {}, mounts, skills: ['pdf'], workspaceIds: new Set(['w1']), save, globalRootPath: groot })
+    const issues = await health({ root, state, apps, groups: {}, mounts, skills: ['pdf'], workspaceIds: new Set(['w1']), globalRootPath: groot })
     assert.equal(issues.filter((i) => i.issue === 'missing-link' || i.issue === 'wrong-target').length, 0)
     // 移除挂载 → 摘除
-    state.mounts = []
-    const r3 = await reconcile({ root, state, apps, groups: {}, skills: ['pdf'], workspaceIds: new Set(['w1']), save, globalRootPath: groot })
+    const r3 = await reconcile({ root, state, apps, groups: {}, mounts: [], skills: ['pdf'], workspaceIds: new Set(['w1']), save, globalRootPath: groot })
     assert.ok(r3.results.some((x) => x.name === 'pdf' && x.action === 'removed'))
     assert.equal(await isLink(join(proj, '.dsh', 'skills', 'pdf')), false)
     assert.deepEqual(state.synced.pdf, [])
@@ -237,16 +238,15 @@ test('reconcile：global 作用域物化到注入的 globalRootPath（真实用�
   try {
     await writeSkill(root, 'pdf')
     const state = emptyState()
-    state.mounts = [{ group: '默认', app: 'dsh', scope: 'global', project: null }]
+    const mounts = [g('默认', 'global')]
     const save = async () => {}
-    const r1 = await reconcile({ root, state, apps, groups: {}, skills: ['pdf'], workspaceIds: new Set(), save, globalRootPath: groot })
+    const r1 = await reconcile({ root, state, apps, groups: {}, mounts, skills: ['pdf'], workspaceIds: new Set(), save, globalRootPath: groot })
     assert.equal(r1.errors.length, 0)
     assert.ok(await isLink(join(groot, 'pdf')))
     assert.equal(await realpath(join(groot, 'pdf')), await realpath(join(root, 'pdf')))
     // 记录落 synced；摘除走同一注入根
     assert.equal(state.synced.pdf[0].dir, join(groot, 'pdf'))
-    state.mounts = []
-    const r2 = await reconcile({ root, state, apps, groups: {}, skills: ['pdf'], workspaceIds: new Set(), save, globalRootPath: groot })
+    const r2 = await reconcile({ root, state, apps, groups: {}, mounts: [], skills: ['pdf'], workspaceIds: new Set(), save, globalRootPath: groot })
     assert.ok(r2.results.some((x) => x.name === 'pdf' && x.action === 'removed'))
     assert.equal(await isLink(join(groot, 'pdf')), false)
   } finally {
@@ -262,8 +262,8 @@ test('reconcile：缺 SKILL.md 的源拒绝物化（error 不中断）', async (
   try {
     await mkdir(join(root, 'broken'), { recursive: true })
     const state = emptyState({ w1: proj })
-    state.mounts = [{ group: '默认', app: 'dsh', scope: 'project', project: 'w1' }]
-    const r = await reconcile({ root, state, apps, groups: {}, skills: ['broken'], workspaceIds: new Set(['w1']), save: async () => {}, globalRootPath: groot })
+    const mounts = [g('默认', 'project', 'w1')]
+    const r = await reconcile({ root, state, apps, groups: {}, mounts, skills: ['broken'], workspaceIds: new Set(['w1']), save: async () => {}, globalRootPath: groot })
     assert.equal(r.errors.length, 1)
     assert.match(r.errors[0].error, /缺少 SKILL.md/)
     // 失败目标不产生有效 synced 记录（空数组或不存在）
@@ -294,8 +294,7 @@ test('孤儿清扫：指向配置目录但不在期望集的链接被摘除；�
     // 兄弟目录：共享字符串前缀（`<root>-sibling`）但不在配置目录内
     await symlink(join(sibling, 'sib'), join(parent, 'sib'), 'junction')
     const state = emptyState({ w1: proj })
-    state.mounts = [] // 无期望
-    await reconcile({ root, state, apps, groups: {}, skills: [], workspaceIds: new Set(['w1']), save: async () => {}, globalRootPath: groot })
+    await reconcile({ root, state, apps, groups: {}, mounts: [], skills: [], workspaceIds: new Set(['w1']), save: async () => {}, globalRootPath: groot })
     assert.equal(await isLink(join(parent, 'orphan')), false)
     assert.ok(await isLink(join(parent, 'theirs')))
     assert.ok(await isLink(join(parent, 'sib')))
@@ -320,11 +319,11 @@ test('未匹配遗留工作区：普通对账保留既有链接且仅报告 work
     const legacyDir = join(parent, 'pdf')
     const state = emptyState({ gone: proj }) // gone 不在活动集
     state.synced = { pdf: [{ app: 'dsh', scope: 'project', project: 'gone', method: 'junction', dir: legacyDir, at: 't' }] }
-    await reconcile({ root, state, apps, groups: {}, skills: ['pdf'], workspaceIds: new Set(), save: async () => {}, globalRootPath: groot })
+    await reconcile({ root, state, apps, groups: {}, mounts: [], skills: ['pdf'], workspaceIds: new Set(), save: async () => {}, globalRootPath: groot })
     // 既有链接保留
     assert.ok(await isLink(legacyDir))
     assert.equal(state.synced.pdf.length, 1)
-    const issues = await health({ root, state, apps, groups: {}, skills: ['pdf'], workspaceIds: new Set(), globalRootPath: groot })
+    const issues = await health({ root, state, apps, groups: {}, mounts: [], skills: ['pdf'], workspaceIds: new Set(), globalRootPath: groot })
     assert.ok(issues.some((i) => i.issue === 'workspace-unmatched' && i.name === 'gone'))
     assert.ok(!issues.some((i) => i.issue === 'extra-link'))
   } finally {
@@ -376,7 +375,7 @@ test('health：报告项目 local-skill/local-empty/local-foreign 与 dsh-invisi
     await writeFile(join(base, 'local', 'SKILL.md'), 'name: local\n', 'utf8')
     await mkdir(join(base, 'empty'), { recursive: true })
     const state = emptyState({ w1: proj })
-    const issues = await health({ root, state, apps, groups: {}, skills: ['pdf', 'Bad_Name'], workspaceIds: new Set(['w1']), globalRootPath: groot })
+    const issues = await health({ root, state, apps, groups: {}, mounts: [], skills: ['pdf', 'Bad_Name'], workspaceIds: new Set(['w1']), globalRootPath: groot })
     const byName = (n) => issues.filter((i) => i.name === n).map((i) => i.issue)
     assert.ok(byName('local').includes('local-skill'))
     assert.ok(byName('empty').includes('local-empty'))
@@ -396,11 +395,11 @@ test('health：期望位置缺失 → missing-link；项目真实目录占位按
     await writeSkill(root, 'pdf')
     await writeSkill(root, 'blocked')
     const state = emptyState({ w1: proj })
-    state.mounts = [{ group: '默认', app: 'dsh', scope: 'project', project: 'w1' }]
+    const mounts = [g('默认', 'project', 'w1')]
     const parent = join(proj, '.dsh', 'skills')
     await mkdir(join(parent, 'blocked'), { recursive: true })
     await writeFile(join(parent, 'blocked', 'note.txt'), 'x', 'utf8') // 非空无 SKILL.md → local-foreign
-    const issues = await health({ root, state, apps, groups: {}, skills: ['pdf', 'blocked'], workspaceIds: new Set(['w1']), globalRootPath: groot })
+    const issues = await health({ root, state, apps, groups: {}, mounts, skills: ['pdf', 'blocked'], workspaceIds: new Set(['w1']), globalRootPath: groot })
     const byName = Object.fromEntries(issues.map((i) => [i.name, i.issue]))
     assert.equal(byName.pdf, 'missing-link')
     assert.equal(byName.blocked, 'local-foreign')
@@ -420,8 +419,8 @@ test('reconcile：git exclude 托管块写入项目 .git/info/exclude', async ()
     await mkdir(join(proj, '.git', 'info'), { recursive: true })
     await writeFile(join(proj, '.git', 'info', 'exclude'), '# 既有内容\n', 'utf8')
     const state = emptyState({ w1: proj })
-    state.mounts = [{ group: '默认', app: 'dsh', scope: 'project', project: 'w1' }]
-    await reconcile({ root, state, apps, groups: {}, skills: ['pdf'], workspaceIds: new Set(['w1']), save: async () => {}, globalRootPath: groot })
+    const mounts = [g('默认', 'project', 'w1')]
+    await reconcile({ root, state, apps, groups: {}, mounts, skills: ['pdf'], workspaceIds: new Set(['w1']), save: async () => {}, globalRootPath: groot })
     const text = await readFile(join(proj, '.git', 'info', 'exclude'), 'utf8')
     assert.match(text, /# >>> dsh-skill-manager/)
     assert.match(text, /\/\.dsh\/skills\//)

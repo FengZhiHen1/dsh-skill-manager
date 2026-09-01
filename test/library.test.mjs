@@ -1,4 +1,5 @@
 // 库扫描与内容基线（inbound-operations.md 库扫描；storage-model.md skills 表）。
+// 本地 skill 无版本管理：未登记目录不写 storage、不回填内容基线；missing 仅 github。
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -40,7 +41,7 @@ test('dirHash：跳过 .git 与 __pycache__，结果确定', async () => {
   }
 })
 
-test('scanLibrary：平铺目录成员；未登记目录补登记 self', async () => {
+test('scanLibrary：本地目录仅展示不登记（无版本管理）；github 记录元数据叠加', async () => {
   const root = await mkTmp()
   try {
     await writeSkill(root, 'mine', { description: '自研技能' })
@@ -48,41 +49,35 @@ test('scanLibrary：平铺目录成员；未登记目录补登记 self', async (
     const items = await scanLibrary(root, store)
     assert.equal(items.length, 1)
     assert.equal(items[0].dir, 'mine')
-    assert.equal(items[0].origin, 'self')
-    assert.equal(items[0].group, '默认')
-    assert.equal(items[0].commit, null)
+    assert.equal(items[0].origin, 'self') // 无记录按自研展示
     assert.equal(items[0].description, '自研技能')
-    // 副作用：补登记（含立即建立内容基线）
-    const rec = store.getSkill('mine')
-    assert.equal(rec.origin, 'self')
-    assert.equal(rec.disabled, false)
-    assert.match(rec.content_hash, /^[0-9a-f]{64}$/)
+    // 不写 storage（本地 skill 直接使用本地文件）
+    assert.equal(store.getSkill('mine'), undefined)
+    assert.equal(store.skillEntries().length, 0)
   } finally {
     await cleanup(root)
   }
 })
 
-test('scanLibrary：github 记录带 commit；记录缺 content_hash 时回填', async () => {
+test('scanLibrary：github 记录带 commit；记录缺 content_hash 不回填（基线由入库路径维护）', async () => {
   const root = await mkTmp()
   try {
     await writeSkill(root, 'pdf')
     const store = fakeStore()
     await store.putSkill('pdf', skillRecord({
-      origin: 'github', repo: 'anthropics/skills', branch: 'main', commit: 'a'.repeat(40), group: '办公',
+      origin: 'github', repo: 'anthropics/skills', branch: 'main', commit: 'a'.repeat(40),
     }))
-    await store.putGroup('办公', { created_at: '2026-08-01T00:00:00.000Z' })
     const items = await scanLibrary(root, store)
     assert.equal(items[0].origin, 'github')
     assert.equal(items[0].commit, 'a'.repeat(40))
-    assert.equal(items[0].group, '办公')
-    // content_hash 回填
-    assert.match(store.getSkill('pdf').content_hash, /^[0-9a-f]{64}$/)
+    // 不回填 content_hash
+    assert.equal(store.getSkill('pdf').content_hash, null)
   } finally {
     await cleanup(root)
   }
 })
 
-test('scanLibrary：表中 origin 非 self 但目录缺失 → missing 条目', async () => {
+test('scanLibrary：表中 github 记录但目录缺失 → missing 恢复入口；self 记录不展示', async () => {
   const root = await mkTmp()
   try {
     const store = fakeStore()
@@ -91,24 +86,10 @@ test('scanLibrary：表中 origin 非 self 但目录缺失 → missing 条目', 
     assert.equal(items.length, 1)
     assert.equal(items[0].missing, true)
     assert.equal(items[0].origin, 'github')
-    // self 记录目录缺失不展示 missing（self 无上游可恢复）
+    // 旧 self 记录目录缺失不展示（本地 skill 无恢复语义）
     await store.putSkill('gone-self', skillRecord())
     const again = await scanLibrary(root, store)
     assert.equal(again.length, 1)
-  } finally {
-    await cleanup(root)
-  }
-})
-
-test('scanLibrary：disabled 标记与失效组名回落 默认', async () => {
-  const root = await mkTmp()
-  try {
-    await writeSkill(root, 'off')
-    const store = fakeStore()
-    await store.putSkill('off', skillRecord({ disabled: true, group: '已删组' }))
-    const items = await scanLibrary(root, store)
-    assert.equal(items[0].disabled, true)
-    assert.equal(items[0].group, '默认') // 组不在 groups 表 → 回落
   } finally {
     await cleanup(root)
   }

@@ -1,22 +1,38 @@
-// storage 域 spec 与门面（storage-model.md）。
+// storage 域 spec 与门面（storage-model.md）：五表投影 + 旧七表迁移 spec。
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { skillManagerSpec, mountKey, syncedKey, backupId, createStore } from '../lib/store.js'
+import { skillManagerSpec, legacySkillManagerSpec, syncedKey, backupId, createStore } from '../lib/store.js'
 import { fakeDomain, skillRecord } from './helpers.mjs'
 
-test('spec：域名/版本/七表齐全', () => {
+test('spec：域名/版本/五表投影（意图表已删除）', () => {
   assert.equal(skillManagerSpec.name, 'skill_manager')
-  assert.equal(skillManagerSpec.version, 1)
+  assert.equal(skillManagerSpec.version, 1) // 必须保持 1：storage-json 对 version 严格校验
   assert.deepEqual(
     Object.keys(skillManagerSpec.tables).sort(),
-    ['backups', 'check_cache', 'groups', 'mounts', 'projects', 'skills', 'synced'],
+    ['backups', 'check_cache', 'projects', 'skills', 'synced'],
   )
 })
 
-test('mountKey / syncedKey / backupId 格式', () => {
-  assert.equal(mountKey({ group: '默认', app: 'dsh', scope: 'global', project: null }), '默认|dsh|global|')
-  assert.equal(mountKey({ group: 'g', app: 'dsh', scope: 'project', project: 'w1' }), 'g|dsh|project|w1')
+test('legacySpec：旧七表齐备（迁移读意图用）', () => {
+  assert.deepEqual(
+    Object.keys(legacySkillManagerSpec.tables).sort(),
+    ['backups', 'check_cache', 'groups', 'mounts', 'projects', 'skills', 'synced'],
+  )
+  // 旧 skills 记录（含意图字段）经新 spec 校验时被 strip（兼容存量打开）
+  const parsed = skillManagerSpec.tables.skills.valueSchema.parse({
+    ...skillRecord({ origin: 'github', repo: 'a/b', commit: 'x'.repeat(40) }),
+    disabled: true,
+    group: '办公',
+  })
+  assert.equal(parsed.disabled, undefined)
+  assert.equal(parsed.group, undefined)
+  assert.equal(parsed.repo, 'a/b')
+  // 旧 self 记录仍可打开（兼容存量；不再新登记）
+  assert.equal(skillManagerSpec.tables.skills.valueSchema.parse(skillRecord()).origin, 'self')
+})
+
+test('syncedKey / backupId 格式', () => {
   assert.equal(syncedKey('pdf', { app: 'dsh', scope: 'global', project: null }), 'pdf|dsh|global|global')
   assert.equal(syncedKey('pdf', { app: 'dsh', scope: 'project', project: 'w1' }), 'pdf|dsh|project|w1')
   const id = backupId('pdf', new Date('2026-08-20T01:02:03.004Z'))
@@ -25,28 +41,17 @@ test('mountKey / syncedKey / backupId 格式', () => {
 
 test('syncedRecord：存量记录缺 at 放行、新记录带 at 通过（打开校验不炸域）', () => {
   const schema = skillManagerSpec.tables.synced.valueSchema
-  // 存量记录（早期写入端漏写 at）必须通过——否则 storage-domain 打开即整体失败
   assert.equal(schema.safeParse({ method: 'junction', dir: 'C:\\x' }).success, true)
-  // 新记录（sync.js 已补齐 at）同样通过
   assert.equal(schema.safeParse({ method: 'copy', dir: 'C:\\x', at: '2026-08-20T00:00:00.000Z' }).success, true)
 })
 
-test('门面：skills/groups/mounts/synced/projects/check/backups 读写往返', async () => {
+test('门面：skills/synced/projects/check/backups 读写往返', async () => {
   const store = createStore(fakeDomain())
   await store.putSkill('pdf', skillRecord({ origin: 'github', repo: 'a/b', commit: 'x'.repeat(40) }))
   assert.equal(store.getSkill('pdf').repo, 'a/b')
   assert.equal(store.skillEntries().length, 1)
-  assert.equal((await store.deleteSkill('pdf')), true)
+  assert.equal(await store.deleteSkill('pdf'), true)
   assert.equal(store.getSkill('pdf'), undefined)
-
-  await store.putGroup('办公', { created_at: '2026-08-01T00:00:00.000Z' })
-  assert.deepEqual(store.groupEntries().map(([n]) => n), ['办公'])
-
-  const mount = { group: '默认', app: 'dsh', scope: 'project', project: 'w1' }
-  await store.putMount(mount)
-  assert.deepEqual(store.mountEntries(), [['默认|dsh|project|w1', mount]])
-  await store.deleteMount(mount)
-  assert.equal(store.mountEntries().length, 0)
 
   await store.putSynced('pdf', { app: 'dsh', scope: 'global', project: null }, { method: 'junction', dir: '/x', at: 't' })
   assert.deepEqual(store.syncedEntries()[0][0], 'pdf|dsh|global|global')

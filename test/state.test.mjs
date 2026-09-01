@@ -1,21 +1,20 @@
-// 挂载状态投影、工作区镜像、挂载规则（mount-sync.md；storage-model.md）。
+// 挂载状态投影、工作区镜像（mount-sync.md；storage-model.md）。
+// 挂载规则不再入 storage（意图在配置），mounts 仅以参数参与统计。
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import {
-  loadState, saveState, ensureSeedMounts, loadCheckCache, saveCheckCache,
-  normalizeWorkspaceProjects, mirrorWorkspaceProjects, validateMountShape,
-  addMount, removeMount, globalRoot, projectRootOf, DSH_APP,
+  loadState, saveState, loadCheckCache, saveCheckCache,
+  normalizeWorkspaceProjects, mirrorWorkspaceProjects, globalRoot, projectRootOf,
 } from '../lib/state.js'
-import { fakeStore, assertRejectsCode, assertThrowsCode } from './helpers.mjs'
+import { fakeStore, assertThrowsCode } from './helpers.mjs'
 
-test('loadState/saveState：投影往返（projects/mounts/synced）', async () => {
+test('loadState/saveState：投影往返（projects/synced）', async () => {
   const store = fakeStore()
   const state = {
     projects: { w1: 'E:/repo' },
-    mounts: [{ group: '默认', app: 'dsh', scope: 'global', project: null }],
     synced: {
       pdf: [
         { app: 'dsh', scope: 'global', project: null, method: 'junction', dir: 'C:/x/pdf', at: 't1' },
@@ -27,14 +26,12 @@ test('loadState/saveState：投影往返（projects/mounts/synced）', async () 
   await saveState(store, state)
   const back = await loadState(store)
   assert.deepEqual(back.projects, { w1: 'E:/repo' })
-  assert.deepEqual(back.mounts, state.mounts)
   assert.equal(back.synced.pdf.length, 2)
   const projectRec = back.synced.pdf.find((r) => r.scope === 'project')
   assert.equal(projectRec.project, 'w1')
   assert.equal(projectRec.method, 'copy')
   // global 记录往返后仍归一为 project:null——syncedKey 的 'global' 哨兵 ↔
-  // parseSyncedKey 归一的桥接必须闭合（targetKey 用 '' 与 syncedKey 用 'global'
-  // 是分层设计，非不一致）。
+  // parseSyncedKey 归一的桥接必须闭合。
   const globalRec = back.synced.pdf.find((r) => r.scope === 'global')
   assert.equal(globalRec.project, null)
   assert.equal(globalRec.method, 'junction')
@@ -44,7 +41,6 @@ test('parseSyncedKey 桥接：project 作用域工作区 id 恰为 global 时不
   const store = fakeStore()
   const state = {
     projects: { global: 'E:/proj' },
-    mounts: [],
     synced: {
       pdf: [
         { app: 'dsh', scope: 'project', project: 'global', method: 'junction', dir: 'E:/proj/.dsh/skills/pdf', at: 't1' },
@@ -63,25 +59,7 @@ test('parseSyncedKey 桥接：project 作用域工作区 id 恰为 global 时不
 
 test('loadState：空域按空骨架', async () => {
   const state = await loadState(fakeStore())
-  assert.deepEqual(state, { projects: {}, mounts: [], synced: {}, proxy: null })
-})
-
-test('ensureSeedMounts：全新域种子默认挂载；非空域不再种子', async () => {
-  const store = fakeStore()
-  await ensureSeedMounts(store)
-  assert.deepEqual(store.mountEntries().map(([, m]) => m), [
-    { group: '默认', app: 'dsh', scope: 'global', project: null },
-  ])
-  // 用户删掉挂载但域内有 skill → 不重新种子
-  await store.deleteMount({ group: '默认', app: 'dsh', scope: 'global', project: null })
-  assert.equal(store.mountEntries().length, 0)
-  const fresh = fakeStore()
-  await fresh.putSkill('x', {
-    origin: 'self', repo: null, branch: null, commit: null, path_in_repo: null,
-    content_hash: null, origin_path: null, installed_at: 't', disabled: false, group: '默认',
-  })
-  await ensureSeedMounts(fresh)
-  assert.equal(fresh.mountEntries().length, 0)
+  assert.deepEqual(state, { projects: {}, synced: {} })
 })
 
 test('check 缓存：往返与 checkedAt 取最大', async () => {
@@ -107,17 +85,21 @@ test('normalizeWorkspaceProjects：拒绝无效或重复的 Host 投影', () => 
   assert.equal(out[0].title, 'w')
 })
 
-test('mirrorWorkspaceProjects：活动键覆写；未匹配项保持只读遗留', () => {
+test('mirrorWorkspaceProjects：活动键覆写；未匹配项保持只读遗留；挂载统计来自配置展平', () => {
   const state = {
     projects: { stale: 'E:/gone' },
-    mounts: [],
     synced: {},
     proxy: null,
   }
-  const snapshot = mirrorWorkspaceProjects(state, [{ id: 'w1', path: 'E:/repo', title: '仓库' }])
+  const configMounts = [
+    { group: '默认', app: 'dsh', scope: 'project', project: 'w1' },
+    { group: '办公', app: 'dsh', scope: 'project', project: 'w1' },
+  ]
+  const snapshot = mirrorWorkspaceProjects(state, [{ id: 'w1', path: 'E:/repo', title: '仓库' }], configMounts)
   assert.equal(state.projects.w1, 'E:/repo')
   assert.equal(state.projects.stale, 'E:/gone') // 未匹配保留
   assert.equal(snapshot.workspaceProjects.length, 1)
+  assert.equal(snapshot.workspaceProjects[0].mountCount, 2) // 两个组挂到 w1
   assert.deepEqual(snapshot.legacyProjects.map((l) => l.project), ['stale'])
   assert.equal(snapshot.legacyProjects[0].status, 'workspace-unmatched')
   // title 永不写入持久项目键
@@ -127,14 +109,12 @@ test('mirrorWorkspaceProjects：活动键覆写；未匹配项保持只读遗留
 test('mirrorWorkspaceProjects：旧键按路径归一到活动工作区', () => {
   const state = {
     projects: { oldKey: 'E:/repo' },
-    mounts: [{ group: '默认', app: 'dsh', scope: 'project', project: 'oldKey' }],
     synced: { pdf: [{ app: 'dsh', scope: 'project', project: 'oldKey', method: 'junction', dir: 'E:/repo/.dsh/skills/pdf', at: 't' }] },
     proxy: null,
   }
   const snapshot = mirrorWorkspaceProjects(state, [{ id: 'w1', path: 'E:/repo', title: '仓库' }])
   assert.equal(state.projects.oldKey, undefined)
   assert.equal(state.projects.w1, 'E:/repo')
-  assert.equal(state.mounts[0].project, 'w1')
   assert.equal(state.synced.pdf[0].project, 'w1')
   assert.equal(snapshot.legacyProjects.length, 0)
 })
@@ -142,7 +122,6 @@ test('mirrorWorkspaceProjects：旧键按路径归一到活动工作区', () => 
 test('mirrorWorkspaceProjects：无法安全合并同步记录时拒绝迁移且不改写 state', () => {
   const state = {
     projects: { oldKey: 'E:/repo', w1: 'E:/repo' },
-    mounts: [],
     synced: {
       pdf: [
         { app: 'dsh', scope: 'project', project: 'oldKey', method: 'junction', dir: 'E:/repo/.dsh/skills/pdf', at: 't1' },
@@ -156,41 +135,12 @@ test('mirrorWorkspaceProjects：无法安全合并同步记录时拒绝迁移且
   assert.equal(state.projects.oldKey, 'E:/repo')
 })
 
-test('validateMountShape：项目级挂载只能引用当前 Host 工作区', () => {
-  const apps = { dsh: { ...DSH_APP } }
-  const state = { projects: { w1: 'E:/repo' }, mounts: [], synced: {}, proxy: null }
-  assert.doesNotThrow(() => validateMountShape(state, apps, { group: '默认', app: 'dsh', scope: 'global', project: null }))
-  assertThrowsCode(() => validateMountShape(state, apps, { group: '默认', app: 'dsh', scope: 'project', project: 'gone' }), 'workspace-not-found')
-  assert.throws(
-    () => validateMountShape(state, apps, { group: '默认', app: 'claude', scope: 'global', project: null }),
-    /只管理 dsh/,
-  )
-  assert.throws(
-    () => validateMountShape(state, { dsh: { ...DSH_APP, enabled: false } }, { group: '默认', app: 'dsh', scope: 'global', project: null }),
-    /未启用/,
-  )
-  assert.throws(
-    () => validateMountShape(state, apps, { group: '默认', app: 'dsh', scope: 'global', project: 'w1' }),
-    /global 挂载不能携带项目/,
-  )
-})
-
-test('addMount/removeMount：重复与不存在', () => {
-  const state = { projects: {}, mounts: [], synced: {}, proxy: null }
-  const m = { group: '默认', app: 'dsh', scope: 'global', project: null }
-  addMount(state, m)
-  assertThrowsCode(() => addMount(state, m), 'mount-exists')
-  removeMount(state, m)
-  assert.equal(state.mounts.length, 0)
-  assertThrowsCode(() => removeMount(state, m), 'mount-not-found')
-})
-
 test('globalRoot/projectRootOf：路径事实', () => {
   assert.match(globalRoot(), /\.dsh[/\\]skills$/)
   // 注入 DSH home 时以其为准（与 dsh-skill-filesystem 的 resolveDshHome 对齐）
   assert.equal(globalRoot('D:/dsh-home'), join('D:/dsh-home', 'skills'))
   assert.equal(globalRoot(''), join(homedir(), '.dsh', 'skills'))
-  const state = { projects: { w1: 'E:/repo' }, mounts: [], synced: {}, proxy: null }
+  const state = { projects: { w1: 'E:/repo' }, synced: {}, proxy: null }
   assert.equal(projectRootOf(state, 'w1'), join('E:/repo', '.dsh', 'skills'))
   assert.equal(projectRootOf(state, 'gone'), undefined)
 })

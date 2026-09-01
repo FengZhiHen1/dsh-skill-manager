@@ -1,16 +1,16 @@
-// 配置命名空间与目录门禁（requirements.md R-22；plugin-runtime.md）。
+// 配置命名空间与目录门禁（requirements.md R-22；plugin-runtime.md「配置即意图」）。
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
-  CONFIG_NS, SKILLS_DIR_FIELD, configSchema, registerConfig, requireDir,
+  CONFIG_NS, SKILLS_DIR_FIELD, DEFAULT_GROUP, configSchema, registerConfig, requireDir,
   safePath, existsDir, writeJson,
 } from '../lib/dir.js'
 import { mkTmp, cleanup, assertThrowsCode } from './helpers.mjs'
 
-test('registerConfig：命名空间与 schema 正确', () => {
+test('registerConfig：命名空间与 schema 正确（意图字段齐备）', () => {
   assert.equal(CONFIG_NS, 'skill-manager')
   assert.equal(SKILLS_DIR_FIELD, 'skillsDir')
   const schema = configSchema()
@@ -27,17 +27,37 @@ test('registerConfig：命名空间与 schema 正确', () => {
   registerConfig(fakeCtx)
   assert.ok(captured)
   assert.equal(typeof captured.options.validate, 'function')
+  // 默认种子：默认组挂载全局（原 ensureSeedMounts 语义，配置化）
+  const resolved = schema({})
+  assert.equal(resolved[SKILLS_DIR_FIELD], '')
+  assert.equal(resolved.groups[DEFAULT_GROUP].mounts.length, 1)
+  assert.equal(resolved.groups[DEFAULT_GROUP].mounts[0].scope, 'global')
+  assert.deepEqual(resolved.skills, {})
+  assert.equal(resolved.intentMigrated, false)
 })
 
-test('registerConfig.validate：拒绝相对路径；接受任意绝对路径（存在性移运行期）', () => {
+test('registerConfig.validate：形式校验（绝对路径/组名/意图形状）；引用完整性放行', () => {
   let captured = null
   const fakeCtx = { settings: { register(ns, s, options) { captured = options } } }
   registerConfig(fakeCtx)
   const validate = captured.validate
+  // skillsDir
   assert.doesNotThrow(() => validate({ skillsDir: '' }))
   assert.throws(() => validate({ skillsDir: 'relative/path' }), /绝对路径/)
   assert.doesNotThrow(() => validate({ skillsDir: 'E:/Project/Skills' }))
   assert.doesNotThrow(() => validate({ skillsDir: 'E:/not/existing/yet' }))
+  // 组名形式
+  assert.doesNotThrow(() => validate({ skillsDir: 'E:/s', groups: { 办公: { mounts: [] } } }))
+  assert.throws(() => validate({ skillsDir: 'E:/s', groups: { 默认: { mounts: [] } } }), /保留字/)
+  assert.throws(() => validate({ skillsDir: 'E:/s', groups: { 'a/b': { mounts: [] } } }), /不能包含/)
+  // 引用完整性不在此拒绝（settings 写是字段级原子，跨字段中间态必须放行）
+  assert.doesNotThrow(() => validate({
+    skillsDir: 'E:/s',
+    groups: {},
+    skills: { pdf: { disabled: false, group: '不存在的组' } },
+  }))
+  // 意图形状
+  assert.throws(() => validate({ skillsDir: 'E:/s', skills: { pdf: { group: 42 } } }), /技能意图格式错误/)
 })
 
 test('requireDir：未配置抛 skilldir-unconfigured', () => {
