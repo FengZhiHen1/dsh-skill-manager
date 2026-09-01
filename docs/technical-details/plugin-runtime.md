@@ -1,0 +1,264 @@
+# 插件运行时
+
+## 权威范围
+
+本文唯一拥有 `dsh-skill-manager` 的包形态、组合挂载与部署、Host 服务与 RPC 传输（DSR-014）、请求调度与缓存、配置读写机制（配置即意图）、Client 设置页与生命周期。意图与状态的存储形状归 `storage-model.md`，业务操作语义归 `inbound-operations.md` 与 `mount-sync.md`，技术选型归 `technology-stack.md`，部署取舍归 DSR-012（`decisions/bundle-github-deployment-2026-09.md`）。模块划分归 DSH_Plugins 仓库 AGENTS.md 的 core/adapter 分层约定（DSR-015）。
+
+## 平面划分
+
+本插件没有模型可见工具或 Skill provider，按 Host/Client 两棵树划分：
+
+| 平面 | 职责 | 不承担 |
+|---|---|---|
+| Host | settings 命名空间注册、目录门禁、storage 域读写、DSH 工作区投影与镜像、网络、三路调度队列、`connection.rpc` channel `/skill-manager`、配置对账器 | 注册模型工具、贡献 Prompt |
+| Client | `settings.section`、三视图、配置卡片、settings 域直读直写、数据加载与错误呈现 | 本地持久化、直接写配置目录、手工注册项目 |
+
+部署形态为全局可用型：Bundle 挂载 Host 行，Client 随页面启动加载一次；设置页不依赖当前会话。
+
+## 包元数据
+
+```json
+{
+  "name": "dsh-skill-manager",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/adapter/index.js",
+  "exports": {
+    ".": "./src/adapter/index.js",
+    "./client": "./dist/client.js",
+    "./package.json": "./package.json"
+  },
+  "engines": { "node": "^22.19.0 || >=24" },
+  "files": ["src/", "dist/", "cordis.patch.yml"],
+  "dependencies": {
+    "schemastery": "^3.18.0",
+    "zod": "^3.25.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-settings": "*",
+    "@deepseek-ai/dsh-storage-domain": "*"
+  },
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-ui-primitives",
+        "@deepseek-ai/dsh-client-connection"
+      ]
+    }
+  }
+}
+```
+
+- `dsh.bundle.patch` 使包进入 reconcile 的 bundle 通道：安装后自动进入 `dsh.profile.bundles`，patch 随之应用（DSR-012）。
+- `dsh.client` 是 Client 被发现的前提；声明了就必须有 `exports["./client"]`（指向 esbuild 产物 `dist/client.js`，DSR-016）。
+- 运行时依赖：schemastery（settings 命名空间 schema）、zod（storage 域表记录校验，DSR-010）；`@deepseek-ai/dsh-settings` 与 `@deepseek-ai/dsh-storage-domain` 进 peerDependencies（+ devDependencies 供本地测试），与宿主共享同一实例（profile `autoInstallPeers: false`，运行时解析落到安装树/共享 fallback）；cordis 无 import 不声明。ZIP 解包用自研零依赖读取器（`src/core/base/zip.js`，基于 `node:zlib`，只读 store/deflate 与单卷 ZIP），不引入 fflate——免去安装链。若未来需要 zip64/加密/分卷再换库。
+- Host 半区无构建（`src/` 下 `.js` 即交付）；Client 半区产物提交入库，`check` 脚本含产物新鲜度哨兵（DSR-016）。
+
+## 组合挂载与部署
+
+`cordis.patch.yml`（即 bundle patch，单行 insert）：
+
+```yaml
+- insert:
+    - id: skill-manager
+      name: dsh-skill-manager
+```
+
+部署现状（DSR-012）：
+
+- **test profile**：`link:` 依赖源码直挂（`dsh plugin --profile test add link:...`），源码改动重启即生效；承担发布前实测门禁。
+- **web profile**：`github:FengZhiHen1/dsh-skill-manager` git 依赖（未钉 ref，lockfile 承载 resolution），经 `dsh plugin --profile web add` 安装，reconcile 自动写入 `dsh.profile.bundles`。
+- 该 GitHub 仓库是 web 部署源；`plugins/dsh-skill-manager/` 改造为 submodule 的待办登记于设计根目录 TODO.md。
+
+双重挂载禁止：bundle 挂载之外不要再在 profile/home 的 patch 层重复 insert 同一 `skill-manager` 行（同 id → `duplicate loader entry id`）。
+
+## Host 入口
+
+- 导出形态：`src/adapter/index.js` 默认导出 `{ name: 'skill-manager', inject: [...], apply(ctx) {...} }`，`apply` 同步完成注册，异步设施（storage 域、迁移）在后台就绪。
+- 硬依赖 `inject: ['connection', 'workspaceRegistry', 'storage', 'dshHomePath', 'settings']`（DSR-014 起移除 `webServer` 与 `loader`）：
+  - `connection`：注册 RPC channel `/skill-manager`（`ctx.connection.rpc.handle`，围栏由平台逐请求应用，注册 fiber-scoped 随卸载自动摘除）。
+  - `workspaceRegistry`：项目级读写的 Host 唯一来源；每次构建库视图时读取其实体的稳定 id、当前 title 与规范化 path 并刷新 `projects` 镜像。
+  - `storage`：域设施（`ctx.storage.domain.open(spec)`，域在 `apply` 后异步打开、Fiber 清理时关闭；打开失败只降级 API 为 `internal`，不拖垮 Host）。
+  - `dshHomePath`：定位 `$DSH_HOME`（备份树根 `skill-manager/backups`、全局 skill 根 `skills`）。
+  - `settings`：配置即意图的载体，命名空间注册的硬依赖。
+- adapter 五文件分工（模块边界归仓库 AGENTS.md 的 core/adapter 约定）：`index.js` 入口装配、`settings.js` 命名空间注册、`storage.js` spec 与开域、`migrate.js` 迁移编排、`rpc.js` 通道薄接线；全部领域逻辑在 `src/core/`。
+- `apply` 内装配模块实例，所有可变状态（域句柄、队列、缓存、定时器）放在本次 Fiber 的局部对象中，不使用模块级可变单例。
+- settings 命名空间注册（`adapter/settings.js` 的 `registerConfig`，schema 与校验来自 `core/model/intent.js`）：形状归 `storage-model.md`；`applies` 取默认 `live`，保存后立即生效。旧 storage 意图的一次性迁移（`adapter/migrate.js`）先于新域打开执行，失败仅告警（语义归 `storage-model.md`）。
+- 目录解析：每次 RPC 从 settings scope 读当前 `skillsDir`，不做启动缓存；为空时所有方法统一返回 `skilldir-unconfigured`，不访问任何目录路径。
+- 通道注册：`ctx.connection.rpc.handle('/skill-manager', (endpoint, payload) => service.dispatch(endpoint, payload))`（`adapter/rpc.js`）；平台对每个请求先应用围栏（见「RPC 传输」），handler 内不再做防伪。
+- 对账器：`scope.watch` 监听配置变更 → 200ms 防抖 → `sync` 对账（意图展平 → 投影 storage → 物化文件系统 → 预热缓存）；对账失败只记日志并反映在健康列表，不打断配置编辑。
+- 启动预热：`apply` 后延迟 1s 后台调用 `warm`，配置了目录时首次打开设置页秒出。
+- 异常边界：`service.dispatch` 捕获所有错误并按 Result 信封返回（不抛出）；未捕获异常只记录日志，不冒泡杀死 Host。
+
+## 请求调度与缓存（低延迟路径，DSR-013）
+
+调度策略收在 core `service.js` 的 `dispatch`（DSR-015 起从入口函数迁入；队列与读屏障是 R-17 一致性语义的一部分，属于领域而非传输）。三类分流：
+
+1. **读方法**（`overview`/`warm`/`health`/`project-skills`/`backups`）**不排队**，直接读进程内 bundle 缓存快照；写操作进行中（`writeQueue.busy`）时读请求先等写屏障结算，避免冷扫读到半写状态。
+2. **文件写方法**（`add`/`update`/`import`/`remove`/`restore`/`claim-empty`/`sync`）FIFO 串行（R-17 写写互斥）；每个写方法收尾 `refreshCache()` 重算并预热缓存，失败不掩盖写结果（清缓存由下次读冷扫兜底）。
+3. **网络慢方法**（`check`/`search`/`repo-skills`）独立队列，绝不阻塞读写——zipball 下载最长 90s 不再拖住任何列表刷新。
+
+缓存层（`src/core/base/cache.js`，全部以配置目录为事实边界）：
+
+| 缓存 | 键与失效 | 用途 |
+|---|---|---|
+| bundle 快照 | 配置目录 root + 约 800ms TTL + 单飞冷扫；写后 `refreshCache` 预热 | library/groups/health/overview 共享的库快照（扫描项、组文档、挂载意图、工作区投影）；缓存热时读请求零扫描零存储读 |
+| meta 缓存 | `${root}\0${dir}` + SKILL.md 的 stat 签名（`mtimeMs:size`） | 重扫退化为 N 次 stat，签名一致即复用 frontmatter 解析结果 |
+| hash 缓存 | 目录 + 5s TTL；写操作统一清空 | `check` 的展示性本地修改判定；`update` 的破坏性判定强制 `fresh` 重算 |
+| health 代际 | 随 bundle 引用失效 | 同一快照内复用文件系统走查结果 |
+
+一致性：读全部返回同一冻结快照引用（永不撕裂）；写操作串行且缓存只在写完成后更新；配置目录变更 → 缓存键（root）失配 → 自动冷扫。
+
+## RPC 传输（DSR-014）
+
+- 通道：官方通用 RPC（`connection.rpc`，知识库 `client/17`）。Host 侧 `ctx.connection.rpc.handle('/skill-manager', handler)`（`adapter/rpc.js`，注册 fiber-scoped、卸载自动摘除）；Client 侧 `ctx.connection.rpc.call('/skill-manager', method, payload)`。方法名即 endpoint（`POST /skill-manager/<method>`）；平台校验信封、端点与 `Content-Type`（非 JSON 415、非法信封 400、方法 ≠ endpoint 拒绝）。
+- 围栏与认证由平台承载，插件不再自携带（旧 `lib/fence.js` 删除）：每个请求先过 `isTrustedApiRequest`（Host 头回环或 connection 行 `trustedHosts`；拒绝 `sec-fetch-site: cross-site`；带 `origin` 时其 host 必须与请求 host 一致）——与旧 fence 同一算法，部署运行时 `0.1.1-rc.2` 实证等价；alpha.3 起平台在围栏之后追加 browser-auth（process token/cookie，未认证 401）。被围栏/认证拒绝的请求不进 handler。
+- 方法结果（平台 `result` 字段）为传输中立 Result，由 core `service.js` 产出：
+
+```json
+{ "ok": true, "value": {} }
+```
+
+```json
+{ "ok": false, "error": { "code": "name-conflict", "message": "skills/pdf 已存在", "details": { "retryable": false } } }
+```
+
+- 错误映射（`service.js`）：`SkillManagerError` → `code`/`message` 原样、`details.retryable` 取错误标记；`GhError` 网络分类 → `code` = `kind`，`retryable` 仅 `unreachable`/`rate_limited` 为 `true`；未分类异常 → `code: "internal"`（不冒泡杀死 Host）。`update` 的 `local-changes-confirmation-required` 等稳定 code 不变。
+- 方法清单（配置读写不在此层——意图经 settings 域直读直写，见「配置即意图」）：
+
+| 方法 | 主要 payload | value 摘要 |
+|---|---|---|
+| `overview` | 无 | 只读视图（低延迟路径）：`{ root, lib, health, workspaceProjects, legacyProjects }`；`lib.skills` 每项含意图叠加（disabled/group）与挂载目标推导（targets）、上游检查缓存（upstream）；`lib` 附推导 `warnings` 与检查时间 `checkedAt`；`root` = 配置目录绝对路径（供修复提示词） |
+| `warm` | 无 | 启动预热（只读）：预热 bundle 扫描与 health 缓存 |
+| `search` | `query, limit, offset` | `query, count, skills` |
+| `repo-skills` | `repo, ref` | `repo, branch, commit, candidates, via` |
+| `add` | `repo, dir, ref, as` | `name, repo, branch, commit, sync` |
+| `check` | `names?` | 结果数组；并行探测（同 repo 同分支去重），合并写入检查缓存（DSR-008） |
+| `update` | `names?, confirmLocalChanges?` | `{ results, sync }`；检测到本地修改而未确认时返回 `local-changes-confirmation-required` |
+| `import` | `path, as` | `name, source, sync` |
+| `backups` | 无 | 备份数组（`id, name, time, has_meta`） |
+| `restore` | `id` | `name, sync` |
+| `remove` | `name, keepFiles` | `name, backup, detached` |
+| `project-skills` | `workspaceId?` | `workspaceProjects, entries, legacyProjects` |
+| `claim-empty` | `workspaceId, name` | `name, workspaceId, sync` |
+| `sync` | `method?` | `{ results, warnings, errors }` |
+| `health` | 无 | `issues` |
+
+- `update` 的本地修改确认由 Host 强制执行（语义归 `inbound-operations.md`）：未携带 `confirmLocalChanges: true` 时不得下载或覆盖；Client 的遮罩确认只是该安全边界的交互入口。
+- 未配置目录时所有方法统一返回 `code: "skilldir-unconfigured"`、`retryable: false`（含 search/repo-skills，避免"可搜不可落"的半可用状态），消息提示先到设置「插件」区配置「本地 skill 目录」。
+- 配置的目录缺失/不可访问时，所有方法统一返回 `code: "skilldir-missing"`、`retryable: false`；插件保持存活，不阻塞启动。
+
+## 配置即意图（核心模型，DSR-011）
+
+- 用户意图的唯一事实源是 **settings 命名空间**（`$DSH_HOME/settings.yaml` 的 `skill-manager` 段），DSH 官方配置机制承载（热加载、跨进程写锁、保注释、`applies: live`）。字段形状与校验语义归 `storage-model.md`。
+- UI（技能页与配置卡片）经标准 settings 域直读直写：`ctx.settingsScope.bind({ namespace: 'skill-manager' })`（快照 `value`/`user` 层、`set`/`unset`/`subscribe`），底层走 `settings.describe`/`mutate`；rc.7 起注册即暴露，`settings-not-exposed` 白名单已移除。
+- 渲染即时（settings mirror 页面启动即加载）、保存即生效；校验失败由 settings 原生拒绝（快照回滚，客户端对比检测并提示 + 一键复制修复提示词）。**没有任何自定义配置写协议**。
+- 配置写是字段级原子；引用完整性（组/工作区是否存在）由对账层容忍回落（推导跳过失效引用并警告），跨字段编辑的中间态必须放行。
+- storage 域降级为运行时投影；旧七表意图由一次性迁移投影进 settings（语义归 `storage-model.md`）。
+- 本地 skill 无版本管理：self 目录不登记 storage；local 导入不留内容基线；`disable/enable` 归配置，无独立端点。
+- 任何文件/网络变更方法成功后的 `value` 只返回该操作结果；Client 随后重取 `overview`（命中写后预热缓存，零扫描）。
+
+## Client 入口
+
+- 源码 `src/client/`（JSX 多文件，DSR-016），esbuild 产单文件 `dist/client.js`：惰性 CommonJS 工厂闭包，由 `window.__ModuleLoader__.load({ id: 'dsh-skill-manager', factory })` 包裹，导出 `{ inject, apply }`；`inject: ['slots', 'workspaces', 'settingsScope', 'remote', 'connection']`。产物提交进 git；修改源码后须重建产物（`check` 脚本哨兵保证新鲜度），已挂载包的 client 产物更新刷新页面即生效（无需重启）。
+- 运行时外部依赖只有 `react`、`react-dom` 与 `dsh.client.inject` 声明的 `@deepseek-ai/dsh-client-*` 包（含 `dsh-client-connection`，DSR-014）；esbuild 外化集合与该声明一致。
+- Client `apply` 的核心注册：
+
+```text
+slots.inject('settings.section', () =>
+  slots.register(
+    { name: 'settings.section', id: 'skills', order: 16, label: '技能', inject: () => ({ call, workspaces, scope }) },
+    SkillsSection
+  )
+)
+slots.inject('settings.plugin.item', () =>
+  slots.register(
+    { name: 'settings.plugin.item', key: 'skill-manager', inject: () => ({ scope, workspaces }) },
+    SkillManagerCard
+  )
+)
+```
+
+- `settings.section` 注册 `id=skills`、`order=16`、中文标签 `技能`；本插件只使用页面渲染区，不扩展设置导航之外区域。
+- 数据源：挂载时经 `settingsScope` 快照直读配置（渲染即时，永不等待网络）；列表/健康/工作区来自单次 `overview`（缓存热时零扫描）。管理/搜索/同步三视图从配置 + 库元数据派生：管理视图的 origin/group/q 过滤为纯前端本地过滤（零请求）；禁用/分组/挂载开关等配置操作 = `scope.set('groups'|'skills', next)` 整字段替换（本地即时生效，Host 对账器后台收敛）；写被拒（settings 校验失败）时快照回滚，组件对比检测后提示原因 + 「复制修复提示词」（含配置目录路径、失败字段、尝试值/当前值、排查方向，供 Agent 修复）；同步视图额外读取 Host 的 `project-skills` 投影（health 直接用 overview 数据）；`add/import/update/remove/restore/check` 等非配置操作仍是请求-响应。配置卡片保存/重置 `skillsDir`（`settings/document-updated` 事件，经 `ctx.remote.$on` 订阅）时技能页自动刷新，无需手动点「刷新」。不写 `localStorage` 或 IndexedDB。
+- 插件配置卡片：注册 `{ name: 'settings.plugin.item', key: 'skill-manager' }`（rc.7 起该槽为 keyed，key = 本卡片编辑的 settings 命名空间）卡片，注入 `{ scope, workspaces }`；经 settings 域直读直写 `skillsDir`。卡片从快照取 `value.skillsDir` 与 `user` 层覆盖标记，订阅快照变化；「选择…」按钮经 `workspaces.pickDirectory()` 调系统目录选择器（File System Access API 不暴露绝对路径，故不用浏览器 API）；保存 `scope.set('skillsDir', ...)`、清空/重置 `scope.unset('skillsDir')`；Host `validate` 拒绝（如非绝对路径）时错误在卡片 footer 回显，草稿保留供修改，不落盘。首次 Host 应答前（`status: 'loading'`）不渲染「未配置」也不允许写入。
+- 未配置状态：技能页经 `settingsScope` 快照判定 `skillsDir` 为空 → 直接显示未配置引导（**不等 overview**，配置渲染零网络）；插件配置卡片始终可用，是进入配置的唯一入口。
+- 设置导航图标补丁：宿主设置外壳按 section id 硬编码导航图标且未开放注册，「技能」会落到默认齿轮与「通用」撞图标；Client 用 MutationObserver 找到本插件导航行，把齿轮 svg 就地改写为 ✦ 星形（对齐设计稿导航行）。宿主 DOM 结构变化导致找不到目标时静默保持原图标，不影响任何功能。
+- 样式：对齐 DSH 原生——主题 token 用 `--dsw-alias-*` 系列（ui-theme 定义），按钮/输入/徽章复用 ui-primitives 的 `Button`/`Input`/`Pill` 原子组件，状态色用 `--dsw-alias-state-*-primary` token + `color-mix` 透明晕；不注入全局样式表。
+- 卸载：`slots.register` 返回的 disposer 进入 Fiber effect；组件内定时器、abort 控制器与 MutationObserver 在卸载时清理。
+
+## 视图设计
+
+### 管理视图
+
+- 信息层级：分组与当前组选定的使用范围在技能库之前；分组胶囊行是纯选择器（全部/默认/各命名组，附成员计数），仅保留「＋ 新建分组」chip（DSR-009）。
+- 新建分组：点按 chip 打开模态对话框（与更新确认同一遮罩语言），输入组名并提示「新组复制『默认』组的挂载规则作为起步；组名 1–30 字符」；创建成功后选中该组便于立即配置范围（DSR-009）。客户端预检长度与保留字，完整规则由 Host validate 兜底。
+- 改名/删除：入口在「当前分组」卡片标题行（DSR-009）；改名点按后标题行变内联编辑态（输入 + 保存/取消，Enter/Esc 快捷），成员与挂载规则同步改名；删除二次确认并提示成员回落默认组；「默认」为虚拟组，不出现入口。
+- 分组项目配置：使用范围将每个活动 DSH 工作区作为可选目标；切换直接编辑 settings 配置，不提供项目注册或路径编辑。全局目标与工作区目标用同一复选语义呈现，附「取消勾选会移除该目标下全部链接」提示。
+- 库工具条：搜索过滤、来源筛选、`↻ 刷新`（重新检查全部上游并刷新列表，DSR-008）、`＋ 导入 skill`（主按钮）。行信息含名称与 meta 行（来源 · 分组 · 生效位置 · 上游 commit 短指纹），描述作为悬停提示；行以描边卡片呈现（对齐 01/07 帧）。
+- 页签为文字页签（激活下划线），每页一句副标题；视觉基元统一为：白底描边卡（范围卡/表单卡/行卡）、浅底卡（仓库/项目/信息条）、状态点 + 状态色晕卡（健康/提示），色值全部走 `--dsw-alias-*` token。
+- 状态直显（DSR-008）：行徽章只表达状态——`缺失`/`已禁用`/`无 SKILL.md` 为本地扫描即得；`已是最新`/`可更新`/`检查失败`/`本地有修改` 来自检查缓存（`overview` 的 `upstream` 字段），无网络请求；技能库标题旁标注「上游状态检查于 HH:MM」。徽章为原生 pending pill 样式（灰底灰字；可更新深色字；仅警告态用琥珀/红）。
+- 行操作收进 `⋯` 菜单（DSR-008）：`立即更新`、`禁用`、`移动到分组 ▸`（悬停展开分组子菜单，当前组打勾）、`删除`（红色）；缺失行只保留 `恢复`/`删除`，禁用行以 `启用` 替代更新/禁用。行内不再放置按钮或换组下拉。`立即更新` 先对单行触发 `check`，发现 `locally_modified` 或 `baseline_missing` 时必须先显示遮罩确认对话框（明确说明覆盖范围、不会自动备份本地修改，勾选确认复选框后才以 `confirmLocalChanges` 重试）；Host 返回 `local-changes-confirmation-required` 时同样转入该对话框。
+- 同步健康提示：存在健康问题时在技能库上方显示琥珀提示条（含未匹配工作区提示），`查看` 跳转同步视图。
+
+### 搜索视图
+
+- 关键词搜索框调用 skills.sh（搜索为主按钮，Enter 快捷）；结果标题为「"query" 的搜索结果 · N 个」，结果行以描边卡片展示名称、仓库、目录、热度与入库按钮。
+- 直接添加为独立卡片「从 GitHub 仓库添加」（02 帧）：`owner/repo` 与可选分支，按钮语义为「探测仓库」（DSR-007）；先调 `repo-skills`，单候选直接入库，多候选展示候选选择列表（与搜索结果入库共用）。
+- 候选列表（DSR-008）：仓库信息用浅底卡；复选框多选 + 建议名称，底部「已选 N 个 · 共 M 个候选」与统一的「入库所选」主按钮；批量入库串行逐个 `add`，单条失败不中断批次，结束后汇总报告；附琥珀提示卡（同名同仓库改用更新、同名异源先出库、分支回退顺序）。
+- 搜索失败保留上一次成功结果与失败原因，不覆盖输入。
+
+### 同步视图
+
+- 矩阵：行 = skill，列 = dsh 全局 + 当前 DSH 工作区；单元格为生效、错误、不适用、`shadowed`（语义归 `mount-sync.md`），以状态色胶囊呈现（表头为浅灰圆角条）。列多时横向滚动，Skill 列冻结在左侧（DSR-008）。
+- `shadowed` 表示工作区本地含同名 SKILL.md，项目级合并优先于全局挂载；单元格只读提示原因，不提供修复按钮。
+- 工作区项目区：浅底卡只读列出当前 DSH 工作区的 title、规范化路径、workspaceId 截断与「N 个组使用」胶囊；不提供新增、改名、改路径或删除。工作区生命周期由 DSH 原生工作区界面负责。
+- 未匹配工作区的遗留项显示为迁移问题，保留原路径和当前保留链接数；普通「应用并修复」不删除它的既有链接。
+- `project-skills` 的条目分类仅用于矩阵单元格状态判定（含 `shadowed`），页面不单列本地条目区（05 帧）；`claim-empty` 保留 Host API，暂无界面入口。
+- 健康列表按严重级着色卡片（05 帧：状态点 + `issue · 名称 @ 目标` 加粗标题 + 后果说明）；`应用并修复` 为主按钮，调 `sync` 后刷新矩阵与健康。
+
+### 导入
+
+- 管理视图工具条打开导入整页卡片（04 帧）：字段纵排（目录/.zip 路径 + 浏览…、可选安装名称），底部取消/导入（主按钮）；卡片下方「导入后」说明区列出两条后果（来源记录 + 复制进库、按分组挂载生效）；成功后关闭并刷新列表。
+
+### 插件配置卡片
+
+- 设置「插件」区卡片：单字段「本地 skills 目录」；空值显示「已覆盖」标记消失并提示先配置；保存后立即生效，技能页下次拉取即按新目录工作；卡片不提供任何库操作，管理操作全部在技能页。
+
+## 生命周期与副作用清单
+
+| 副作用 | 建立 | 清理 |
+|---|---|---|
+| RPC channel | `apply` 内 `ctx.connection.rpc.handle('/skill-manager', ...)` | 平台 `owner.effect` 持有，随 Fiber 卸载自动摘除（DSR-014） |
+| storage 域 | `apply` 后异步 `ctx.storage.domain.open(spec)`（迁移先行） | 域句柄 `close()` 进 `ctx.effect` |
+| settings 命名空间 | `apply` 内 `ctx.settings.register` | register 返回 disposer |
+| 配置对账器 | `apply` 内 `scope.watch` + 200ms 防抖 → sync | watch disposer + 防抖定时器随 Fiber 释放 |
+| 启动预热 | `apply` 内 1s 延迟定时器 | 定时器随 Fiber 释放 |
+| 调度队列 | `apply` 内创建（文件写队列 + 网络队列） | 随 Fiber 释放 |
+| 缓存层 | `apply` 内创建（`src/core/base/cache.js`） | 随 Fiber 释放（纯内存） |
+| 网络请求 | 每次调用创建 AbortController（API 15s / 下载 90s） | 超时或完成时 abort |
+| settings.section | Client `slots.register` | 注册返回 disposer |
+| 插件配置卡片 | Client `slots.register`（settings.plugin.item） | 注册返回 disposer |
+| 配置变更订阅 | Client `ctx.remote.$on('settings/document-updated')` | 订阅返回 disposer |
+| 导航图标补丁 | Client MutationObserver | `disconnect()` |
+| 组件状态 | 组件局部 | React 卸载 |
+
+## 验证计划
+
+1. `dsh --profile <name> --dump-config`：确认只有一行 `skill-manager`，依赖边恰为 `connection`、`workspaceRegistry`、`storage`、`dshHomePath`、`settings` 五项（无 `webServer`/`loader`）。
+2. 浏览器 `window.__DSH_BOOT__.entries`：确认 `dsh-skill-manager` 与 `/plugins/dsh-skill-manager/client.js` 存在。
+3. 配置冒烟（settings 域）：`settings.describe` 返回 `skill-manager` 命名空间（含 `groups/skills` 意图字段与默认种子「默认组→全局」）；卡片 `set` 相对路径被拒（`本地 skill 目录必须是绝对路径`）；`set` 绝对路径后快照读到新值、settings.yaml 落盘 `skill-manager` 段、出现「已覆盖」；`reset`（unset）回到未配置、覆盖标记消失。
+4. 设置页出现 `技能`，切到目标会话与对照会话均不影响页面；未配置时**立即**显示引导（不等网络）；配置目录后技能页自动刷新出库。
+5. 配置操作冒烟（settings 直写）：禁用/启用/移动/挂载开关/建组/改名/删组 → UI 即时变化，settings.yaml 落盘，对账器 200ms 内物化/摘除链接；非法组名（保留字）被 settings 拒绝 → 快照回滚 + 修复提示词（含目录路径）可复制。
+6. 执行一次 add、check、update、import、remove、restore、sync，逐项对照 `requirements.md` 的验收条件。
+7. 按 AC-12 构造项目级既有条目的五类现场，确认只有 `claim-empty` 会修改目标目录。
+8. 迁移冒烟：旧版（七表 storage + mounts/groups 意图）启动 → settings.yaml 出现 `intentMigrated: true` 与迁移后的 `groups/skills`；再次启动不重复迁移；旧 self 记录不迁移。
+9. 插件行移除后重启：RPC channel 消失（`/skill-manager/*` 404），槽位消失，已挂载链接保留。
+10. 未配置状态下调用各方法，确认统一 `skilldir-unconfigured` 且无任何目录读写。
+11. `npm run check` 全绿：语法检查 + 单元测试（`node --test test/*.test.mjs`）+ 分层门禁（`tools/plugin-layering-check.mjs`）+ client 产物新鲜度哨兵（DSR-016）。
+12. 传输冒烟（DSR-014）：`ctx.connection.rpc.call('/skill-manager', 'overview')` 正常应答；伪造 `sec-fetch-site: cross-site` 请求被平台围栏 403；浏览器 `connection` 服务注入生效（PENDING 行不出现）。

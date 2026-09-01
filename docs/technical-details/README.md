@@ -1,0 +1,21 @@
+# dsh-skill-manager 技术细节
+
+## 权威范围
+
+本文是 `dsh-skill-manager` 技术细节目录的入口，唯一拥有本目录的阅读顺序与文档地图。机制事实归各机制文档；本文不重复定义机制。
+
+## 阅读顺序
+
+1. `storage-model.md`：先读目录语义、settings 意图形状、storage 域表形状与并发契约。
+2. `inbound-operations.md`：再读库内容如何进出。
+3. `mount-sync.md`：读挂载物化与对账。
+4. `plugin-runtime.md`：最后读包形态、部署、传输、调度与 UI。
+
+## 文档地图
+
+| 文档 | 唯一权威范围 |
+|---|---|
+| `storage-model.md` | 目录读取语义、settings 命名空间意图形状与校验、storage 域表形状、备份目录、并发策略与校验规则 |
+| `inbound-operations.md` | 扫描、搜索、入库、检查、更新、导入、出库、备份恢复、禁用启用语义 |
+| `mount-sync.md` | dsh App 语义、DSH 工作区项目镜像、挂载推导、物化、对账、健康与既有条目 |
+| `plugin-runtime.md` | 插件包形态、组合挂载与部署、Host 服务、RPC 传输（DSR-014）、请求调度与缓存、Client 设置页与生命周期 |

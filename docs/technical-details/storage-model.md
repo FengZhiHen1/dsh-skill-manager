@@ -1,0 +1,164 @@
+# 目录、配置与状态存储
+
+## 权威范围
+
+本文唯一拥有：配置目录（本地 skills 目录）的读取语义、settings 命名空间 `skill-manager` 的意图形状与校验、DSH storage 域（`skill_manager`）的表形状、备份目录布局、名称与校验规则、并发策略。库内容操作归 `inbound-operations.md`，挂载物化归 `mount-sync.md`，RPC 信封与调度归 `plugin-runtime.md`。设计取舍归决策记录 DSR-010（`decisions/pure-skill-dir-and-dsh-storage-2026-08.md`）与 DSR-011（`decisions/config-as-intent-2026-09.md`）。
+
+## 结论先行
+
+- 三类状态三个事实源：库内容 = 配置目录本身；用户意图（目录路径、分组与挂载、禁用与组归属）= settings 命名空间 `skill-manager`（`settings.yaml` 的 `skill-manager` 段）；运行时投影（入库元数据、物化记录、工作区镜像、检查缓存、备份登记）= storage 域 `skill_manager`（`$DSH_HOME/storages/skill_manager.json`）。
+- storage 域为五表：`skills`/`synced`/`projects`/`check_cache`/`backups`；旧七表 spec 仅保留供一次性迁移读取。
+- 备份文件树在 `$DSH_HOME/skill-manager/backups/`，与配置目录无关。
+
+## 已核实事实
+
+- 配置目录由设置中插件配置项「本地 skills 目录」决定（默认为空即未配置，见需求 R-22 与 DSR-005）。
+- settings 命名空间经 `ctx.settings.register(settingsNamespace('skill-manager'), schema, { validate })` 注册，落盘 `settings.yaml` 的 `skill-manager` 段；`applies` 取默认 `live`，保存立即生效；rc.7 起注册即暴露，浏览器端经标准 settings 域直读直写。
+- storage 域以 `defineDomain` 声明 `skill_manager` 域并经 `ctx.storage.domain.open(spec)` 打开；json 后端落盘 `$DSH_HOME/storages/skill_manager.json`。
+- `$DSH_HOME` 经 Host 的 `dshHomePath` 服务定位（`ctx.dshHomePath(...segments)`），插件不自行解析环境变量。
+- 域读为内存同步读；写为「持久化先行」单链：backend 落盘成功后才改内存并发出 `domain/changed`。域 `version` 严格相等校验：spec 版本与存量介质不一致时打开以 `version-mismatch` 失败，不丢弃、不迁移介质。
+- 域打开失败（含迁移读取失败）不拖垮 Host：插件保持存活，管理 API 统一返回 `internal` 或跳过迁移，只记警告日志。
+- DSH skill 发现会忽略没有 `SKILL.md` 的目录；安装名文法之外的目录名不会成为 DSH 可见 skill（见不变式）。
+
+## 目录读取语义
+
+- 配置目录是**纯 skill 平铺目录**：扫描其直接子目录（跳过 `.` 开头者），目录名即安装名；含 `SKILL.md` 者解析 frontmatter 并在 DSH 侧可见，不含者仍列入库视图并标记 `无 SKILL.md`。目录内不维护任何子层结构（无 `skills/`、无 `distributor/`、无 `.disabled/`）。
+- 未配置（为空串）：插件不读取、不写入该目录；所有库 RPC 返回 `skilldir-unconfigured`（见 `plugin-runtime.md`）。
+- 已配置：目录每次按当前配置值解析，不做启动缓存，配置变更即时生效。
+- 目录缺失/不可访问为运行期条件：所有库 RPC 返回 `skilldir-missing`，插件保持存活；不做注册期校验。
+- 目录内不出现插件状态文件：意图归 settings 命名空间；投影归 storage 域；备份归 `$DSH_HOME/skill-manager/`。
+
+## settings 命名空间形状
+
+命名空间 `skill-manager`，schema 用 schemastery 在注册时声明，字段：
+
+```json
+{
+  "skillsDir": "",
+  "intentMigrated": false,
+  "groups": { "默认": { "mounts": [{ "scope": "global", "project": null }] } },
+  "skills": { "<目录名>": { "disabled": false, "group": "默认" } }
+}
+```
+
+- `skillsDir`：配置目录绝对路径；空串 = 未配置。
+- `intentMigrated`：旧 storage 意图一次性迁移标记（见「旧意图迁移」）；UI 不展示。
+- `groups`：组集合，键为组名，值 `{ mounts: [{ scope, project }] }`；`scope` 取 `global | project`，`project` 为工作区 `workspaceId` 或 `null`（`global` 规则的 `project` 归一为 `null`）。默认种子 = 「默认」组挂载全局。
+- `skills`：技能意图，键为目录名，值 `{ disabled, group }`；缺省条目等价于 `{ disabled: false, group: "默认" }`。
+- 虚拟组 `默认` 始终存在，即使 `groups` 中无该键；保留字 `默认`、`全部` 不可用作命名组。
+
+### 校验语义
+
+- `validate` 只做**形式校验**：`skillsDir` 非空时必须是绝对路径；组名符合组名规则（见「名称与校验」）；`skills` 意图形状合法（值为对象、`group` 为字符串）。
+- 引用完整性（组是否存在、工作区是否存在）**不在写路径拒绝**：settings 写是字段级原子，跨字段编辑的中间态必须放行；失效引用由对账层跳过并产生警告（归 `mount-sync.md`）。
+- 目录存在性同样是运行期条件，不进 `validate`（否则目录被删后插件下次启动整体加载失败）。
+
+## storage 域形状
+
+域名 `skill_manager`，`version: 1`。记录 schema 用 zod 在域边界校验；非法记录在打开时以 `invalid-record` 失败（不静默修复）。`version` 严格相等，bump 会让存量介质以 `version-mismatch` 打不开。
+
+### `skills` 表（键 = 安装名）
+
+```json
+{
+  "origin": "github | local | self",
+  "repo": "owner/repo 或 null",
+  "branch": "main 或 null",
+  "commit": "<40位sha> 或 null",
+  "path_in_repo": "skills/pdf 或 null",
+  "content_hash": "<sha256> 或 null",
+  "origin_path": "<本地导入源绝对路径> 或 null",
+  "installed_at": "<ISO 8601>"
+}
+```
+
+- 本表只承载**入库元数据**，不含意图字段（`disabled`/`group` 归 settings 的 `skills` 段）。
+- `origin: "github"`：`repo/branch/commit` 非空，`commit` 为入库/更新时的上游快照；`content_hash` 为同刻内容基线，仅用于 github 条目的本地修改检测与更新门禁。
+- `origin: "local"`：本地导入；`repo` 为 `null`，`origin_path` 记录来源，`content_hash` 为 `null`（本地 skill 无版本管理）。
+- `origin: "self"`：仅为兼容存量记录保留，不再新登记；目录中无记录的本地 skill 就是本地文件本身，删除即从列表消失。
+- `content_hash` 算法：按相对路径排序后拼接 `路径 + \0 + 文件内容` 做 SHA-256，跳过目录、`.git` 与 `__pycache__`。
+
+### `synced` 表（键 = `<name>|<app>|<scope>|<project 或 global>`）
+
+```json
+{ "method": "junction | copy", "dir": "<绝对目标路径>", "at": "<ISO 8601>", "hash": "<sha256>" }
+```
+
+- 记录本插件物化过的目标；`method` 为 `junction` 或 `copy`；`at` 为物化时间。
+- `hash` 仅 copy 物化时写入（副本内容哈希）：之后仅哈希一致（未被改动）的 copy 目录允许被替换/摘除。junction 记录无此字段。
+- `at` 与 `hash` 在 schema 中均为可选：早期写入端漏写 `at`、junction 与早期 copy 记录无 `hash`，打开校验放行旧记录；新记录中 `at` 由对账必写，`hash` 仅 copy 记录携带（安全判据归 `mount-sync.md`）。
+
+### `projects` 表（键 = `workspaceId`）
+
+```json
+{ "path": "<规范化绝对工作区路径>" }
+```
+
+- DSH 工作区镜像，不是手工注册表；显示标题不落盘（标题每次由 `workspaceRegistry` 提供）。
+- 每次构建库视图前，Host 从 `workspaceRegistry` 重新取得活动列表并刷新该镜像：活动键写入/更新；路径匹配到活动工作区的旧键归一为新 `workspaceId`（`synced` 引用同步改写）；未匹配旧键保留为只读遗留项（语义归 `mount-sync.md`）。
+- 旧键归一并入活动键时，若同目标既有 `synced` 记录无法安全合并（method 或目录冲突），以 `workspace-migration-conflict` 失败，不写入半成品状态。
+
+### `check_cache` 表（键 = 安装名）
+
+```json
+{
+  "checked_at": "<ISO 8601>",
+  "repo": "owner/repo",
+  "branch": "main",
+  "current": "<skills 表 commit>",
+  "latest": "<上游 commit>",
+  "status": "updatable",
+  "reason": null,
+  "via": "api",
+  "updatable": true,
+  "reachable": true,
+  "locally_modified": false,
+  "baseline_missing": false,
+  "missing": false
+}
+```
+
+- 最近一次上游检查的缓存，供管理页状态徽章直显；读取不触发网络请求。
+- 只收 `origin: "github"` 的条目；`check`（并行探测后）与 `update`（成功条目翻转为 `up_to_date`）写入，`remove` 删除对应条目。
+
+### `backups` 表（键 = 备份 id）
+
+```json
+{ "name": "<安装名>", "created_at": "<ISO 8601>" }
+```
+
+- 出库备份登记；备份文件树位于 `$DSH_HOME/skill-manager/backups/<id>/`（经 `ctx.dshHomePath` 定位），id 为 `<安装名>-<时间戳紧凑串>`。
+- 备份目录内写 `_backup_meta.json`（名称、`skills` 记录快照、时间）；恢复语义归 `inbound-operations.md`。
+
+## 旧意图迁移
+
+历史版本（DSR-010 七表时代）把意图存在 storage 域：`groups` 表、`mounts` 表、`skills` 表的 `disabled`/`group` 字段。迁移语义（`src/adapter/migrate.js` 编排 + `src/core/model/intent.js` 纯投影，DSR-015）：
+
+1. 启动时若 `intentMigrated` 已为 `true` 则直接跳过。
+2. 用旧七表 spec（`legacySkillManagerSpec`，同域名同版本）打开域读取存量意图；打开失败只记警告并按空意图启动。
+3. `mounts` 按组归集（仅 `app=dsh`；`global` 的 `project` 归一为 `null`）；虚拟组 `默认` 始终保留。
+4. `skills` 意图按记录 `disabled`/`group` 投影；`origin: "self"` 记录不迁移。
+5. 有任何意图数据才 `scope.update` 写入 settings 并置 `intentMigrated: true`；完全无意图则不动配置。
+6. 迁移必须先于新 spec 打开（同名域并发打开会 already-open）；新 spec 首次写入会把未声明的旧表从文件抹除，迁移因此自动幂等。
+
+## 名称与校验
+
+- 安装名校验归本文拥有，入口规则与 `requirements.md` 的 C-01 一致：`^[a-z0-9]+(?:-[a-z0-9]+)*$`。
+- 组名约束：1 到 30 个字符，保留字 `默认`、`全部` 与空串不可用，不含 `/ \ : * ? " < > |` 与控制字符。settings `validate` 与客户端建组预检共用同一规则。
+- 仓库 slug 校验：去掉协议与 `.git` 后匹配 `^[\w.-]+/[\w.-]+$`，且两段都不含点，以排除非 GitHub 来源。
+- SKILL.md frontmatter 采用单行 `key: value` 与块标量折叠的解析语义；`name` 与 `description` 用于列表展示。
+
+## 并发
+
+- settings 写由平台保证字段级原子与跨进程写锁；插件不维护自己的配置写协议（DSR-011）。
+- 域写链按域串行，持久化先行、内存权威。
+- 插件 API 层的调度（读快照/写 FIFO/网络独立队列）归 `plugin-runtime.md`；写操作内部全部经域写链，两个标签页同时提交不会产生交错状态。
+
+## 不变式
+
+- 库视图 = 配置目录直接子目录（跳过 `.` 开头者）+ `skills` 表中 `origin` 为 `github` 且目录缺失的条目（标记 `missing`，作为恢复入口）。
+- `skills` 表中 `origin` 非 `self` 的键应当在目录中存在，否则只能解释为 `missing`（仅 github 条目进列表）。
+- settings 的 `skills[dir].group` 引用的命名组应在 `groups` 中存在；失效引用由对账层容忍回落（视为 `默认`），不构成写错误。
+- 每个活动挂载规则引用的组与当前 DSH 工作区都存在；只读遗留项可保留未匹配项目引用与既有 `synced` 记录，直到显式清理。
+- dsh 根下所有由插件管理的目录名必须满足安装名文法。
+- 配置目录内不出现插件写入的状态文件或元数据目录。

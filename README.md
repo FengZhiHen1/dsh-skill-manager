@@ -2,7 +2,7 @@
 
 DSH 设置页技能管理插件：**配置即意图**——用户意图（分组、挂载目标、禁用/归属）存于 DSH settings 命名空间（`$DSH_HOME/settings.yaml` 的 `skill-manager` 段），UI 经标准 settings 域直读直写（与原生设置卡片同构，渲染即时、保存即生效），Host 对账器监听配置变更后台物化链接。技能页提供管理/搜索/同步三视图：库列表（本地文件 + GitHub 入库元数据）、skills.sh 搜索下载、GitHub zipball 入库、检查更新、本地导入、备份恢复；本地 skill 无版本管理（即本地文件）。物化状态存于 DSH storage 域（`$DSH_HOME/storages/skill_manager.json`，运行时投影）。
 
-权威设计与语义：`docs/design/dsh-skill-manager/`（本仓库）。
+权威设计与语义：`docs/`（本仓库）。
 
 ## 功能
 
@@ -33,7 +33,7 @@ lib/inbound.js  搜索/探测/入库/检查（repo 级去重）/更新/导入/�
 lib/api.js      HTTP 信封、三路队列、只读视图与文件/网络操作
 ```
 
-低延迟路径：配置渲染永不等待网络（settings mirror 页面启动即加载）；读请求走进程内 bundle 缓存快照（缓存热时零扫描）；写操作串行并在收尾预热缓存；网络慢操作独立队列不阻塞读写；技能页单请求 `overview` 出只读视图。详见 `docs/design/dsh-skill-manager/technical-details/plugin-runtime.md`。
+低延迟路径：配置渲染永不等待网络（settings mirror 页面启动即加载）；读请求走进程内 bundle 缓存快照（缓存热时零扫描）；写操作串行并在收尾预热缓存；网络慢操作独立队列不阻塞读写；技能页单请求 `overview` 出只读视图。详见 `docs/technical-details/plugin-runtime.md`。
 
 ## 开发
 

@@ -1,0 +1,31 @@
+# DSR-012：部署通道迁移——bundle 声明 + test 直挂 / web git 依赖
+
+## 上下文
+
+DSR-001 选择「真实插件包 + 手工复制目录 + Profile `file:` 依赖 + 手改 `cordis.patch.yml` insert 行」的部署形态，并预留「迁移 bundle 通道」的重访条件。此后仓库部署红线成形：web 稳定 profile 绝对拒绝源码直挂（只允许已发布 npm 包或 `github:` git 依赖），profile 依赖与 `dsh.profile.bundles` 只允许经 `dsh plugin` reconcile 维护。DSR-001 的手工步骤同时违反这两条红线，重访条件（使用 `dsh plugin add` 安装）已实际触发。
+
+## 真实方向与评价
+
+- 方向 A：维持 DSR-001 手工复制 + `file:` 依赖。对本机最直接，但违反 web 红线（`file:` 指向源码目录），且绕开 reconcile（手改 profile 清单），每次升级都要重复手工复制。
+- 方向 B：包声明 `dsh.bundle.patch`，test profile 经 `link:` 源码直挂，web profile 经 `github:FengZhiHen1/dsh-skill-manager` git 依赖挂载，`dsh plugin add` reconcile 自动入 `dsh.profile.bundles`。与仓库红线和其他自研插件（dsh-guardrails 等）同构；代价是需要维护一个 GitHub 部署源仓库。
+- 方向 C：发布 npm registry 包。部署最干净，但插件定位为本机自用（非目标「不发布 npm」），当前无收益。
+
+## 最终决定
+
+采用方向 B（2026-08 下旬落地，commit `b4043b5`「补 dsh.bundle.patch 声明」；本记录为追溯补记）：
+
+1. `package.json` 声明 `dsh.bundle.patch` 指向包内 `cordis.patch.yml`（该文件即 bundle patch，单行 insert 不变）。
+2. test profile：`dsh plugin --profile test add link:...`，源码改动重启即生效，承担发布前实测门禁。
+3. web profile：`dsh plugin --profile web add github:FengZhiHen1/dsh-skill-manager`，未钉 ref，lockfile 承载 resolution。
+4. DSR-001 的手工复制步骤与「禁止加入 `dsh.profile.bundles`」废止；禁双挂语义反转为「不要在 bundle 挂载之外再重复 insert 同一 id 行」。
+
+## 直接后果
+
+- GitHub 仓库 `FengZhiHen1/dsh-skill-manager` 成为 web 部署源；`plugins/dsh-skill-manager/` 已按本决定的后续待办改造为 submodule（2026-09 落实，remote 指向该仓库）。
+- `plugin-runtime.md` 部署章节、定调文档 `technology-stack.md` 的部署约束按本决定重写。
+- DSR-001 的「方向 A + insert 行」决定被本决定取代（其重访条件已触发）；DSR-001 保留为历史记录。
+
+## 重访条件
+
+- 插件需要分发给其他机器或公开使用时，重访方向 C（npm 发布）。
+- GitHub 部署源仓库的同步改为自动化（如 CI 推送）时，更新部署章节的运维描述。

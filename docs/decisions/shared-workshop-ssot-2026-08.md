@@ -1,0 +1,25 @@
+# DSR-002：复用 Skill 车间为唯一事实源
+
+## 上下文
+
+插件需要一个 skill 库。检查点已记录用户裁决：直接读写 `E:\Project\Skills` 现有车间文件，不新建独立车间，CLI 与插件双面孔共存。
+
+## 真实方向与评价
+
+- 方向 A：复用现有车间。无数据迁移，git 溯源延续，CLI 与插件操作同一库；代价是共享 JSON 并发与格式兼容约束。
+- 方向 B：插件建立独立副本库。隔离干净，但产生第二事实源，两处会漂移，违背 CLI 与插件共存的场景。
+
+## 最终决定
+
+采用方向 A。共享文件形状与写入规则由 [storage-model.md](../technical-details/storage-model.md)（原 workshop-files.md，后更名）统一；原子写加进程内单飞队列缓解并发，不追求严格跨进程锁。
+
+## 直接后果
+
+- 插件写入 `skills/`、`skills.lock.json`、`distributor/groups.json`、`apps.json`、`state.json`。
+- 插件只追加并维护 `app=dsh` 的条目；`claude` 等既有 App 数据只读。
+- 任何新增字段必须保持 CLI 兼容，见需求 C-04。
+
+## 重访条件
+
+- 若 Skills 车间迁移、拆分或引入多用户并发时，重访锁粒度与格式迁移。
+- 若 CLI 停止维护且插件成为唯一入口，可再评估独立格式。

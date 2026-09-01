@@ -34,7 +34,7 @@
 //   lib/inbound.js   — 搜索/探测/入库/检查/更新/导入/出库/恢复
 //   lib/api.js       — HTTP 信封、三路队列、只读视图与文件/网络操作
 //
-// 权威语义：docs/design/dsh-skill-manager/（本仓库）。
+// 权威语义：docs/（本仓库）。
 
 import { registerConfig } from './lib/dir.js'
 import { openStore } from './lib/store.js'

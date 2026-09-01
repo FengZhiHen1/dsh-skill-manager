@@ -1,0 +1,26 @@
+# DSR-001：真实插件包形态
+
+## 上下文
+
+设计开始时存在两种插件形态：每次会话临时注入的动态 Cordis 插件，或随 Profile 持久挂载的真实插件包。本插件需要跨会话、跨重启的完整 Node 能力与稳定设置页。
+
+## 真实方向与评价
+
+- 方向 A：真实插件包，Profile 依赖 + `cordis.patch.yml` insert 行。与 `dsh-guardrails` 完全同构，实现可预期，Host 与 Client 生命周期受 Loader 管理。
+- 方向 B：会话内动态注入的 Cordis 插件。无需改 Profile，但进程重启后消失，不满足设置页与持久化要求。
+- 方向 C：打 tarball 并加入 `dsh.profile.bundles`。发布形态完整，但 v1 仅本机使用，构建与安装链更重。
+
+## 最终决定
+
+采用方向 A：真实插件包 + insert 行；包内保留 `cordis.patch.yml`，为未来迁移方向 C 预留兼容。依据：需求 R-01 要求跨重启持久，方向 B 直接不满足；本机 Profile 已有方向 A 的稳定先例，方向 C 没有当前收益。
+
+## 直接后果
+
+- 需要修改 `~/.dsh/profiles/web/package.json` 与 `cordis.patch.yml` 两个文件，见 [plugin-runtime.md](../technical-details/plugin-runtime.md)。
+- 升级流程为复制包目录 + `pnpm install` + 重启。
+- 禁止与 `dsh.profile.bundles` 同时挂载同一行，避免重复 Service Provider。
+
+## 重访条件
+
+- 需要发布给其他机器或使用 `dsh plugin add` 时，重访方向 C。
+- 若 Profile 用户不希望手改组合文件，重访 bundle tarball 通道。

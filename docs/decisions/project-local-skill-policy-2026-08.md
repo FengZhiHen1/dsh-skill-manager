@@ -1,0 +1,28 @@
+# DSR-004：项目级既有 skill 最小接管策略
+
+## 上下文
+
+DSH 工作区项目的 `.dsh/skills` 可能已经存在链接、空目录或真实 skill 目录。若直接沿用挂载物化的覆盖规则，会把所有真实目录都报告为 `target-exists`，既无法区分安全现场，也可能误导用户手工处理。本机已核实现场：两个项目级链接正确指向车间源，DSH_Plugins 项目存在一个空目录。
+
+## 真实方向与评价
+
+- 方向 A：最小接管。正确链接直接记录为已接管；错误链接在用户执行对账时修复；空目录仅在用户显式点击后清理；含 SKILL.md 的真实目录与外部项目 skill 只读展示，永不自动修改。风险最低，没有现成证据证明需要自动迁移。
+- 方向 B：v1 同时实现采纳入库。把项目本地 skill 复制进车间、备份原目录、替换为 junction。流程顺手，但增加一个当前数据未证明需要的迁移操作面，且会触碰“真实目录零静默破坏”的边界。
+- 方向 C：全自动清理与接管。自动删除空目录并修复错误链接。省点击，但违反安全原则。
+
+## 最终决定
+
+采用方向 A。具体分类与动作归 [mount-sync.md](../technical-details/mount-sync.md)，用户可见行为与验收归 [requirements.md](../requirements.md) 的 R-21 与 AC-12。
+
+## 直接后果
+
+- 新增只读方法 `skill-manager/project-skills` 与显式方法 `skill-manager/claim-empty`。
+- `local-skill` 与 `local-foreign` 在 v1 中没有任何写路径。
+- 同步矩阵新增 `shadowed` 单元格，提示项目本地版优先于全局挂载。
+- DSH_Plugins 现有空目录 `design-spec-workshop` 成为首个 `local-empty` 实况用例，但验证按 AC-12 构造完整五类现场。
+
+## 重访条件
+
+- 若用户频繁遇到项目本地 skill 且确有统一收编需求，重访方向 B。
+- 若 DSH 的 skill 根合并规则变化，使项目级不再优先，重访 `shadowed` 语义。
+- 若 CLI 或 DSH 自身开始写入 `.dsh/skills` 的管理元数据，重访分类判据。
