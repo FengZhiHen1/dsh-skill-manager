@@ -1,6 +1,6 @@
 // dsh-skill-manager — 应用服务层（原 lib/api.js → P1 搬位；P2 语义收敛：
-// 无台账 bundle、行状态走查、junction-only、备份目录事实源；connection.rpc
-// 传输迁移归 P4，插件运行时.md）。
+// 无台账 bundle、行状态走查、junction-only、备份目录事实源；P4 传输迁移：
+// connection.rpc 通道 + createDispatch 三路队列 + Result 包装，插件运行时.md）。
 // 配置（用户意图）不经过本层：UI 经 settings 域直读直写 settings.yaml 的
 // skill-manager 段，Host 对账器监听配置变更后台收敛。本层只提供：
 //   - 只读视图：overview（库列表+行状态+工作区投影）、warm、backups
@@ -9,9 +9,9 @@
 //     project-skills/claim-empty/config 已随 DSR-016/017 废止）
 // 队列：读请求不排队（bundle 缓存快照 + 写屏障）；文件写 FIFO 串行；
 // 网络慢操作独立队列。
-// 信封（临时，P4 删）：{ ok:true, data } / { ok:false, error:{ code, message,
-// retryable } }。未配置门禁：skills 目录未配置时所有方法统一
-// skilldir-unconfigured（R-22）。
+// 结果形状（Host 平台契约，connection.rpc）：{ok:true,value} 或
+// {ok:false,error:{code,message,details:{retryable}}}；本层绝不抛出越过
+// dispatch 的错误（未配置门禁等统一转 Result 失败侧）。
 
 import { SkillManagerError } from './base/errors.js'
 import { requireDir, DEFAULT_GROUP, makeGroups } from './model/intent.js'
@@ -26,71 +26,11 @@ import * as acquire from './inbound/acquire.js'
 import * as upstream from './inbound/upstream.js'
 import * as backupsMod from './inbound/backups.js'
 
-const MAX_BODY_BYTES = 1 << 20
-
-export class ApiError extends Error {
-  code
-  retryable
-  constructor(code, message, retryable = false) {
-    super(message)
-    this.name = 'ApiError'
-    this.code = code
-    this.retryable = retryable
-  }
-}
-
-export async function readJsonBody(req) {
-  const chunks = []
-  let total = 0
-  for await (const chunk of req) {
-    const buffer = typeof chunk === 'string' ? Buffer.from(chunk) : chunk
-    total += buffer.length
-    if (total > MAX_BODY_BYTES) throw new ApiError('bad-request', 'request body too large')
-    chunks.push(buffer)
-  }
-  const text = Buffer.concat(chunks).toString('utf8')
-  if (text.trim() === '') return {}
-  try {
-    return JSON.parse(text)
-  } catch {
-    throw new ApiError('bad-request', 'request body is not valid JSON')
-  }
-}
-
-export function writeJson(res, status, body) {
-  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' })
-  res.end(JSON.stringify(body))
-}
-
-export function writeOk(res, value) {
-  writeJson(res, 200, { ok: true, data: value })
-}
-
-/** 任意错误 → 信封；未知错误归类 internal，不冒泡杀死 Host。 */
-export function writeError(res, error) {
-  if (error instanceof SkillManagerError) {
-    writeJson(res, 200, { ok: false, error: { code: error.code, message: error.message, retryable: error.retryable } })
-    return
-  }
-  if (error instanceof ApiError) {
-    writeJson(res, 400, { ok: false, error: { code: error.code, message: error.message, retryable: false } })
-    return
-  }
-  if (error && typeof error === 'object' && error.kind !== undefined && typeof error.kind === 'string') {
-    // GhError 网络分类（入站操作.md）
-    writeJson(res, 200, {
-      ok: false,
-      error: {
-        code: error.kind,
-        message: error.message ?? String(error),
-        retryable: ['unreachable', 'rate_limited'].includes(error.kind),
-      },
-    })
-    return
-  }
-  const message = error instanceof Error ? error.message : String(error)
-  writeJson(res, 500, { ok: false, error: { code: 'internal', message, retryable: false } })
-}
+/** 读方法：不排队，直接走进程内 bundle 缓存快照（写屏障由 createQueue.busy 对齐）。 */
+const READ_METHODS = new Set(['overview', 'warm', 'backups'])
+/** 网络慢方法：独立队列，绝不阻塞读写。 */
+const NET_METHODS = new Set(['check', 'search', 'repo-skills'])
+// 其余方法（add/update/remove/restore/sync）= 文件写操作，FIFO 串行。
 
 /** 单飞队列：FIFO 串行，前序失败不阻塞后续；暴露 busy/idle 供读路径对齐写屏障。 */
 export function createQueue() {
@@ -398,5 +338,60 @@ export function buildApi(scopeGetter, { listWorkspaces = () => [], getStore, bac
       await refreshCache()
       return result
     },
+  }
+}
+
+/**
+ * 任意错误 → RPC Result 失败侧（平台契约 error 形状 {code,message,details}；
+ * retryable 归入 details，由客户端 createCall 消费做重试提示）。GhError 的
+ * kind 字段直通错误码（入站操作.md 网络分类）。绝不外抛——handler 抛异常会
+ * 退化成平台 500 纯文本，客户端只剩 transport failure 兜底。
+ */
+export function toRpcFailure(error) {
+  if (error instanceof SkillManagerError) {
+    return { ok: false, error: { code: error.code, message: error.message, details: { retryable: error.retryable } } }
+  }
+  if (error && typeof error === 'object' && typeof error.kind === 'string') {
+    return {
+      ok: false,
+      error: {
+        code: error.kind,
+        message: error.message ?? String(error),
+        details: { retryable: ['unreachable', 'rate_limited'].includes(error.kind) },
+      },
+    }
+  }
+  return {
+    ok: false,
+    error: { code: 'internal', message: error instanceof Error ? error.message : String(error), details: { retryable: false } },
+  }
+}
+
+/**
+ * connection.rpc 通道分发器：按方法表三路排队（READ 快照直返 / NET 网络队列 /
+ * 其余 WRITE FIFO），把结果与错误统一包成平台 Result。signal 刻意不透传：
+ * 写操作半途而废即半成品现场，断连也必须跑完；读与网络操作短平快无取消价值。
+ * @returns {(endpoint: string, payload: unknown) => Promise<{ok: boolean, value?: unknown, error?: object}>}
+ */
+export function createDispatch(api, { writeQueue = createQueue(), netQueue = createQueue() } = {}) {
+  return async function dispatch(endpoint, payload) {
+    if (typeof endpoint !== 'string' || !Object.hasOwn(api, endpoint)) {
+      return {
+        ok: false,
+        error: { code: 'unknown-endpoint', message: `unknown skill-manager endpoint "${String(endpoint)}"`, details: { retryable: false } },
+      }
+    }
+    const input = payload && typeof payload === 'object' ? payload : {}
+    try {
+      const invoke = () => Promise.resolve(api[endpoint](input))
+      const value = READ_METHODS.has(endpoint)
+        ? await (writeQueue.busy ? writeQueue.idle().then(invoke) : invoke())
+        : NET_METHODS.has(endpoint)
+          ? await netQueue.enqueue(invoke)
+          : await writeQueue.enqueue(invoke)
+      return { ok: true, value }
+    } catch (error) {
+      return toRpcFailure(error)
+    }
   }
 }

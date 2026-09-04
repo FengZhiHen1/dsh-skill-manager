@@ -8,11 +8,11 @@
 // - 旧 storage 意图一次性迁移（src/adapter/migrate.js）投影进配置。
 // - 打开 storage 域 skill_manager（两表运行时投影：skills/check_cache，
 //   DSR-017）；打开失败只记日志，API 统一回 internal，不拖垮 Host。
-// - 对账器：scope.watch 监听配置变更 → 200ms 防抖 → sync（bundle+reconcile+
+// - 注册对账器：scope.watch 监听配置变更 → 200ms 防抖 → sync（bundle+reconcile+
 //   junction 物化+预热缓存）；对账错误入行状态（overview 下发），不打断配置编辑。
-// - 注册 /skill-manager/api 路由（受信请求围栏 + 三路队列 + 统一信封），
-//   只提供只读视图与网络/文件操作（配置读写不在此层）。
-// - 未配置 skills 目录时所有方法统一返回 skilldir-unconfigured。
+// - 挂 connection.rpc 通道 /skill-manager（11 端点，createDispatch 三路队列 +
+//   Result 包装；请求围栏与 JSON 信封由 Host 平台承担）。
+// - 未配置 skills 目录时所有端点统一返回 skilldir-unconfigured 失败 Result。
 // - 备份树根：ctx.dshHomePath('skill-manager', 'backups')（DSR-010 D5）。
 //
 // 部署形态：真实插件包 + cordis.patch.yml insert 行；禁止与 dsh.profile.bundles
@@ -34,12 +34,11 @@
 //   src/core/inbound/zipball.js   — zipball → skill 目录管线与入站域共享原语
 //   src/core/inbound/acquire.js   — 搜索 / 仓库探测 / 入库（原子换装）
 //   src/core/inbound/upstream.js  — 上游检查与更新（结果逐条写 check_cache；覆盖走原子换装）
-//   src/core/inbound/backups.js   — 出库 / 备份列表 / 恢复（备份事实源=目录+meta；importSkill 退役中）
-//   src/core/service.js           — 方法表、三路队列、只读视图与文件/网络操作（原 lib/api.js）
+//   src/core/inbound/backups.js   — 出库 / 备份列表 / 恢复（备份事实源=目录+meta）
+//   src/core/service.js           — 方法表、RPC dispatch（三路队列+Result）、只读视图与文件/网络操作
 //   src/adapter/settings.js       — settings 命名空间注册（唯一 @deepseek-ai/dsh-settings import）
 //   src/adapter/storage.js        — storage 域 defineDomain/domainTable 包裹与 openStore
 //   src/adapter/migrate.js        — 旧 storage 意图一次性迁移
-//   src/adapter/fence.js          — 受信请求围栏（临时，P4 随 connection.rpc 迁移删除）
 //   src/adapter/index.js          — 本文件：插件入口
 //
 // 权威语义：docs/（本仓库）。
@@ -48,18 +47,11 @@ import { registerConfig } from './settings.js'
 import { openStore } from './storage.js'
 import { migrateLegacyIntent } from './migrate.js'
 import { createSharedCache } from '../core/base/cache.js'
-import { ApiError, buildApi, createQueue, readJsonBody, writeJson, writeOk, writeError } from '../core/service.js'
-import { isTrustedApiRequest, trustedHostsOf } from './fence.js'
-
-/** 读方法：不排队，直接走进程内 bundle 缓存快照（写屏障由 createQueue.busy 对齐）。 */
-const READ_METHODS = new Set(['overview', 'warm', 'backups'])
-/** 网络慢方法：独立队列，绝不阻塞读写。 */
-const NET_METHODS = new Set(['check', 'search', 'repo-skills'])
-// 其余方法（add/update/remove/restore/sync）= 文件写操作，FIFO 串行。
+import { buildApi, createDispatch } from '../core/service.js'
 
 export default {
   name: 'skill-manager',
-  inject: ['webServer', 'loader', 'workspaceRegistry', 'storage', 'dshHomePath', 'settings'],
+  inject: ['connection', 'workspaceRegistry', 'storage', 'dshHomePath', 'settings'],
   apply(ctx) {
     // settings 命名空间注册（硬依赖：配置即意图，settings 服务是插件核心）。
     const scope = registerConfig(ctx)
@@ -98,13 +90,9 @@ export default {
     // resolveDshHome 同源，不再由 homedir 硬编码推导（挂载与同步.md）。
     const globalRootPath = ctx.dshHomePath('skills')
 
-    // 队列：文件写操作 FIFO 串行（R-17 写写互斥）；网络慢操作独立；
-    // 读请求不排队（bundle 缓存快照 + 写屏障对齐，插件运行时.md「低延迟路径」）。
-    const writeQueue = createQueue()
-    const netQueue = createQueue()
+    // 队列与缓存：createDispatch 内建三路排队（READ 快照 / NET 网络 / WRITE
+    // FIFO）；进程内 bundle 缓存跨分发共享（低延迟路径）。
     const sharedCache = createSharedCache()
-    const trustedHosts = trustedHostsOf(ctx)
-    const fence = (req) => isTrustedApiRequest(req, trustedHosts)
     // Host workspaceRegistry 是项目级目标与路径的唯一事实源；Client 不参与路径解析。
     const api = buildApi(() => scope, {
       listWorkspaces: () => ctx.workspaceRegistry.list(),
@@ -138,40 +126,10 @@ export default {
       clearTimeout(warmTimer)
     }, 'dsh-skill-manager: config watcher and warmup')
 
-    ctx.effect(() => ctx.webServer.register({
-      kind: 'exact',
-      path: '/skill-manager/api',
-      handler: async (req, res) => {
-        if (!fence(req)) {
-          writeJson(res, 403, { ok: false, error: { code: 'forbidden', message: 'forbidden', retryable: false } })
-          return
-        }
-        if (req.method !== 'POST') {
-          writeJson(res, 405, { ok: false, error: { code: 'method-error', message: 'method not allowed', retryable: false } })
-          return
-        }
-        try {
-          const body = await readJsonBody(req)
-          const method = body?.method
-          if (typeof method !== 'string' || !(method in api)) {
-            throw new ApiError('not-found', `unknown skill-manager API method "${String(method)}"`)
-          }
-          const invoke = () => api[method](body?.payload ?? {})
-          let result
-          if (READ_METHODS.has(method)) {
-            // 读路径：写操作进行中则等其结算（避免冷扫读到半写状态），否则直接走缓存快照。
-            if (writeQueue.busy) await writeQueue.idle()
-            result = await invoke()
-          } else if (NET_METHODS.has(method)) {
-            result = await netQueue.enqueue(invoke)
-          } else {
-            result = await writeQueue.enqueue(invoke)
-          }
-          writeOk(res, result)
-        } catch (error) {
-          writeError(res, error)
-        }
-      },
-    }), 'dsh-skill-manager: /skill-manager/api route')
+    // RPC 通道（插件运行时.md）：/skill-manager 前缀挂 connection.rpc，
+    // 平台完成 403/401 围栏、JSON 信封与 POST/endpoint 校验；handler 必须
+    // 返回 Result（createDispatch 保证绝不抛出——抛错会退化为 500 纯文本）。
+    // handle 经 owner.effect 自持生命周期，随本插件 fiber 注销，无需插件清理。
+    ctx.connection.rpc.handle('/skill-manager', createDispatch(api))
   },
 }

@@ -93,7 +93,7 @@ export function skillRecord(overrides = {}) {
   }
 }
 
-/** 断言异步调用以指定错误码拒绝（SkillManagerError/ApiError 契约是 code，不是 message）。 */
+/** 断言异步调用以指定错误码拒绝（SkillManagerError 契约是 code，不是 message）。 */
 export async function assertRejectsCode(promise, code) {
   try {
     await promise
