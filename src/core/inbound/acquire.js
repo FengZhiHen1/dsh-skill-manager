@@ -6,7 +6,7 @@ import { mkdir, readFile, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { SkillManagerError } from '../base/errors.js'
 import { fetchZipball, ghApi, normalizeRepoSlug, resolveRemote, searchSkillsSh } from '../base/net.js'
-import { safePath } from '../base/fsys.js'
+import { atomicSwapDir, safePath } from '../base/fsys.js'
 import { dirHash, parseSkillMd } from '../model/library.js'
 import { copyTree, explodeZipball, materializeSkillDir, nowIso, pathExists, skillsFromFiles, validateInstallName } from './zipball.js'
 
@@ -100,9 +100,15 @@ export const add = withRepoErrors(async ({ root, store, repo: repoInput, dir, re
       `${installName} 已存在（${existing?.origin === 'github' ? 'GitHub 来源' : '自研/本地'}），如需替换请先出库现有版本`,
     )
   }
-  await mkdir(dest, { recursive: true })
-  await copyTree(tmp, dest)
+  // 原子换装入库（DSR-017）：同卷临时目录构建后 rename 就位，杜绝半写目录
+  // 经 junction 实时暴露给 DSH。add 目标不存在（上方 name-conflict 已拦截），
+  // 换装退化为直达 rename。
+  await atomicSwapDir(dest, async (stage) => {
+    await copyTree(tmp, stage)
+    await rm(tmp, { recursive: true, force: true })
+  })
 
+  // 入库元数据只投影版本事实；disabled/group 是 settings 意图，绝不写入（DSR-011/017）。
   await store.putSkill(installName, {
     origin: 'github',
     repo: repoSlug,
@@ -112,10 +118,7 @@ export const add = withRepoErrors(async ({ root, store, repo: repoInput, dir, re
     content_hash: await dirHash(dest),
     origin_path: null,
     installed_at: nowIso(),
-    disabled: false,
-    group: '默认',
   })
-  await rm(tmp, { recursive: true, force: true })
 
   const sync = await ctx.reconcile()
   return {

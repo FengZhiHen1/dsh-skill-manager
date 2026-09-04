@@ -1,24 +1,25 @@
-// dsh-skill-manager — 应用服务层（自原 lib/api.js 搬位，P1 语义未动；传输语义迁移 connection.rpc 归 P4，插件运行时.md）。
+// dsh-skill-manager — 应用服务层（原 lib/api.js → P1 搬位；P2 语义收敛：
+// 无台账 bundle、行状态走查、junction-only、备份目录事实源；connection.rpc
+// 传输迁移归 P4，插件运行时.md）。
 // 配置（用户意图）不经过本层：UI 经 settings 域直读直写 settings.yaml 的
 // skill-manager 段，Host 对账器监听配置变更后台收敛。本层只提供：
-//   - 只读视图：overview（库列表+健康+工作区）、health、backups、project-skills
-//   - 网络/文件操作：check/update/add/import/remove/restore/search/repo-skills/
-//     claim-empty/sync
+//   - 只读视图：overview（库列表+行状态+工作区投影）、warm、backups
+//   - 网络/文件操作：check / search / repo-skills / add / update / remove /
+//     restore / sync（import、health 端点退役中，P3 删除）
 // 队列：读请求不排队（bundle 缓存快照 + 写屏障）；文件写 FIFO 串行；
 // 网络慢操作独立队列。
-// 信封：{ ok:true, data } / { ok:false, error:{ code, message, retryable } }（R-19）。
-// 未配置门禁：skills 目录未配置时所有方法统一 skilldir-unconfigured（R-22）。
+// 信封（临时，P4 删）：{ ok:true, data } / { ok:false, error:{ code, message,
+// retryable } }。未配置门禁：skills 目录未配置时所有方法统一
+// skilldir-unconfigured（R-22）。
 
-import { join } from 'node:path'
-import { rm } from 'node:fs/promises'
 import { SkillManagerError } from './base/errors.js'
 import { requireDir, DEFAULT_GROUP, makeGroups } from './model/intent.js'
 import { createSharedCache, hashOf } from './base/cache.js'
 import { dirHash } from './model/library.js'
 import * as library from './model/library.js'
-import * as stateMod from './model/state.js'
-import * as deriveMod from './mount/derive.js'
-import * as inspectMod from './mount/inspect.js'
+import { readCheckCache } from './model/store.js'
+import { deriveDesired, projectWorkspaces, targetKey } from './mount/derive.js'
+import { SKILL_NAME, findOrphanLinks, scanMountLinks, walkMountState } from './mount/inspect.js'
 import * as reconcileMod from './mount/reconcile.js'
 import * as acquire from './inbound/acquire.js'
 import * as upstream from './inbound/upstream.js'
@@ -114,9 +115,19 @@ export function createQueue() {
   }
 }
 
+/** 工作区投影读取：注册表异常统一 workspace-unavailable（不读写任何项目目录）。 */
+async function readWorkspaceProjection(listWorkspaces) {
+  try {
+    return projectWorkspaces(await listWorkspaces())
+  } catch (error) {
+    if (error instanceof SkillManagerError && error.code === 'workspace-unavailable') throw error
+    throw new SkillManagerError('workspace-unavailable', `无法读取 DSH 工作区注册表：${error instanceof Error ? error.message : String(error)}`, true)
+  }
+}
+
 /**
- * 每请求会话：按当前配置读 skills 目录根，加载全部共享状态（写前重读，R-17）。
- * 配置意图（settings.groups/skills）在 bundle 内展平为挂载规则与组文档。
+ * 每请求会话：按当前配置读 skills 目录根，组装只读 bundle（无台账：期望集来自
+ * settings 意图 + 工作区投影现算，行状态来自文件系统走查，DSR-017）。
  * globalRootPath 由 Host 经 dshHomePath 注入（挂载与同步.md「DSH skill 根」）。
  * @param {() => SettingsScope} scopeGetter - 类型为 @deepseek-ai/dsh-settings 的 SettingsScope（命名空间注册在 src/adapter/settings.js）
  */
@@ -132,15 +143,8 @@ export function createSession(scopeGetter, listWorkspaces, getStore, backupsRoot
       const config = scopeGetter().get()
       const configGroups = config?.groups && typeof config.groups === 'object' ? config.groups : {}
       const intentSkills = config?.skills && typeof config.skills === 'object' ? config.skills : {}
-      let workspaceRecords
-      try {
-        workspaceRecords = await listWorkspaces()
-        stateMod.normalizeWorkspaceProjects(workspaceRecords)
-      } catch (error) {
-        if (error instanceof SkillManagerError && error.code === 'workspace-unavailable') throw error
-        throw new SkillManagerError('workspace-unavailable', `无法读取 DSH 工作区注册表：${error instanceof Error ? error.message : String(error)}`, true)
-      }
-      // 库扫描（元数据 + github 记录）；意图字段由配置叠加（本地 skill 无登记）。
+      const workspacesById = await readWorkspaceProjection(listWorkspaces)
+      // 库扫描（目录 + 入库元数据）；意图字段由 settings 叠加（本地 skill 无登记）。
       const items = await library.scanLibrary(root, store, { meta: shared?.meta })
       const viewItems = items.map((it) => {
         const intent = intentSkills[it.dir]
@@ -152,6 +156,7 @@ export function createSession(scopeGetter, listWorkspaces, getStore, backupsRoot
             }
           : it
       })
+      // 参与推导的 skill 集 = 未禁用且未缺失（挂载与同步.md「挂载推导」）。
       const skills = viewItems.filter((it) => !it.disabled && !it.missing).map((it) => it.dir)
       // 配置挂载展平（global 的 project 归一为 null；形状非法项跳过，对账容忍）。
       const mounts = []
@@ -161,48 +166,59 @@ export function createSession(scopeGetter, listWorkspaces, getStore, backupsRoot
           if (m.scope !== 'global' && m.scope !== 'project') continue
           mounts.push({
             group,
-            app: 'dsh',
             scope: m.scope,
-            project: m.scope === 'project' && typeof m.project === 'string' ? m.project : null,
+            project: m.scope === 'project' && typeof m.project === 'string' && m.project !== '' ? m.project : null,
           })
         }
       }
+      // 成员归属：失效组引用回落「默认」（目录配置与状态存储.md 不变式）。
+      const memberships = new Map(skills.map((dir) => {
+        const g = intentSkills?.[dir]?.group
+        return [dir, typeof g === 'string' && g !== '' && (g in configGroups || g === DEFAULT_GROUP) ? g : DEFAULT_GROUP]
+      }))
       const groupsDoc = makeGroups(configGroups, intentSkills, new Set(skills))
-      const state = await stateMod.loadState(store)
-      const before = JSON.stringify(state)
-      stateMod.mirrorWorkspaceProjects(state, workspaceRecords, mounts)
-      if (JSON.stringify(state) !== before) await stateMod.saveState(store, state)
-      // 镜像刷新可能改写项目镜像，因此在写盘后重新计算摘要。
-      const snapshot = stateMod.mirrorWorkspaceProjects(state, workspaceRecords, mounts)
+      const { desired, warnings } = deriveDesired({ memberships, mounts, workspacesById, globalRootPath })
+      // 行状态走查 + 孤儿集：一次扫描，代际随 bundle 引用失效（插件运行时.md 缓存表）。
+      const links = await scanMountLinks({ root, globalRootPath, workspacesById })
+      const mountRows = await walkMountState({ root, desired, links, globalRootPath, workspacesById })
+      const orphans = await findOrphanLinks({ root, desired, globalRootPath, workspacesById, links })
+      const mountCount = new Map([...workspacesById.keys()].map((id) => [id, 0]))
+      const counted = new Set()
+      for (const m of mounts) {
+        if (m.scope === 'project' && m.project != null && mountCount.has(m.project)) {
+          const key = `${m.project}\0${m.group}`
+          if (!counted.has(key)) {
+            counted.add(key)
+            mountCount.set(m.project, mountCount.get(m.project) + 1)
+          }
+        }
+      }
+      const workspacesView = [...workspacesById.values()].map((ws) => ({ ...ws, mountCount: mountCount.get(ws.workspaceId) ?? 0 }))
       return {
         root,
         items: viewItems,
         skills,
         mounts,
+        memberships,
         groups: groupsDoc.groups,
-        state,
-        apps: { dsh: { ...stateMod.DSH_APP } },
-        workspaceProjects: snapshot.workspaceProjects,
-        legacyProjects: snapshot.legacyProjects,
-        workspaceIds: snapshot.workspaceIds,
+        desired,
+        warnings,
+        workspacesById,
+        workspacesView,
+        links,
+        mountRows,
+        orphans,
       }
     },
-    async saveState(state) {
-      await stateMod.saveState(store, state)
-    },
-    async reconcile(method = 'auto') {
+    /** 全量对账（junction-only，无 method 参数，DSR-017）。 */
+    async reconcile() {
       const b = await this.bundle()
       return reconcileMod.reconcile({
         root,
-        state: b.state,
-        apps: b.apps,
-        groups: b.groups,
-        skills: b.skills,
+        memberships: b.memberships,
         mounts: b.mounts,
-        workspaceIds: b.workspaceIds,
+        workspacesById: b.workspacesById,
         globalRootPath,
-        method,
-        save: (s) => this.saveState(s),
       })
     },
   }
@@ -258,59 +274,43 @@ export function buildApi(scopeGetter, { listWorkspaces = () => [], getStore, bac
     }
   }
 
-  /**
-   * health 代际缓存：同一 bundle 引用 + TTL 内复用文件系统走查结果。
-   * 写操作 refreshCache 换新 bundle 引用 → 自然失效重算。
-   */
-  async function getHealth(b) {
-    const cached = shared.health
-    if (cached !== null && cached.bundle === b && Date.now() - cached.at < shared.bundleTtlMs) {
-      return cached.issues
+  /** 行状态问题全集（走查 issue + 孤儿），bundle 代际内零额外 IO。 */
+  function mountIssuesOf(b) {
+    const issues = []
+    for (const [name, rows] of b.mountRows) {
+      for (const row of rows) issues.push({ name, target: row.target, issue: row.issue })
     }
-    const issues = await inspectMod.health({
-      root: b.root,
-      state: b.state,
-      apps: b.apps,
-      groups: b.groups,
-      skills: b.skills,
-      mounts: b.mounts,
-      workspaceIds: b.workspaceIds,
-      globalRootPath: globalRoot,
-    })
-    shared.health = { bundle: b, issues, at: Date.now() }
+    for (const l of b.orphans) issues.push({ name: l.name, target: l.path, issue: 'orphan-link' })
     return issues
   }
 
-  /** 只读视图派生：库列表（含挂载目标推导与检查缓存）+ 健康。 */
-  async function deriveOverview(b) {
-    const { desired, warnings } = deriveMod.deriveDesired({
-      state: b.state, apps: b.apps, groups: b.groups, skills: b.skills, mounts: b.mounts, workspaceIds: b.workspaceIds,
-    })
-    const cache = await stateMod.loadCheckCache(getStore())
-    const skills = b.items
-      .map((it) => ({
-        ...it,
-        targets: [...(desired.get(it.dir) ?? [])].map(deriveMod.targetKey),
-        upstream: cache.results[it.dir] ?? null,
-      }))
+  /** 只读视图派生（同步：扫描与走查已在 bundle 冷扫中完成）。 */
+  function deriveOverview(b) {
+    const checkCache = readCheckCache(getStore())
+    const skills = b.items.map((it) => ({
+      ...it,
+      nameVisible: SKILL_NAME.test(it.dir),
+      targets: [...(b.desired.get(it.dir) ?? [])].map(targetKey),
+      mount: (b.mountRows.get(it.dir) ?? []).map((row) => ({ ...row })),
+      upstream: checkCache.results[it.dir] ?? null,
+    }))
     return {
       root: b.root,
-      lib: { skills, warnings, checkedAt: cache.checkedAt },
-      health: { issues: await getHealth(b) },
-      workspaceProjects: b.workspaceProjects,
-      legacyProjects: b.legacyProjects,
+      lib: { skills, warnings: [...b.warnings], checkedAt: checkCache.checkedAt },
+      health: { issues: mountIssuesOf(b) },
+      workspaces: b.workspacesView,
     }
   }
 
   return {
-    /** 只读视图：技能页单请求出列表/健康/工作区（配置经 settings 域直读）。 */
+    /** 只读视图：技能页单请求出列表/行状态/工作区（配置经 settings 域直读）。 */
     async 'overview'() {
       return deriveOverview(await getBundle())
     },
 
-    /** 启动预热（只读）：Host 空闲时预热 bundle 扫描与 health，首次打开秒出。 */
+    /** 启动预热（只读）：Host 空闲时预热 bundle 扫描与行状态，首次打开秒出。 */
     async 'warm'() {
-      await deriveOverview(await getBundle())
+      deriveOverview(await getBundle())
       return { ok: true }
     },
 
@@ -363,16 +363,17 @@ export function buildApi(scopeGetter, { listWorkspaces = () => [], getStore, bac
       return result
     },
 
+    /** 本地导入（退役中，P3 删除）。 */
     async 'import'(payload) {
       const s = session()
-      const result = await backupsMod.importSkill({ root: s.root, store: s.store, path: String(payload.path ?? ''), as: payload.as ? String(payload.as) : undefined, ctx: s })
+      const result = await backupsMod.importSkill({ root: s.root, path: String(payload.path ?? ''), as: payload.as ? String(payload.as) : undefined, ctx: s })
       await refreshCache()
       return result
     },
 
     async 'backups'() {
       const s = session()
-      return backupsMod.backups({ store: s.store, backupsRoot: s.backupsRoot })
+      return backupsMod.backups({ backupsRoot: s.backupsRoot })
     },
 
     async 'restore'(payload) {
@@ -384,59 +385,31 @@ export function buildApi(scopeGetter, { listWorkspaces = () => [], getStore, bac
 
     async 'remove'(payload) {
       const s = session()
-      const result = await backupsMod.remove({ root: s.root, store: s.store, name: String(payload.name ?? ''), keepFiles: payload.keepFiles === true, backupsRoot: s.backupsRoot, ctx: s })
+      const workspacesById = await readWorkspaceProjection(listWorkspaces)
+      const result = await backupsMod.remove({
+        root: s.root,
+        store: s.store,
+        name: String(payload.name ?? ''),
+        backupsRoot: s.backupsRoot,
+        workspacesById,
+        globalRootPath: globalRoot,
+      })
       await refreshCache()
       return result
     },
 
-    async 'project-skills'(payload = {}) {
-      const b = await getBundle()
-      const workspaceId = payload.workspaceId ? String(payload.workspaceId) : ''
-      if (workspaceId !== '' && !b.workspaceIds.has(workspaceId)) {
-        throw new SkillManagerError('workspace-not-found', `DSH 工作区「${workspaceId}」不存在或已移除`)
-      }
-      const entries = {}
-      for (const workspace of b.workspaceProjects) {
-        if (workspaceId !== '' && workspace.workspaceId !== workspaceId) continue
-        entries[workspace.workspaceId] = await inspectMod.classifyProjectEntries(b.root, workspace.path)
-      }
-      return { workspaceProjects: b.workspaceProjects, entries, legacyProjects: b.legacyProjects }
-    },
-
-    async 'claim-empty'(payload) {
+    /** 全量对账（自身即幂等收敛；method 参数随 junction-only 删除，DSR-017）。 */
+    async 'sync'() {
       const s = session()
-      const b = await s.bundle()
-      const name = String(payload.name ?? '')
-      const workspaceId = String(payload.workspaceId ?? '')
-      if (!b.workspaceIds.has(workspaceId)) {
-        throw new SkillManagerError('workspace-not-found', `DSH 工作区「${workspaceId}」不存在或已移除`)
-      }
-      const path = b.state.projects[workspaceId]
-      const { entries, base } = await inspectMod.classifyProjectEntries(s.root, path)
-      const entry = entries.find((item) => item.name === name)
-      if (!entry || entry.kind !== 'local-empty') {
-        throw new SkillManagerError('bad-claim', `目标不是空目录现场: ${name}`)
-      }
-      const records = Array.isArray(b.state.synced[name]) ? b.state.synced[name] : []
-      if (records.some((record) => record?.scope === 'project' && record.project === workspaceId && record.method === 'copy')) {
-        throw new SkillManagerError('bad-claim', `目标仍由本插件 copy 记录管理，拒绝删除: ${name}`)
-      }
-      await rm(join(base, name), { recursive: true, force: true })
-      const sync = await s.reconcile()
-      await refreshCache()
-      return { name, workspaceId, sync }
-    },
-
-    async 'sync'(payload) {
-      const s = session()
-      const result = await s.reconcile(payload.method ? String(payload.method) : 'auto')
+      const result = await s.reconcile()
       await refreshCache()
       return result
     },
 
+    /** 独立健康视图已废止（R-03）；端点薄壳临时留守（P3 删除），行状态经 overview 下发。 */
     async 'health'() {
       const b = await getBundle()
-      return { issues: await getHealth(b) }
+      return { issues: mountIssuesOf(b) }
     },
   }
 }

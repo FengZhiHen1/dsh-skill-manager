@@ -3,7 +3,6 @@
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { buildApi, createQueue, readJsonBody, writeError, writeOk } from '../src/core/service.js'
 import { isLink } from '../src/core/mount/materialize.js'
@@ -136,14 +135,16 @@ test('overview：配置意图驱动 — 禁用/分组/挂载目标/工作区/健
     const off = o.lib.skills.find((s) => s.dir === 'off')
     assert.equal(pdf.disabled, false)
     assert.equal(pdf.group, '办公')
-    assert.deepEqual(pdf.targets.sort(), ['dsh|global|', 'dsh|project|w1'])
+    assert.deepEqual(pdf.targets.sort(), ['global|global', 'project|w1'])
+    // 未物化现场：行状态逐 target 报 link-missing（DSR-017 行状态经 overview 下发）
+    assert.deepEqual(pdf.mount.map((m) => m.issue).sort(), ['link-missing', 'link-missing'])
     assert.equal(off.disabled, true)
+    assert.deepEqual(off.targets, []) // 禁用不进期望集
     assert.equal(pdf.origin, 'github')
     assert.ok(Array.isArray(o.health.issues))
-    assert.equal(o.workspaceProjects.length, 1)
-    assert.equal(o.workspaceProjects[0].workspaceId, 'w1')
-    // 禁用技能不进期望集
-    assert.deepEqual(o.lib.skills.filter((s) => s.disabled).map((s) => s.dir), ['off'])
+    assert.equal(o.workspaces.length, 1)
+    assert.equal(o.workspaces[0].workspaceId, 'w1')
+    assert.equal(o.workspaces[0].mountCount, 1) // 「办公」组挂了 w1
   } finally {
     await cleanup(root)
     await cleanup(proj)
@@ -208,38 +209,6 @@ test('check 缓存随 overview 下发（不发网络）', async () => {
   }
 })
 
-test('project-skills / claim-empty：工作区现场分类与接管', async () => {
-  const root = await mkTmp()
-  const proj = await mkTmp()
-  const groot = await mkTmp()
-  try {
-    await writeSkill(root, 'pdf')
-    const workspaces = [{ id: 'w1', path: proj, title: '项目' }]
-    // 配置意图含项目挂载（claim-empty 后对账才能物化到 w1）
-    const { api } = makeApi({
-      root,
-      workspaces,
-      globalRoot: groot,
-      scope: () => fakeScope(root, {
-        groups: { 默认: { mounts: [{ scope: 'global' }, { scope: 'project', project: 'w1' }] } },
-        skills: { pdf: { disabled: false, group: '默认' } },
-      }),
-    })
-    const { mkdir } = await import('node:fs/promises')
-    await mkdir(join(proj, '.dsh', 'skills', 'pdf'), { recursive: true }) // 空目录现场
-    const before = await api['project-skills']({ workspaceId: 'w1' })
-    assert.equal(before.entries.w1.entries.find((e) => e.name === 'pdf').kind, 'local-empty')
-    const r = await api['claim-empty']({ name: 'pdf', workspaceId: 'w1' })
-    assert.equal(r.name, 'pdf')
-    assert.ok(await isLink(join(proj, '.dsh', 'skills', 'pdf')))
-    await assertRejectsCode(api['claim-empty']({ name: 'pdf', workspaceId: 'gone' }), 'workspace-not-found')
-  } finally {
-    await cleanup(root)
-    await cleanup(proj)
-    await cleanup(groot)
-  }
-})
-
 test('storage 域未就绪：方法回 internal 语义（getStore 抛错）', async () => {
   const root = await mkTmp()
   try {
@@ -254,21 +223,6 @@ test('storage 域未就绪：方法回 internal 语义（getStore 抛错）', as
     const gate = buildApi(() => fakeScope(''), { getStore: () => { throw new Error('x') }, backupsRoot: '' })
     await assertRejectsCode(gate.overview({}), 'skilldir-unconfigured')
     await assert.rejects(() => api.overview({}), /storage 域尚未就绪/)
-  } finally {
-    await cleanup(root)
-  }
-})
-
-test('工作区镜像：legacy 项目经 api 下发为只读遗留项', async () => {
-  const root = await mkTmp()
-  try {
-    const { api, store } = makeApi({ root, workspaces: [] })
-    await store.putProject('gone', { path: 'E:/removed' })
-    const data = await api.overview({})
-    assert.equal(data.legacyProjects.length, 1)
-    assert.equal(data.legacyProjects[0].status, 'workspace-unmatched')
-    // 目录不因遗留项被触碰
-    assert.deepEqual(await readdir(root), [])
   } finally {
     await cleanup(root)
   }

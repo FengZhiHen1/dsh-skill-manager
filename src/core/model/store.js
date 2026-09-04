@@ -1,26 +1,30 @@
-// dsh-skill-manager — storage 域投影形状与存取门面（DSR-015 model 层）。
+// dsh-skill-manager — storage 域投影形状与存取门面（DSR-015 model 层；DSR-017 两表收敛）。
 //
 // 权威语义见 docs/technical-details/目录配置与状态存储.md：
-// - storage 域 `skill_manager` 是**运行时投影**：用户意图（分组/挂载/禁用）
-//   的唯一事实源是 settings 命名空间（settings.yaml 的 skill-manager 段），
-//   域内只保留发现物与物化状态：skills（github 入库元数据）、synced（物化
-//   记录）、projects（工作区镜像）、check_cache、backups。
-// - groups/mounts 表已删除（意图归配置）；skills 表不再记录 disabled/group
-//   意图字段；self 目录不再登记（本地 skill 即本地文件）。
-// - 域读为内存同步读；写经域写链持久化先行（put/delete/update 均为异步）。
-// - legacy 七表 spec 仅供一次性迁移：读旧意图（groups/mounts/
-//   skills.disabled/group）投影进 settings.yaml，随后不再使用。
+// - storage 域 `skill_manager` 是**运行时投影**，只有两表：skills（github 入库
+//   元数据）与 check_cache（上游检查结果缓存）。用户意图的唯一事实源是
+//   settings 命名空间；物化状态由文件系统现场现算（无 synced/projects 台账，
+//   备份事实源是备份目录本身，DSR-017）。
+// - 域读为内存同步读；写经域写链持久化先行（put/delete 均为异步）。
+// - version 保持 1：storage-json 后端对 version 严格相等校验，bump 会让存量
+//   域打不开；新 spec 未声明的旧表（synced/projects/backups 乃至 legacy 七表）
+//   在首次写入时从域文件整体抹除（打开只载入声明表、写入整文档重序列化），
+//   无需迁移代码（目录配置与状态存储.md「已核实事实」）。
+// - legacy 七表 spec 仅供一次性迁移（src/adapter/migrate.js）读取存量意图。
 //
-// P1 搬位说明：本文件保留 zod 记录 schema、域形状构建器、键与窄门面；
-// defineDomain/domainTable 的 @deepseek-ai/dsh-storage-domain 包裹与
-// openStore 移至 src/adapter/storage.js（core 不 import @deepseek-ai/*）。
+// P1 搬位说明：defineDomain/domainTable 的 @deepseek-ai 包裹在
+// src/adapter/storage.js（core 不 import @deepseek-ai/*）。
 // 其余模块只依赖 createStore 返回的门面。测试用 createStore(fakeDomain) 注入
 // 内存假句柄（fakeDomain.table(name) 返回带同步 get/entries/keys 与异步
 // put/delete/update 的对象），不依赖真实 storage 服务。
 
 import { z } from 'zod'
 
-/** github/local 入库元数据；self 为兼容存量记录保留（不再新登记）。 */
+/**
+ * 入库元数据（键 = 安装名）。新登记只有 origin:"github"；存量 "local"/"self"
+ * 记录兼容读取并视为 self（无上游操作、无删除入口、不新登记，DSR-017）。
+ * origin_path 仅供旧记录通过校验，不再写入。
+ */
 const skillRecord = z.object({
   origin: z.enum(['github', 'local', 'self']),
   repo: z.string().nullable(),
@@ -32,33 +36,7 @@ const skillRecord = z.object({
   installed_at: z.string(),
 })
 
-const groupRecord = z.object({
-  created_at: z.string(),
-})
-
-const mountRecord = z.object({
-  group: z.string(),
-  app: z.string(),
-  scope: z.enum(['global', 'project']),
-  project: z.string().nullable(),
-})
-
-const syncedRecord = z.object({
-  method: z.enum(['junction', 'copy']),
-  dir: z.string(),
-  // at 是物化时间（目录配置与状态存储.md「synced 表」）；早期写入端漏写导致存量记录
-  // 缺此字段，而 storage-domain 仅在打开时对每条存量记录做 zod 校验，必填会
-  // 让整域打不开。改可选：新记录由 sync.js 补齐，旧记录放行；无逻辑读取 at。
-  at: z.string().optional(),
-  // hash 是 copy 物化时的内容哈希（挂载与同步.md「物化」）：仅哈希一致（未被
-  // 改动）的 copy 目录允许被替换/摘除。junction 记录与早期存量记录无此字段。
-  hash: z.string().optional(),
-})
-
-const projectRecord = z.object({
-  path: z.string(),
-})
-
+/** 最近一次上游检查结果（键 = 安装名），只收 origin:"github" 条目。 */
 const checkRecord = z.object({
   checked_at: z.string(),
   repo: z.string(),
@@ -75,15 +53,37 @@ const checkRecord = z.object({
   missing: z.boolean(),
 })
 
+// ---- 以下三个 schema 只服务 legacy 七表 spec 的存量读取（迁移窗口），新 spec 不声明 ----
+
+const groupRecord = z.object({
+  created_at: z.string(),
+})
+
+const mountRecord = z.object({
+  group: z.string(),
+  app: z.string(),
+  scope: z.enum(['global', 'project']),
+  project: z.string().nullable(),
+})
+
+const syncedRecord = z.object({
+  method: z.string(),
+  dir: z.string(),
+  at: z.string().optional(),
+  hash: z.string().optional(),
+})
+
+const projectRecord = z.object({
+  path: z.string(),
+})
+
 const backupRecord = z.object({
   name: z.string(),
   created_at: z.string(),
 })
 
 /**
- * 域声明构建器（目录配置与状态存储.md「storage 域形状」）。version 保持 1：storage-json
- * 后端对 version 严格相等校验，bump 会让存量域打不开；未声明表在打开时被
- * 忽略，首次新 spec 写入即从文件抹除（迁移窗口期无害）。
+ * 域声明构建器（目录配置与状态存储.md「storage 域形状」）：两表，version 恒 1。
  * @param {{ defineDomain: Function, domainTable: Function }} 平台包裹（adapter 注入）
  */
 export const buildSkillManagerSpec = ({ defineDomain, domainTable }) => defineDomain({
@@ -91,16 +91,13 @@ export const buildSkillManagerSpec = ({ defineDomain, domainTable }) => defineDo
   version: 1,
   tables: {
     skills: domainTable(skillRecord),
-    synced: domainTable(syncedRecord),
-    projects: domainTable(projectRecord),
     check_cache: domainTable(checkRecord),
-    backups: domainTable(backupRecord),
   },
 })
 
 /**
- * 旧七表 spec 构建器（含 groups/mounts 与带意图的 skills）——仅供一次性迁移
- * （src/adapter/migrate.js）读取存量意图；迁移完成后不再使用。
+ * 旧七表 spec 构建器（含 groups/mounts/synced/projects/backups 与带意图的
+ * skills）——仅供一次性迁移读取存量意图；迁移完成后不再使用。
  * @param {{ defineDomain: Function, domainTable: Function }} 平台包裹（adapter 注入）
  */
 export const buildLegacySkillManagerSpec = ({ defineDomain, domainTable }) => defineDomain({
@@ -117,12 +114,7 @@ export const buildLegacySkillManagerSpec = ({ defineDomain, domainTable }) => de
   },
 })
 
-/** 物化记录键：`<name>|<app>|<scope>|<project 或 global>`。 */
-export function syncedKey(name, target) {
-  return `${name}|${target.app}|${target.scope}|${target.project ?? 'global'}`
-}
-
-/** 备份 id：`<安装名>-<时间戳紧凑串>`（目录配置与状态存储.md backups 表）。 */
+/** 备份目录 id：`<安装名>-<时间戳紧凑串>`（备份事实源 = 目录 + _backup_meta.json）。 */
 export function backupId(name, at = new Date()) {
   const stamp = at.toISOString().replace(/[-:.TZ]/g, '')
   return `${name}-${stamp}`
@@ -142,22 +134,22 @@ export function createStore(domain) {
     putSkill: (name, record) => table('skills').put(name, record),
     deleteSkill: (name) => table('skills').delete(name),
 
-    syncedEntries: () => [...table('synced').entries()],
-    putSynced: (name, target, record) => table('synced').put(syncedKey(name, target), record),
-    deleteSynced: (name, target) => table('synced').delete(syncedKey(name, target)),
-
-    getProject: (workspaceId) => table('projects').get(workspaceId),
-    projectEntries: () => [...table('projects').entries()],
-    putProject: (workspaceId, record) => table('projects').put(workspaceId, record),
-
     getCheck: (name) => table('check_cache').get(name),
     checkEntries: () => [...table('check_cache').entries()],
     putCheck: (name, record) => table('check_cache').put(name, record),
     deleteCheck: (name) => table('check_cache').delete(name),
-
-    getBackup: (id) => table('backups').get(id),
-    backupEntries: () => [...table('backups').entries()],
-    putBackup: (id, record) => table('backups').put(id, record),
-    deleteBackup: (id) => table('backups').delete(id),
   }
+}
+
+/**
+ * 上游检查缓存读取（DSR-008 状态直显）：checkedAt + 按安装名的最近结果。
+ * 只由 check/update/remove 经门面维护；读取不发网络请求。
+ */
+export function readCheckCache(store) {
+  const results = Object.fromEntries(store.checkEntries())
+  const checkedAt = Object.values(results).reduce(
+    (latest, record) => (record?.checked_at > (latest ?? '') ? record.checked_at : latest),
+    null,
+  )
+  return { checkedAt, results }
 }

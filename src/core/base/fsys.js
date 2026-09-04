@@ -1,10 +1,10 @@
 // dsh-skill-manager — 文件系统与路径原语收口（base 层，DSR-015）。
 // 搬位说明（P1）：safePath/existsDir/normalizeRel/writeJson 来自原 lib/dir.js；
 // canonicalPath/pathsEqual/withinRoot/readLinkTarget 来自原 lib/sync.js。
-// 全部函数逻辑原样未动。
+// P2 新增：atomicSwapDir（写库目录一律原子换装，DSR-017）。
 
-import { mkdir, readlink, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
-import { dirname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path'
+import { basename, dirname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path'
+import { mkdir, mkdtemp, readlink, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { SkillManagerError } from './errors.js'
 
 /** Resolve a relative path below root, rejecting traversal and root itself. */
@@ -90,16 +90,77 @@ export function withinRoot(root, target) {
 /**
  * 读取链接目标：realpath 优先；悬挂链接（目标已删除）回退 readlink 取原始
  * 目标串（剥除 Windows verbatim 前缀），供归属判断使用。全部失败返回 ''。
+ *
+ * 悬挂回退的 8.3 归一：Windows 创建 junction 时目标被内核存成短路径形态
+ * （如 `FENGZH~1`，实测 Node 24/readlink 如此返回），与 canonicalPath 得到
+ * 的长路径前缀做 withinRoot 比对会误判非 owned——悬挂孤儿因此逃过清扫。
+ * 对策：沿 readlink 结果向上找最近的存在祖先，realpath 展开为长形态后回填
+ * 尾段，恢复可与长路径对比的规范目标。
  */
 export async function readLinkTarget(path) {
   try {
     return await realpath(path)
   } catch {
+    let raw
     try {
-      const raw = await readlink(path)
-      return raw.replace(/^\\\\\?\\/, '')
+      raw = (await readlink(path)).replace(/^\\\\\?\\/, '')
     } catch {
       return ''
     }
+    try {
+      let cur = resolve(raw)
+      const tail = []
+      for (;;) {
+        try {
+          return join(await realpath(cur), ...tail.reverse())
+        } catch {
+          // cur 不存在：再向上走一层
+        }
+        const up = dirname(cur)
+        if (up === cur) return raw
+        tail.push(basename(cur))
+        cur = up
+      }
+    } catch {
+      return raw
+    }
+  }
+}
+
+/**
+ * 原子换装（DSR-017/入站操作.md：写库目录一律"同卷临时目录构建 → rename
+ * 交换"，不存在删旧后重写的半写窗口）。调用方负责先判定 dest 允许被本
+ * 插件整体替换（update 目标必为自登记目录；add/restore 遇占位直接
+ * name-conflict 拒绝，不走本函数）。
+ *
+ * 序列：mkdtemp(dest 同父目录) → buildFn(stage) 填充 → 旧 dest（如存在）
+ * 整体改名移开 → 新目录顶上 → 删除旧目录。任何一步失败：已移开的旧目录
+ * 放回原位，临时目录清理，抛出原错误——dest 全程要么是完整旧版要么是
+ * 完整新版。
+ */
+export async function atomicSwapDir(dest, buildFn) {
+  const parent = dirname(dest)
+  await mkdir(parent, { recursive: true })
+  const stage = await mkdtemp(join(parent, `.dsh-sm-swap-${basename(dest)}-`))
+  const moved = join(parent, `.dsh-sm-old-${basename(dest)}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`)
+  let hadOld = false
+  try {
+    await buildFn(stage)
+    try {
+      await rename(dest, moved)
+      hadOld = true
+    } catch (error) {
+      if (!(error && error.code === 'ENOENT')) throw error
+    }
+    try {
+      await rename(stage, dest)
+    } catch (error) {
+      if (hadOld) await rename(moved, dest).catch(() => {})
+      throw error
+    }
+    if (hadOld) await rm(moved, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 })
+  } finally {
+    await rm(stage, { recursive: true, force: true })
+    if (hadOld) await rm(moved, { recursive: true, force: true }).catch(() => {})
   }
 }

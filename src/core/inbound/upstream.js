@@ -1,12 +1,11 @@
 // dsh-skill-manager — 上游检查与更新（入站操作.md；DSR-015 inbound 层）。
 // 自原 lib/inbound.js 搬位（P1，逻辑未动）。解包原语在 zipball.js。
 
-import { mkdir, rm } from 'node:fs/promises'
+import { rm } from 'node:fs/promises'
 import { SkillManagerError } from '../base/errors.js'
 import { fetchZipball, remoteHead } from '../base/net.js'
-import { safePath } from '../base/fsys.js'
+import { atomicSwapDir, safePath } from '../base/fsys.js'
 import { dirHash } from '../model/library.js'
-import { loadCheckCache, saveCheckCache } from '../model/state.js'
 import { copyTree, materializeSkillDir, nowIso, pathExists } from './zipball.js'
 
 /**
@@ -35,17 +34,15 @@ function cacheEntryFromCheck(r, checkedAt) {
   }
 }
 
-/** 合并有上游（repo）的检查结果进缓存；无上游条目（skipped）不入缓存。 */
+/**
+ * 合并有上游（repo）的检查结果进缓存；无上游条目（skipped）不入缓存。
+ * 两表面无独立缓存对象（DSR-017）：逐条 putCheck，键即安装名。
+ */
 async function mergeCheckCache(store, results, checkedAt = nowIso()) {
-  const cache = await loadCheckCache(store)
-  let touched = false
   for (const r of results) {
     if (!r || !r.repo) continue
-    cache.results[r.name] = cacheEntryFromCheck(r, checkedAt)
-    touched = true
+    await store.putCheck(r.name, cacheEntryFromCheck(r, checkedAt))
   }
-  if (!touched) return
-  await saveCheckCache(store, cache)
 }
 
 /**
@@ -175,10 +172,12 @@ export async function update({ root, store, names, confirmLocalChanges = false, 
       const payload = await fetchZipball(entry.repo, entry.branch)
       // strict：记录的 path_in_repo 失效时报 path-stale + 候选（入站操作.md）
       const { tmp } = await materializeSkillDir(payload, entry.path_in_repo ?? undefined, true)
-      if (await pathExists(dest)) await rm(dest, { recursive: true, force: true })
-      await mkdir(dest, { recursive: true })
-      await copyTree(tmp, dest)
-      await rm(tmp, { recursive: true, force: true })
+      // 覆盖语义（原子换装，DSR-017/入站操作.md）：新版在临时位置构建完成并
+      // 校验后 rename 交换替换旧目录，再清理旧目录；不存在删旧后重写的半写窗口。
+      await atomicSwapDir(dest, async (stage) => {
+        await copyTree(tmp, stage)
+        await rm(tmp, { recursive: true, force: true })
+      })
 
       await store.putSkill(name, {
         ...entry,

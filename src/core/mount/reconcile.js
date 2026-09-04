@@ -1,93 +1,102 @@
-// dsh-skill-manager — 对账编排（挂载与同步.md 对账流程；DSR-015 mount 层）。
-// 自原 lib/sync.js 搬位（P1，逻辑未动）：摘除 → 孤儿清扫 → 物化 → Git exclude → 写回 state。
+// dsh-skill-manager — 对账编排（挂载与同步.md「对账流程」；DSR-015 mount 层；
+// DSR-017 junction-only + 无台账：删除 synced/projects 写回与 save，摘除与孤儿
+// 清扫合并为 findOrphanLinks 单源一步，物化只建 junction）。
+//
+// 全量幂等：任意子项失败不影响其他子项，返回 { results, warnings, errors }。
+// 未配置目录由 service 层 requireDir 门禁先行拦截（skilldir-unconfigured），
+// 到这里 root 必已存在。
 
-import { readdir } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
-import { canonicalPath, readLinkTarget, withinRoot } from '../base/fsys.js'
-import { deriveDesired, isLegacyProjectRecord, linkLocations, targetDirOf, targetKey } from './derive.js'
-import { detachOne, isLink, materializeOne, removeLink, updateGitExcludes } from './materialize.js'
+import { readFile, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { deriveDesired, targetKey } from './derive.js'
+import { findOrphanLinks, scanMountLinks } from './inspect.js'
+import { materializeOne, removeLink } from './materialize.js'
 
-/** 孤儿清扫：仅扫描全局根与当前活动工作区，绝不触碰未匹配遗留项目。 */
-export async function orphanSweep({ root, state, apps, desired, results, workspaceIds, globalRootPath }) {
-  const desiredPaths = new Set()
-  for (const [name, targets] of desired) {
-    for (const t of targets) {
-      const parent = targetDirOf(state, apps, t, workspaceIds, globalRootPath)
-      if (parent !== undefined) desiredPaths.add(resolve(join(parent, name)).toLowerCase())
-    }
-  }
-  const repoRoot = await canonicalPath(root)
-  for (const loc of linkLocations(state, workspaceIds, globalRootPath)) {
-    let entries = []
-    try {
-      entries = await readdir(loc, { withFileTypes: true })
-    } catch {
-      continue
-    }
-    for (const entry of entries) {
-      const full = join(loc, entry.name)
-      if (!(await isLink(full))) continue
-      const target = await readLinkTarget(full)
-      // 别人的链接，不动；归属判据带路径边界（skills-sibling 不算库内）。
-      if (target === '' || !withinRoot(repoRoot, target)) continue
-      if (desiredPaths.has(resolve(full).toLowerCase())) continue // 配置需要，保留
-      await removeLink(full)
-      results.push({ name: entry.name, target: full, action: 'removed', reason: '孤儿链接' })
-    }
-  }
-}
+const EXCLUDE_BEGIN = '# >>> dsh-skill-manager'
+const EXCLUDE_END = '# <<< dsh-skill-manager'
+const EXCLUDE_LINE = '/.dsh/skills/'
 
-/** 全量对账（挂载与同步.md 对账流程）：摘除多余 → 孤儿清扫 → 物化期望 → git exclude → 写 state。 */
-export async function reconcile({ root, state, apps, groups, skills, mounts, method = 'auto', save, workspaceIds, globalRootPath }) {
-  const derived = deriveDesired({ state, apps, groups, skills, mounts, workspaceIds })
-  const { desired, warnings } = derived
-  const activeIds = derived.workspaceIds
+/**
+ * 全量对账（挂载与同步.md「对账流程」）：
+ *   1. 推导活动期望集；
+ *   2. 归属判据成立（realpath 落在配置目录内）且不在期望集 → 摘除（删除链接）；
+ *   3. 物化活动期望（junction-only，空闲建链 / 库内他处重建 / 库外与真实目录报错）；
+ *   4. 维护当前活动工作区 .git/info/exclude 托管块。
+ * 无状态写回（DSR-017）。
+ */
+export async function reconcile({ root, memberships, mounts, workspacesById, globalRootPath }) {
+  const { desired, warnings } = deriveDesired({ memberships, mounts, workspacesById, globalRootPath })
   const results = []
 
-  // 1. 非期望 synced 记录摘除；未匹配遗留工作区只保护既有记录，绝不静默摘链。
-  for (const [name, records] of Object.entries(state.synced)) {
-    if (!Array.isArray(records)) continue
-    const want = new Set([...desired.get(name) ?? []].map(targetKey))
-    const kept = []
-    for (const rec of records) {
-      if (isLegacyProjectRecord(state, rec, activeIds) || (want.has(targetKey(rec)) && desired.has(name))) {
-        kept.push(rec)
-        continue
-      }
-      const action = await detachOne(rec)
-      results.push({ name, target: targetKey(rec), action })
-    }
-    state.synced[name] = kept
+  // 1. 摘除 = 孤儿清扫（同一归属判据，无第二张台账）：owned 且不在期望集 → 删链接。
+  const links = await scanMountLinks({ root, globalRootPath, workspacesById })
+  const orphans = await findOrphanLinks({ root, desired, globalRootPath, workspacesById, links })
+  for (const link of orphans) {
+    await removeLink(link.path)
+    results.push({ name: link.name, target: link.parent, action: 'removed', reason: '孤儿链接（归属本插件且不在期望集）' })
   }
 
-  // 2. 孤儿清扫只遍历活动工作区。
-  await orphanSweep({ root, state, apps, desired, results, workspaceIds: activeIds, globalRootPath })
-
-  // 3. 物化活动期望。
-  for (const [name, targets] of desired) {
+  // 2. 物化活动期望（junction-only）。
+  for (const [skill, targets] of desired) {
     for (const t of targets) {
       const key = targetKey(t)
-      const records = state.synced[name] ?? (state.synced[name] = [])
-      const existing = records.find((x) => targetKey(x) === key)
       try {
-        const r = await materializeOne({ root, state, apps, skill: name, t, method, existingRec: existing, workspaceIds: activeIds, globalRootPath })
-        const parent = targetDirOf(state, apps, t, activeIds, globalRootPath)
-        const rec = { ...t, method: r.method, dir: parent === undefined ? null : join(parent, name), at: new Date().toISOString() }
-        if (r.hash !== undefined) rec.hash = r.hash
-        state.synced[name] = [...state.synced[name].filter((x) => targetKey(x) !== key), rec]
-        results.push({ name, target: key, action: r.action, method: r.method })
+        const r = await materializeOne({ root, skill, t, workspacesById, globalRootPath })
+        results.push({ name: skill, target: key, action: r.action, method: 'junction' })
       } catch (error) {
-        results.push({ name, target: key, action: 'error', error: error.message })
+        results.push({ name: skill, target: key, action: 'error', error: error.message, code: error.code })
       }
     }
   }
 
-  // 4. Git exclude 仅更新活动工作区。
-  await updateGitExcludes(state, apps, activeIds)
-
-  // 5. 写回 state。
-  await save(state)
+  // 3. Git exclude 托管块（只更新有 project 级期望的活动工作区；非 Git 项目跳过）。
+  await updateGitExcludes({ desired, workspacesById })
 
   const errors = results.filter((r) => r.action === 'error')
   return { results, warnings, errors }
+}
+
+/** 需要写 exclude 托管块的工作区集合（desired 中 project 作用域目标的 workspaceId）。 */
+function projectIdsWithDesired(desired) {
+  const ids = new Set()
+  for (const targets of desired.values()) {
+    for (const t of targets) {
+      if (t.scope === 'project' && typeof t.project === 'string' && t.project !== '') ids.add(t.project)
+    }
+  }
+  return ids
+}
+
+/** 为活动工作区根写/清 .git/info/exclude 托管块（挂载与同步.md「Git exclude」）。 */
+async function updateGitExcludes({ desired, workspacesById }) {
+  const wanted = projectIdsWithDesired(desired)
+  for (const [workspaceId, ws] of workspacesById) {
+    const excludeFile = join(ws.path, '.git', 'info', 'exclude')
+    let text = ''
+    try {
+      text = await readFile(excludeFile, 'utf8')
+    } catch {
+      continue // 非 Git 项目或不可读：跳过
+    }
+    const stripped = stripExcludeBlock(text)
+    const next = wanted.has(workspaceId) ? withExcludeBlock(stripped) : stripped
+    if (next !== text) await writeFile(excludeFile, next, 'utf8')
+  }
+}
+
+function stripExcludeBlock(text) {
+  let out = text
+  while (out.includes(EXCLUDE_BEGIN) && out.includes(EXCLUDE_END)) {
+    const pre = out.split(EXCLUDE_BEGIN, 1)[0]
+    const rest = out.slice(out.indexOf(EXCLUDE_BEGIN) + EXCLUDE_BEGIN.length)
+    const post = rest.slice(rest.indexOf(EXCLUDE_END) + EXCLUDE_END.length)
+    out = `${pre.replace(/\n+$/, '')}${post ? `\n${post.replace(/^\n+/, '')}` : ''}`
+  }
+  return out.replace(/\n+$/, '')
+}
+
+function withExcludeBlock(text) {
+  const block = `${EXCLUDE_BEGIN}\n${EXCLUDE_LINE}\n${EXCLUDE_END}`
+  const base = text.replace(/\n+$/, '')
+  return base === '' ? `${block}\n` : `${base}\n\n${block}\n`
 }

@@ -1,21 +1,22 @@
-// dsh-skill-manager — 导入、出库、备份与恢复（入站操作.md；DSR-015 inbound 层）。
-// 自原 lib/inbound.js 搬位（P1，逻辑未动）。importSkill 按批次要求临时放在本文件
-// （P3 随端点删除一并处理）。解包原语在 zipball.js；摘链 detachOne 在 mount 域。
+// dsh-skill-manager — 出库、备份与恢复（入站操作.md；DSR-015 inbound 层；
+// DSR-017：备份事实源 = 备份目录 + _backup_meta.json（无登记表）；remove 一律
+// 自动备份（keepFiles 废止）；恢复/入库写库目录一律原子换装）。
+// importSkill 为退役端点临时留守（P3 随 import 端点一并删除）：本地导入不再
+// 登记 skills 表（本地 skill 无版本管理，DSR-017）。
 
 import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { SkillManagerError } from '../base/errors.js'
-import { safePath } from '../base/fsys.js'
+import { atomicSwapDir, canonicalPath, pathsEqual, safePath } from '../base/fsys.js'
 import { dirHash } from '../model/library.js'
-import { loadState, saveState } from '../model/state.js'
 import { backupId } from '../model/store.js'
-import { targetKey } from '../mount/derive.js'
-import { detachOne } from '../mount/materialize.js'
+import { scanMountLinks } from '../mount/inspect.js'
+import { removeLink } from '../mount/materialize.js'
 import { copyTree, explodeZipball, locateSkillDir, nowIso, pathExists, validateInstallName } from './zipball.js'
 
-/** 本地导入（R-11）。 */
-export async function importSkill({ root, store, path: inputPath, as, ctx }) {
+/** 本地导入（退役中，P3 删除）。本地 skill 无版本管理：落文件即入库，不登记。 */
+export async function importSkill({ root, path: inputPath, as, ctx }) {
   const src = resolve(inputPath.replace(/%([^%]+)%/g, (_, v) => process.env[v] ?? `%${v}%`))
   if (!(await pathExists(src))) throw new SkillManagerError('not-found', `路径不存在: ${inputPath}`)
   let skillDir
@@ -49,64 +50,76 @@ export async function importSkill({ root, store, path: inputPath, as, ctx }) {
     if (tmp) await rm(tmp, { recursive: true, force: true })
     throw new SkillManagerError('name-conflict', `${installName} 已存在，可用改名导入`)
   }
-  await mkdir(dest, { recursive: true })
-  await copyTree(skillDir, dest)
-  if (tmp) await rm(tmp, { recursive: true, force: true })
-
-  await store.putSkill(installName, {
-    origin: 'local',
-    repo: null,
-    branch: null,
-    commit: null,
-    path_in_repo: null,
-    // 本地 skill 无版本管理：不建立内容基线（content_hash 仅 github 更新门禁用）。
-    content_hash: null,
-    origin_path: src,
-    installed_at: nowIso(),
+  await atomicSwapDir(dest, async (stage) => {
+    await copyTree(skillDir, stage)
+    if (tmp) await rm(tmp, { recursive: true, force: true })
   })
   const sync = await ctx.reconcile()
   return { name: installName, source: 'local', sync }
 }
 
-/** 出库（R-12）：备份 → 摘除物化 → 删除目录 → 删记录 → 清缓存。 */
-export async function remove({ root, store, name, keepFiles, backupsRoot, ctx }) {
-  const src = safePath(root, name)
-  if (!(await pathExists(src))) throw new SkillManagerError('not-found', `库中不存在 skill: ${name}`)
+/**
+ * 出库（入站操作.md「remove」）：仅限 origin:"github"。执行顺序不可交换：
+ * 1. 备份整目录（missing 条目无物可备，backup=null）；
+ * 2. 摘除该 name 的全部物化链接（归属判据单源扫描全局根与活动工作区根，
+ *    指向 <root>/<name> 者删除；真实目录与其他链接一律不动）；
+ * 3. 删除库内目录；
+ * 4. 删除 skills 登记与 check_cache 条目。
+ * 不触碰 settings 意图（disabled/group 残留，日后入库自然落回原组）。
+ * 任一步失败不回滚已完成步骤；错误消息携带已完成动作供展示（DSR-018 facts 归 P5）。
+ */
+export async function remove({ root, store, name, backupsRoot, workspacesById, globalRootPath }) {
   const record = store.getSkill(name) ?? null
+  if (!record || record.origin !== 'github') {
+    throw new SkillManagerError('not-removable', `「${name}」不是外部 skill（本地与自研目录无删除入口，请在文件系统自管）`)
+  }
+  const src = safePath(root, name)
+  const present = await pathExists(src)
 
+  // 1. 备份（一律自动，keepFiles 选项随本地导入一并废止）。
   let backup = null
-  if (!keepFiles) {
+  if (present) {
     const id = backupId(name)
     backup = join(backupsRoot, id)
     await mkdir(backup, { recursive: true })
-    await copyTree(src, backup)
-    const createdAt = nowIso()
-    await writeFile(
-      join(backup, '_backup_meta.json'),
-      JSON.stringify({ name, record, created_at: createdAt }, null, 2),
-      'utf8',
-    )
-    await store.putBackup(id, { name, created_at: createdAt })
+    try {
+      await copyTree(src, backup)
+      await writeFile(
+        join(backup, '_backup_meta.json'),
+        JSON.stringify({ name, record, created_at: nowIso() }, null, 2),
+        'utf8',
+      )
+    } catch (error) {
+      await rm(backup, { recursive: true, force: true })
+      throw error
+    }
   }
 
-  const state = await loadState(store)
+  // 2. 摘除全部物化链接（与对账同一归属判据：owned 链接中 realpath 指向
+  //    <root>/<name> 者删除；真实目录与其他链接一律不动）。
   const detached = []
-  for (const rec of state.synced[name] ?? []) {
-    if ((await detachOne(rec)) === 'removed') detached.push(targetKey(rec))
+  const srcCanonical = await canonicalPath(src)
+  for (const link of await scanMountLinks({ root, globalRootPath, workspacesById })) {
+    if (link.owned && pathsEqual(link.target, srcCanonical)) {
+      await removeLink(link.path)
+      detached.push(link.path)
+    }
   }
-  delete state.synced[name]
-  await saveState(store, state)
 
-  await rm(src, { recursive: true, force: true, maxRetries: 3 })
-  if (record) await store.deleteSkill(name)
+  // 3. 删除库内目录（插件自行下载的外部 skill，属 C-03 允许的可写范围）。
+  if (present) await rm(src, { recursive: true, force: true, maxRetries: 3 })
 
-  // DSR-008：出库后清理检查缓存条目，避免残留状态。
+  // 4. 两表清理。
+  await store.deleteSkill(name)
   await store.deleteCheck(name)
   return { name, backup, detached }
 }
 
-/** 备份列表（R-12）：域登记 ∪ 备份目录实际内容。 */
-export async function backups({ store, backupsRoot }) {
+/**
+ * 备份列表（入站操作.md）：事实源 = 备份目录实际内容（无登记表，DSR-017）；
+ * 逐个读 _backup_meta.json 补名称与时间，无元数据仍展示（has_meta=false）。
+ */
+export async function backups({ backupsRoot }) {
   let entries = []
   try {
     entries = await readdir(backupsRoot, { withFileTypes: true })
@@ -114,7 +127,6 @@ export async function backups({ store, backupsRoot }) {
     if (error && error.code === 'ENOENT') entries = []
     else throw error
   }
-  const registered = new Map(store.backupEntries())
   const out = []
   for (const entry of entries.filter((d) => d.isDirectory())) {
     let meta = {}
@@ -123,44 +135,50 @@ export async function backups({ store, backupsRoot }) {
     } catch {
       // 无元数据仍展示
     }
-    const reg = registered.get(entry.name)
     out.push({
       id: entry.name,
-      name: meta.name || reg?.name || entry.name,
-      time: meta.created_at || reg?.created_at || '',
-      has_meta: Boolean(meta.name),
+      name: typeof meta.name === 'string' && meta.name !== '' ? meta.name : entry.name.replace(/-\d{8,}T?[\d.]*Z?$/, ''),
+      time: typeof meta.created_at === 'string' ? meta.created_at : '',
+      has_meta: typeof meta.name === 'string' && meta.name !== '',
     })
   }
   return out
 }
 
-/** 恢复（R-12）：备份必须在 backups 表登记且为备份目录直接子目录。 */
+/**
+ * 恢复（入站操作.md「restore」）：id = 不含路径分隔符的普通目录名且目录实际存在
+ * （登记存在性检查随 backups 表一并删除）；目标占位拒绝；原子换装就位（剥除
+ * _backup_meta.json）；有 record 的 github 快照按登记恢复（剥除意图字段，
+ * content_hash 缺失时以恢复结果重算基线）；local/self/无记录 = 本地文件恢复，
+ * 不写登记。完成后触发对账。
+ */
 export async function restore({ root, store, id, backupsRoot, ctx }) {
-  const registration = typeof id === 'string' && !id.includes('/') && !id.includes('\\') && id !== '.' && id !== '..'
-    ? store.getBackup(id)
-    : undefined
-  if (!registration) throw new SkillManagerError('not-found', `备份不存在: ${id}`)
+  if (typeof id !== 'string' || id === '' || id.includes('/') || id.includes('\\') || id === '.' || id === '..') {
+    throw new SkillManagerError('not-found', `非法备份 id: ${id}`)
+  }
   const src = join(backupsRoot, id)
-  if (!(await pathExists(src))) throw new SkillManagerError('not-found', `备份目录缺失: ${id}`)
+  if (!(await pathExists(src))) throw new SkillManagerError('not-found', `备份目录不存在: ${id}`)
   let meta = {}
   try {
     meta = JSON.parse(await readFile(join(src, '_backup_meta.json'), 'utf8'))
   } catch {
-    // 无元数据
+    // 无元数据 = 本地文件恢复
   }
-  const name = meta.name || registration.name || id
+  const name = typeof meta.name === 'string' && meta.name !== '' ? meta.name : id.replace(/-\d{8,}T?[\d.]*Z?$/, '')
+  validateInstallName(name)
   const dest = safePath(root, name)
   if (await pathExists(dest)) throw new SkillManagerError('name-conflict', `${name} 已存在，无法恢复`)
-  await mkdir(dest, { recursive: true })
-  await copyTree(src, dest)
-  await rm(join(dest, '_backup_meta.json'), { force: true })
 
-  // 恢复 github/local 记录（含基线；意图字段已废弃，组归属以配置为准）。
-  // 无元数据或无记录的备份 = 本地文件恢复，不写登记（本地 skill 无版本管理）。
+  // 原子换装恢复：备份内容在同卷临时位置就位（剥元数据）后 rename 到目标。
+  await atomicSwapDir(dest, async (stage) => {
+    await copyTree(src, stage)
+    await rm(join(stage, '_backup_meta.json'), { force: true })
+  })
+
   const record = meta.record && typeof meta.record === 'object' ? { ...meta.record } : null
   delete record?.disabled
   delete record?.group
-  if (record && record.origin !== 'self') {
+  if (record && record.origin === 'github') {
     record.content_hash = record.content_hash ?? await dirHash(dest)
     await store.putSkill(name, record)
   }

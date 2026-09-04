@@ -4,8 +4,8 @@
 // storage 域。新架构意图唯一事实源是 settings 命名空间。本模块在启动时：
 //   1. 用 legacySkillManagerSpec（旧七表）打开域，读存量意图；
 //   2. 有数据且 settings 未标记 intentMigrated → scope.update 投影进配置；
-//   3. 关闭旧域；随后 openStore 用新五表 spec 打开（version 相同，未声明表
-//      被忽略；新 spec 的首次写入会把旧表从文件抹除，迁移自动幂等）。
+//   3. 关闭旧域；随后 openStore 用新两表 spec 打开（version 相同，未声明表
+//      不被读取；新 spec 的首次写入会整文档重发、把旧表从文件抹除，迁移自动幂等）。
 
 import { legacySkillManagerSpec } from './storage.js'
 import { DEFAULT_GROUP } from '../core/model/intent.js'

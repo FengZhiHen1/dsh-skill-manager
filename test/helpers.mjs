@@ -83,12 +83,12 @@ export function fakeScope(skillsDir, overrides = {}) {
   return { get: () => ({ ...base, ...overrides }) }
 }
 
-/** 标准 skills 记录（缺省 self；用 overrides 覆盖字段）。 */
+/** 标准 skills 入库元数据（缺省 self；用 overrides 覆盖字段）。两表面：意图字段（disabled/group）已归 settings，不再出现在记录里。 */
 export function skillRecord(overrides = {}) {
   return {
     origin: 'self', repo: null, branch: null, commit: null,
     path_in_repo: null, content_hash: null, origin_path: null,
-    installed_at: '2026-08-01T00:00:00.000Z', disabled: false, group: '默认',
+    installed_at: '2026-08-01T00:00:00.000Z',
     ...overrides,
   }
 }

@@ -6,10 +6,10 @@
 //   用户意图的唯一事实源 = settings.yaml 的 skill-manager 段；浏览器端经
 //   标准 settings 域（settingsScope）直读直写，不经过自定义 HTTP 协议。
 // - 旧 storage 意图一次性迁移（src/adapter/migrate.js）投影进配置。
-// - 打开 storage 域 skill_manager（五表投影：skills/synced/projects/
-//   check_cache/backups）；打开失败只记日志，API 统一回 internal，不拖垮 Host。
+// - 打开 storage 域 skill_manager（两表运行时投影：skills/check_cache，
+//   DSR-017）；打开失败只记日志，API 统一回 internal，不拖垮 Host。
 // - 对账器：scope.watch 监听配置变更 → 200ms 防抖 → sync（bundle+reconcile+
-//   物化+预热缓存）；对账错误进健康列表（health），不打断配置编辑。
+//   junction 物化+预热缓存）；对账错误入行状态（overview 下发），不打断配置编辑。
 // - 注册 /skill-manager/api 路由（受信请求围栏 + 三路队列 + 统一信封），
 //   只提供只读视图与网络/文件操作（配置读写不在此层）。
 // - 未配置 skills 目录时所有方法统一返回 skilldir-unconfigured。
@@ -27,15 +27,14 @@
 //   src/core/model/intent.js      — 配置即意图模型（schema、形式校验、requireDir）+ 组纯推导
 //   src/core/model/store.js       — storage 域形状（zod schema、构建器、键）与读写门面
 //   src/core/model/library.js     — 库扫描、frontmatter、内容哈希基线
-//   src/core/model/state.js       — 挂载状态投影、工作区镜像（临时，P2 处理）
-//   src/core/mount/derive.js      — 挂载推导（targetKey/deriveDesired/targetDirOf/拓扑 helpers）
-//   src/core/mount/materialize.js — junction 物化与摘除、git exclude（copy 兜底临时保留，P2 收敛）
-//   src/core/mount/inspect.js     — 只读走查（health、项目既有条目分类；临时，P2/P3 收缩）
-//   src/core/mount/reconcile.js   — 对账编排（摘除 → 清扫 → 物化 → exclude → 写回）
+//   src/core/mount/derive.js      — 挂载推导与工作区投影（targetKey/deriveDesired/targetDir/全局根回退）
+//   src/core/mount/materialize.js — junction-only 物化与摘除（挂载与同步.md「物化」）
+//   src/core/mount/inspect.js     — 归属判据单源（scanMountLinks/findOrphanLinks）与行状态走查
+//   src/core/mount/reconcile.js   — 对账编排（摘除=清扫单源 → junction 物化 → git exclude，无台账写回）
 //   src/core/inbound/zipball.js   — zipball → skill 目录管线与入站域共享原语
-//   src/core/inbound/acquire.js   — 搜索 / 仓库探测 / 入库
-//   src/core/inbound/upstream.js  — 上游检查与更新
-//   src/core/inbound/backups.js   — 本地导入（临时）/ 出库 / 备份列表 / 恢复
+//   src/core/inbound/acquire.js   — 搜索 / 仓库探测 / 入库（原子换装）
+//   src/core/inbound/upstream.js  — 上游检查与更新（结果逐条写 check_cache；覆盖走原子换装）
+//   src/core/inbound/backups.js   — 出库 / 备份列表 / 恢复（备份事实源=目录+meta；importSkill 退役中）
 //   src/core/service.js           — 方法表、三路队列、只读视图与文件/网络操作（原 lib/api.js）
 //   src/adapter/settings.js       — settings 命名空间注册（唯一 @deepseek-ai/dsh-settings import）
 //   src/adapter/storage.js        — storage 域 defineDomain/domainTable 包裹与 openStore
@@ -53,10 +52,10 @@ import { ApiError, buildApi, createQueue, readJsonBody, writeJson, writeOk, writ
 import { isTrustedApiRequest, trustedHostsOf } from './fence.js'
 
 /** 读方法：不排队，直接走进程内 bundle 缓存快照（写屏障由 createQueue.busy 对齐）。 */
-const READ_METHODS = new Set(['overview', 'warm', 'health', 'project-skills', 'backups'])
+const READ_METHODS = new Set(['overview', 'warm', 'health', 'backups'])
 /** 网络慢方法：独立队列，绝不阻塞读写。 */
 const NET_METHODS = new Set(['check', 'search', 'repo-skills'])
-// 其余方法（add/update/import/remove/restore/claim-empty/sync）= 文件写操作，FIFO 串行。
+// 其余方法（add/update/import/remove/restore/sync）= 文件写操作，FIFO 串行。
 
 export default {
   name: 'skill-manager',
