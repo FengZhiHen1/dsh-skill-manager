@@ -1,2 +1,7 @@
 allowBuilds:
   esbuild: true
+# 本机 pnpm store 例外（AGENTS：E: 盘仓库族用自定义 store）。node_modules 记录即此
+# store；不钉此项则 pnpm run 的依赖核验子进程用默认 store → 触发 modules purge。
+storeDir: E:/Project/Tool/dsh-auteur/.pnpm-store
+# check 链自带全部四道门禁（产物新鲜度/语法/分层/单测），关闭 pnpm 运行前依赖核验。
+verifyDepsBeforeRun: false

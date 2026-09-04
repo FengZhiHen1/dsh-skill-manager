@@ -1,14 +1,17 @@
 {
   "name": "dsh-skill-manager",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "DSH 设置页技能管理插件：配置本地 skills 目录（纯 skill 平铺目录）后，管理库、分组与 DSH 挂载，支持 skills.sh 搜索下载、GitHub 入库、本地导入、检查更新、备份恢复与禁用启用；状态存于 DSH storage 域。",
+  "description": "DSH 设置页技能管理插件：配置本地 skills 目录（纯 skill 平铺目录）后，管理库、分组与 DSH 挂载（junction-only），支持 skills.sh 搜索、GitHub 入库、检查更新、备份恢复与禁用启用；配置即意图存 settings，运行时投影存 DSH storage 域，失败附一键复制修复提示词。",
   "type": "module",
   "main": "./src/adapter/index.js",
   "exports": {
     ".": "./src/adapter/index.js",
     "./client": "./dist/client.js",
     "./package.json": "./package.json"
+  },
+  "engines": {
+    "node": "^22.19.0 || >=24"
   },
   "files": [
     "src/",
@@ -18,12 +21,16 @@
   "scripts": {
     "build": "node build-client.mjs",
     "test": "node --test test/*.test.mjs",
-    "check": "node build-client.mjs --check && node --check dist/client.js && node --check src/adapter/index.js && node --check src/adapter/settings.js && node --check src/adapter/storage.js && node --check src/adapter/migrate.js && node --check src/core/service.js && node --check src/core/base/errors.js && node --check src/core/base/fsys.js && node --check src/core/base/cache.js && node --check src/core/base/zip.js && node --check src/core/base/net.js && node --check src/core/model/intent.js && node --check src/core/model/store.js && node --check src/core/model/library.js && node --check src/core/mount/derive.js && node --check src/core/mount/materialize.js && node --check src/core/mount/inspect.js && node --check src/core/mount/reconcile.js && node --check src/core/inbound/zipball.js && node --check src/core/inbound/acquire.js && node --check src/core/inbound/upstream.js && node --check src/core/inbound/backups.js && node --test test/*.test.mjs"
+    "layering": "node ../../tools/plugin-layering-check.mjs .",
+    "check": "node build-client.mjs --check && node --check dist/client.js && node --check src/adapter/index.js && node --check src/adapter/settings.js && node --check src/adapter/storage.js && node --check src/adapter/migrate.js && node --check src/core/service.js && node --check src/core/base/errors.js && node --check src/core/base/fsys.js && node --check src/core/base/cache.js && node --check src/core/base/zip.js && node --check src/core/base/net.js && node --check src/core/model/intent.js && node --check src/core/model/store.js && node --check src/core/model/library.js && node --check src/core/mount/derive.js && node --check src/core/mount/materialize.js && node --check src/core/mount/inspect.js && node --check src/core/mount/reconcile.js && node --check src/core/inbound/zipball.js && node --check src/core/inbound/acquire.js && node --check src/core/inbound/upstream.js && node --check src/core/inbound/backups.js && npm run layering && node --test test/*.test.mjs"
   },
   "dependencies": {
-    "@deepseek-ai/dsh-storage-domain": "0.1.0-rc.7",
     "schemastery": "^3.18.0",
     "zod": "^3.25.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-settings": "*",
+    "@deepseek-ai/dsh-storage-domain": "*"
   },
   "dsh": {
     "bundle": {
@@ -40,6 +47,7 @@
     }
   },
   "devDependencies": {
+    "@deepseek-ai/dsh-storage-domain": "0.1.0-rc.7",
     "esbuild": "^0.28.2"
   }
 }
