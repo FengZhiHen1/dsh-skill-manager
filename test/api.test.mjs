@@ -46,17 +46,21 @@ test('已配置但目录缺失：统一 skilldir-missing（插件保持存活）
 })
 
 test('toRpcFailure：错误 → 平台 Result 失败侧（retryable 归 details）', () => {
-  assert.deepEqual(toRpcFailure(new SkillManagerError('bad-name', '名字不对')), {
-    ok: false,
-    error: { code: 'bad-name', message: '名字不对', details: { retryable: false } },
-  })
-  assert.deepEqual(toRpcFailure(new SkillManagerError('rate_limited', '稍后重试', true)).error.details, { retryable: true })
+  const sme = toRpcFailure(new SkillManagerError('bad-name', '名字不对'))
+  assert.deepEqual(
+    { ok: sme.ok, code: sme.error.code, message: sme.error.message, retryable: sme.error.details.retryable },
+    { ok: false, code: 'bad-name', message: '名字不对', retryable: false },
+  )
+  assert.ok(sme.error.details.repair.summary) // DSR-018：任何失败带 repair
+  assert.equal(toRpcFailure(new SkillManagerError('rate_limited', '稍后重试', true)).error.details.retryable, true)
   // GhError 网络分类：kind 直通错误码，unreachable/rate_limited 可重试
-  const gh = toRpcFailure(Object.assign(new Error('gh down'), { kind: 'unreachable' }))
+  const gh = toRpcFailure(Object.assign(new Error('gh down'), { kind: 'unreachable' }), 'search')
   assert.equal(gh.error.code, 'unreachable')
   assert.equal(gh.error.details.retryable, true)
+  assert.equal(gh.error.details.repair.operation, 'search')
   assert.equal(toRpcFailure(new Error('boom')).error.code, 'internal')
   assert.equal(toRpcFailure('plain string').error.code, 'internal')
+  assert.ok(toRpcFailure(new Error('boom')).error.details.repair) // internal 也有复制入口
 })
 
 test('createQueue：busy/idle 与失败不阻塞后续', async () => {

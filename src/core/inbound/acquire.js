@@ -93,11 +93,21 @@ export const add = withRepoErrors(async ({ root, store, repo: repoInput, dir, re
   const destExists = await pathExists(dest)
   if (destExists) {
     if (existing && existing.repo === repoSlug) {
-      throw new SkillManagerError('already-installed', `${installName} 已在库中（同仓库），请用更新`)
+      throw new SkillManagerError('already-installed', `${installName} 已在库中（同仓库），请用更新`, false, [
+        { label: 'skill', value: installName },
+        { label: '仓库', value: repoSlug },
+        { label: '已登记 commit', value: existing.commit ?? '未知' },
+      ])
     }
     throw new SkillManagerError(
       'name-conflict',
       `${installName} 已存在（${existing?.origin === 'github' ? 'GitHub 来源' : '自研/本地'}），如需替换请先出库现有版本`,
+      false,
+      [
+        { label: '目标路径', value: dest },
+        { label: '现有条目来源', value: existing ? String(existing.origin) : '无登记（仅目录占位）' },
+        { label: '欲导入仓库', value: repoSlug },
+      ],
     )
   }
   // 原子换装入库（DSR-017）：同卷临时目录构建后 rename 就位，杜绝半写目录

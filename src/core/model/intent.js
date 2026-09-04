@@ -94,11 +94,17 @@ export function requireDir(scope) {
   const root = resolve(dir)
   try {
     if (!statSync(root).isDirectory()) {
-      throw new SkillManagerError('skilldir-missing', `配置的 skills 目录不是目录：${dir}`)
+      throw new SkillManagerError('skilldir-missing', `配置的 skills 目录不是目录：${dir}`, false, [
+        { label: '配置的目录', value: dir },
+        { label: '解析后路径', value: root },
+      ])
     }
   } catch (error) {
     if (error instanceof SkillManagerError) throw error
-    throw new SkillManagerError('skilldir-missing', `配置的 skills 目录不存在或不可访问：${dir}`)
+    throw new SkillManagerError('skilldir-missing', `配置的 skills 目录不存在或不可访问：${dir}`, false, [
+      { label: '配置的目录', value: dir },
+      { label: '解析后路径', value: root },
+    ])
   }
   return root
 }

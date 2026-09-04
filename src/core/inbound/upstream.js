@@ -144,6 +144,8 @@ export async function update({ root, store, names, confirmLocalChanges = false, 
     throw new SkillManagerError(
       'local-changes-confirmation-required',
       `检测到本地修改，更新会覆盖：${localChanges.join('、')}。请确认后继续。`,
+      false,
+      [{ label: '含本地修改的条目', value: localChanges.join('、') }],
     )
   }
   const results = []

@@ -26,7 +26,10 @@ import { copyTree, nowIso, pathExists, validateInstallName } from './zipball.js'
 export async function remove({ root, store, name, backupsRoot, workspacesById, globalRootPath }) {
   const record = store.getSkill(name) ?? null
   if (!record || record.origin !== 'github') {
-    throw new SkillManagerError('not-removable', `「${name}」不是外部 skill（本地与自研目录无删除入口，请在文件系统自管）`)
+    throw new SkillManagerError('not-removable', `「${name}」不是外部 skill（本地与自研目录无删除入口，请在文件系统自管）`, false, [
+      { label: 'skill', value: name },
+      { label: '库内路径', value: join(root, name) },
+    ])
   }
   const src = safePath(root, name)
   const present = await pathExists(src)
@@ -109,10 +112,10 @@ export async function backups({ backupsRoot }) {
  */
 export async function restore({ root, store, id, backupsRoot, ctx }) {
   if (typeof id !== 'string' || id === '' || id.includes('/') || id.includes('\\') || id === '.' || id === '..') {
-    throw new SkillManagerError('not-found', `非法备份 id: ${id}`)
+    throw new SkillManagerError('not-found', `非法备份 id: ${id}`, false, [{ label: '备份 id', value: String(id) }])
   }
   const src = join(backupsRoot, id)
-  if (!(await pathExists(src))) throw new SkillManagerError('not-found', `备份目录不存在: ${id}`)
+  if (!(await pathExists(src))) throw new SkillManagerError('not-found', `备份目录不存在: ${id}`, false, [{ label: '期望的备份路径', value: src }])
   let meta = {}
   try {
     meta = JSON.parse(await readFile(join(src, '_backup_meta.json'), 'utf8'))
@@ -122,7 +125,12 @@ export async function restore({ root, store, id, backupsRoot, ctx }) {
   const name = typeof meta.name === 'string' && meta.name !== '' ? meta.name : id.replace(/-\d{8,}T?[\d.]*Z?$/, '')
   validateInstallName(name)
   const dest = safePath(root, name)
-  if (await pathExists(dest)) throw new SkillManagerError('name-conflict', `${name} 已存在，无法恢复`)
+  if (await pathExists(dest)) {
+    throw new SkillManagerError('name-conflict', `${name} 已存在，无法恢复`, false, [
+      { label: '目标路径', value: dest },
+      { label: '备份 id', value: id },
+    ])
+  }
 
   // 原子换装恢复：备份内容在同卷临时位置就位（剥元数据）后 rename 到目标。
   await atomicSwapDir(dest, async (stage) => {

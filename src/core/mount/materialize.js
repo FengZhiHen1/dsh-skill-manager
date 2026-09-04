@@ -39,14 +39,19 @@ export async function materializeOne({ root, skill, t, workspacesById, globalRoo
   const src = safePath(root, skill)
   try {
     const info = await stat(join(src, 'SKILL.md'))
-    if (!info.isFile()) throw new SkillManagerError('no-skill-md', `${skill} 缺少 SKILL.md，拒绝同步`)
+    if (!info.isFile()) throw new SkillManagerError('no-skill-md', `${skill} 缺少 SKILL.md，拒绝同步`, false, [{ label: '库内条目', value: src }])
   } catch (error) {
     if (error instanceof SkillManagerError) throw error
-    if (error && error.code === 'ENOENT') throw new SkillManagerError('no-skill-md', `${skill} 缺少 SKILL.md，拒绝同步`)
+    if (error && error.code === 'ENOENT') throw new SkillManagerError('no-skill-md', `${skill} 缺少 SKILL.md，拒绝同步`, false, [{ label: '库内条目', value: src }])
     throw error
   }
   const parent = targetDir(t, { workspacesById, globalRootPath })
-  if (parent === undefined) throw new SkillManagerError('workspace-unavailable', `目标根不可用: ${t.project ?? 'global'}`)
+  if (parent === undefined) {
+    throw new SkillManagerError('workspace-unavailable', `目标根不可用: ${t.project ?? 'global'}`, true, [
+      { label: '挂载规则引用的工作区', value: t.project ?? 'global' },
+      { label: 'skill', value: skill },
+    ])
+  }
   await mkdir(parent, { recursive: true })
   const dst = join(parent, skill)
 
@@ -57,7 +62,10 @@ export async function materializeOne({ root, skill, t, workspacesById, globalRoo
     // 指向库内他处（如改名后的旧链接）：按归属判据摘除重建（自检修复）；
     // 指向库外的链接非本插件所有：报告，不夺取。
     if (!withinRoot(await canonicalPath(root), target)) {
-      throw new SkillManagerError('wrong-target', `目标已存在指向库外的链接，不夺取: ${dst}`)
+      throw new SkillManagerError('wrong-target', `目标已存在指向库外的链接，不夺取: ${dst}`, false, [
+        { label: '目标路径', value: dst },
+        { label: '该链接现指向', value: target },
+      ])
     }
     await removeLink(dst)
   } else {
@@ -65,7 +73,10 @@ export async function materializeOne({ root, skill, t, workspacesById, globalRoo
       await lstat(dst)
       // 目标已是真实目录：非本插件所有（本插件永不创建真实目录；含旧版本
       // 遗留 copy 物化），按「挂载失败·目标被占用」报告，永不覆盖或删除。
-      throw new SkillManagerError('target-occupied', `目标已被真实目录占用（含旧版本 copy 遗留），本插件不触碰: ${dst}`)
+      throw new SkillManagerError('target-occupied', `目标已被真实目录占用（含旧版本 copy 遗留），本插件不触碰: ${dst}`, false, [
+        { label: '目标路径', value: dst },
+        { label: '期望链接的库内条目', value: src },
+      ])
     } catch (error) {
       if (error instanceof SkillManagerError) throw error
       if (!(error && error.code === 'ENOENT')) throw error

@@ -30,10 +30,14 @@ export function projectWorkspaces(list) {
     const workspaceId = typeof ws?.id === 'string' ? ws.id : ''
     const path = typeof ws?.path === 'string' ? ws?.path : ''
     if (workspaceId === '' || path === '') {
-      throw new SkillManagerError('workspace-unavailable', '工作区注册表返回了缺少 id 或 path 的条目')
+      throw new SkillManagerError('workspace-unavailable', '工作区注册表返回了缺少 id 或 path 的条目', true, [
+        { label: '异常条目形状', value: JSON.stringify(ws) },
+      ])
     }
     if (byId.has(workspaceId)) {
-      throw new SkillManagerError('workspace-unavailable', `工作区注册表返回了重复 id：${workspaceId}`)
+      throw new SkillManagerError('workspace-unavailable', `工作区注册表返回了重复 id：${workspaceId}`, true, [
+        { label: '重复的工作区 id', value: workspaceId },
+      ])
     }
     byId.set(workspaceId, {
       workspaceId,

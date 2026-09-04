@@ -13,7 +13,7 @@
 // {ok:false,error:{code,message,details:{retryable}}}；本层绝不抛出越过
 // dispatch 的错误（未配置门禁等统一转 Result 失败侧）。
 
-import { SkillManagerError } from './base/errors.js'
+import { SkillManagerError, buildRepair } from './base/errors.js'
 import { requireDir, DEFAULT_GROUP, makeGroups } from './model/intent.js'
 import { createSharedCache, hashOf } from './base/cache.js'
 import { dirHash } from './model/library.js'
@@ -62,7 +62,12 @@ async function readWorkspaceProjection(listWorkspaces) {
     return projectWorkspaces(await listWorkspaces())
   } catch (error) {
     if (error instanceof SkillManagerError && error.code === 'workspace-unavailable') throw error
-    throw new SkillManagerError('workspace-unavailable', `无法读取 DSH 工作区注册表：${error instanceof Error ? error.message : String(error)}`, true)
+    throw new SkillManagerError(
+      'workspace-unavailable',
+      `无法读取 DSH 工作区注册表：${error instanceof Error ? error.message : String(error)}`,
+      true,
+      [{ label: '注册表错误', value: error instanceof Error ? error.message : String(error) }],
+    )
   }
 }
 
@@ -343,27 +348,37 @@ export function buildApi(scopeGetter, { listWorkspaces = () => [], getStore, bac
 
 /**
  * 任意错误 → RPC Result 失败侧（平台契约 error 形状 {code,message,details}；
- * retryable 归入 details，由客户端 createCall 消费做重试提示）。GhError 的
- * kind 字段直通错误码（入站操作.md 网络分类）。绝不外抛——handler 抛异常会
- * 退化成平台 500 纯文本，客户端只剩 transport failure 兜底。
+ * details = {retryable, repair}：retryable 供客户端重试提示，repair 为 DSR-018
+ * 修复 facts（operation=端点名，模板见 base/errors.js）。GhError 的 kind 字段
+ * 直通错误码（入站操作.md 网络分类）。绝不外抛——handler 抛异常会退化成平台
+ * 500 纯文本，客户端只剩 transport failure 兜底。
  */
-export function toRpcFailure(error) {
+export function toRpcFailure(error, operation) {
   if (error instanceof SkillManagerError) {
-    return { ok: false, error: { code: error.code, message: error.message, details: { retryable: error.retryable } } }
-  }
-  if (error && typeof error === 'object' && typeof error.kind === 'string') {
     return {
       ok: false,
       error: {
-        code: error.kind,
-        message: error.message ?? String(error),
-        details: { retryable: ['unreachable', 'rate_limited'].includes(error.kind) },
+        code: error.code,
+        message: error.message,
+        details: { retryable: error.retryable, repair: buildRepair(error.code, { operation, facts: error.facts }) },
       },
+    }
+  }
+  if (error && typeof error === 'object' && typeof error.kind === 'string') {
+    const code = error.kind
+    const retryable = ['unreachable', 'rate_limited'].includes(code)
+    return {
+      ok: false,
+      error: { code, message: error.message ?? String(error), details: { retryable, repair: buildRepair(code, { operation }) } },
     }
   }
   return {
     ok: false,
-    error: { code: 'internal', message: error instanceof Error ? error.message : String(error), details: { retryable: false } },
+    error: {
+      code: 'internal',
+      message: error instanceof Error ? error.message : String(error),
+      details: { retryable: false, repair: buildRepair('internal', { operation }) },
+    },
   }
 }
 
@@ -378,7 +393,11 @@ export function createDispatch(api, { writeQueue = createQueue(), netQueue = cre
     if (typeof endpoint !== 'string' || !Object.hasOwn(api, endpoint)) {
       return {
         ok: false,
-        error: { code: 'unknown-endpoint', message: `unknown skill-manager endpoint "${String(endpoint)}"`, details: { retryable: false } },
+        error: {
+          code: 'unknown-endpoint',
+          message: `unknown skill-manager endpoint "${String(endpoint)}"`,
+          details: { retryable: false, repair: buildRepair('unknown-endpoint', { operation: String(endpoint) }) },
+        },
       }
     }
     const input = payload && typeof payload === 'object' ? payload : {}
@@ -391,7 +410,7 @@ export function createDispatch(api, { writeQueue = createQueue(), netQueue = cre
           : await writeQueue.enqueue(invoke)
       return { ok: true, value }
     } catch (error) {
-      return toRpcFailure(error)
+      return toRpcFailure(error, endpoint)
     }
   }
 }

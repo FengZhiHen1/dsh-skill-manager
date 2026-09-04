@@ -12,7 +12,10 @@ export function safePath(root, rel) {
   const target = resolve(root, rel)
   const within = relative(resolve(root), target)
   if (within === '' || within === '..' || within.startsWith(`..${sep}`) || isAbsolute(within)) {
-    throw new SkillManagerError('bad-path', `路径越出 skills 目录：${rel}`)
+    throw new SkillManagerError('bad-path', `路径越出 skills 目录：${rel}`, false, [
+      { label: 'skills 目录', value: resolve(root) },
+      { label: '被解析路径', value: String(rel) },
+    ])
   }
   return target
 }
@@ -52,7 +55,9 @@ export async function writeJson(root, rel, data) {
     }
   } catch (error) {
     await rm(tmp, { force: true })
-    throw new SkillManagerError('write-failed', `写入 ${rel} 失败：${error.message}`, false)
+    throw new SkillManagerError('write-failed', `写入 ${rel} 失败：${error.message}`, false, [
+      { label: '目标文件', value: String(file) },
+    ])
   }
 }
 
@@ -139,6 +144,22 @@ export async function readLinkTarget(path) {
  * 完整新版。
  */
 export async function atomicSwapDir(dest, buildFn) {
+  try {
+    await swapDirInner(dest, buildFn)
+  } catch (error) {
+    // 业务错误（buildFn 抛出的 target-occupied/no-skill-md 等）原样透传；
+    // 纯 fs 失败（mkdtemp/rename/rm）归 write-failed 并带目标路径 facts。
+    if (error instanceof SkillManagerError) throw error
+    throw new SkillManagerError(
+      'write-failed',
+      `原子换装 ${dest} 失败：${error instanceof Error ? error.message : String(error)}`,
+      false,
+      [{ label: '目标目录', value: dest }],
+    )
+  }
+}
+
+async function swapDirInner(dest, buildFn) {
   const parent = dirname(dest)
   await mkdir(parent, { recursive: true })
   const stage = await mkdtemp(join(parent, `.dsh-sm-swap-${basename(dest)}-`))
