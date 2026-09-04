@@ -12,6 +12,7 @@
 - 旧基线设计已落地部分：DSR-001~DSR-013 曾落地到源码（扁平 `lib/` 形态）；单元测试 88 项全绿（2026-09-01 实测，针对旧形态）。
 - 部署（DSR-012）：test profile 经 `link:` 源码直挂；web profile 经 `github:FengZhiHen1/dsh-skill-manager` git 依赖挂载。
 - 待验证项（未实测）：真实 DSH GUI 的客户端模块重建/遮罩确认交互、junction-only 行为与行状态走查的 test-profile 集成冒烟、skills.sh 匿名搜索——清单见 `需求.md` 的 missing evidence 与 `TODO.md`。
+- 本插件不再维护独立设计稿（OpenPencil `.op` 已弃用删除，2026-09-04）：界面视觉与交互细节以设置页实际实现为准；`technical-details/插件运行时.md` 的视图节只承载交互语义与信息架构，不作为视觉规格。
 
 ## 阅读顺序
 
