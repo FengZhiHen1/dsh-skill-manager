@@ -1,6 +1,6 @@
 # DSR-015：core/adapter 分层与模块领域重划
 
-> 状态：已确认（2026-09-01，design-spec-workshop D2′，含用户修订「按域分目录」），代码实施待执行；实施前 `../项目结构设计.md` 等文档按目标形态描述。
+> 状态：已确认（2026-09-01，design-spec-workshop D2′，含用户修订「按域分目录」），代码实施待执行；实施前 `../项目结构设计.md` 等文档按目标形态描述。模块清单经 DSR-017 修订（`model/workspaces.js` 删除、`mount/inspect.js` 收缩、`inbound/acquire.js` 去导入），分层与依赖规则不变。
 
 ## 上下文
 
