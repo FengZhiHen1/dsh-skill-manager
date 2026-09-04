@@ -1,9 +1,9 @@
 // dsh-skill-manager — 进程内缓存层（延迟优化，插件运行时.md「低延迟路径」）。
 //
 // 三个缓存，全部以配置目录为事实边界：
-// - bundle 缓存：library/groups/health/overview 共享的库快照（state/items/
-//   groups/skills/workspace 投影），单飞冷扫、TTL 后失效、写操作后 refresh
-//   预热——读请求在缓存热时零扫描零存储读。
+// - bundle 缓存：overview/warm 与写后预热共享的库快照（session().bundle()
+//   返回值），单飞冷扫、TTL 后失效、写操作后 refresh 预热——读请求在缓存热
+//   时零扫描零存储读。
 // - meta 缓存：每个 skill 目录的 SKILL.md 解析结果，按 stat 签名
 //   （mtimeMs:size）复用，重扫退化为 N 次 stat。
 // - hash 缓存：dirHash 短 TTL（默认 5s），供 check 的本地修改展示用；
@@ -20,15 +20,13 @@ export function createSharedCache({ bundleTtlMs = 800, hashTtlMs = 5000 } = {}) 
     hashTtlMs,
     // bundle 缓存（root 键 + TTL + 单飞）
     bundleRoot: null, // 快照对应的配置目录
-    bundle: null, // { state, items, apps, groups, skills, workspaceProjects, legacyProjects, workspaceIds }
+    bundle: null, // { root, items, skills, mounts, memberships, groups, desired, warnings, workspacesById, workspacesView, links, mountRows, orphans }
     bundleAt: 0,
     bundleInflight: null,
     // meta 缓存：`${root}\0${dir}` -> { sig, hasSkillMd, meta }
     meta: new Map(),
     // hash 缓存：dir -> { hash, at }
     hashes: new Map(),
-    // health 代际缓存：随 bundle 引用失效（写后 refreshCache 换新引用即自然 miss）
-    health: null, // { bundle, issues, at }
   }
 }
 
