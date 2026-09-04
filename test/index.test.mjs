@@ -2,7 +2,7 @@
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import plugin from '../index.js'
+import plugin from '../src/adapter/index.js'
 
 test('Host 入口声明硬依赖：webServer/loader/workspaceRegistry/storage/dshHomePath/settings（不含 connection）', () => {
   assert.equal(plugin.name, 'skill-manager')

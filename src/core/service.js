@@ -1,4 +1,4 @@
-// dsh-skill-manager — HTTP API 传输层（插件运行时.md）。
+// dsh-skill-manager — 应用服务层（自原 lib/api.js 搬位，P1 语义未动；传输语义迁移 connection.rpc 归 P4，插件运行时.md）。
 // 配置（用户意图）不经过本层：UI 经 settings 域直读直写 settings.yaml 的
 // skill-manager 段，Host 对账器监听配置变更后台收敛。本层只提供：
 //   - 只读视图：overview（库列表+健康+工作区）、health、backups、project-skills
@@ -11,15 +11,18 @@
 
 import { join } from 'node:path'
 import { rm } from 'node:fs/promises'
-import { SkillManagerError } from './errors.js'
-import { requireDir, DEFAULT_GROUP } from './dir.js'
-import { createSharedCache, hashOf } from './cache.js'
-import { dirHash } from './library.js'
-import * as library from './library.js'
-import * as groupsMod from './groups.js'
-import * as stateMod from './state.js'
-import * as syncMod from './sync.js'
-import * as inbound from './inbound.js'
+import { SkillManagerError } from './base/errors.js'
+import { requireDir, DEFAULT_GROUP, makeGroups } from './model/intent.js'
+import { createSharedCache, hashOf } from './base/cache.js'
+import { dirHash } from './model/library.js'
+import * as library from './model/library.js'
+import * as stateMod from './model/state.js'
+import * as deriveMod from './mount/derive.js'
+import * as inspectMod from './mount/inspect.js'
+import * as reconcileMod from './mount/reconcile.js'
+import * as acquire from './inbound/acquire.js'
+import * as upstream from './inbound/upstream.js'
+import * as backupsMod from './inbound/backups.js'
 
 const MAX_BODY_BYTES = 1 << 20
 
@@ -115,7 +118,7 @@ export function createQueue() {
  * 每请求会话：按当前配置读 skills 目录根，加载全部共享状态（写前重读，R-17）。
  * 配置意图（settings.groups/skills）在 bundle 内展平为挂载规则与组文档。
  * globalRootPath 由 Host 经 dshHomePath 注入（挂载与同步.md「DSH skill 根」）。
- * @param {() => import('@deepseek-ai/dsh-settings').SettingsScope} scopeGetter
+ * @param {() => SettingsScope} scopeGetter - 类型为 @deepseek-ai/dsh-settings 的 SettingsScope（命名空间注册在 src/adapter/settings.js）
  */
 export function createSession(scopeGetter, listWorkspaces, getStore, backupsRoot, globalRootPath, shared) {
   const root = requireDir(scopeGetter())
@@ -164,7 +167,7 @@ export function createSession(scopeGetter, listWorkspaces, getStore, backupsRoot
           })
         }
       }
-      const groupsDoc = groupsMod.makeGroups(configGroups, intentSkills, new Set(skills))
+      const groupsDoc = makeGroups(configGroups, intentSkills, new Set(skills))
       const state = await stateMod.loadState(store)
       const before = JSON.stringify(state)
       stateMod.mirrorWorkspaceProjects(state, workspaceRecords, mounts)
@@ -189,7 +192,7 @@ export function createSession(scopeGetter, listWorkspaces, getStore, backupsRoot
     },
     async reconcile(method = 'auto') {
       const b = await this.bundle()
-      return syncMod.reconcile({
+      return reconcileMod.reconcile({
         root,
         state: b.state,
         apps: b.apps,
@@ -264,7 +267,7 @@ export function buildApi(scopeGetter, { listWorkspaces = () => [], getStore, bac
     if (cached !== null && cached.bundle === b && Date.now() - cached.at < shared.bundleTtlMs) {
       return cached.issues
     }
-    const issues = await syncMod.health({
+    const issues = await inspectMod.health({
       root: b.root,
       state: b.state,
       apps: b.apps,
@@ -280,14 +283,14 @@ export function buildApi(scopeGetter, { listWorkspaces = () => [], getStore, bac
 
   /** 只读视图派生：库列表（含挂载目标推导与检查缓存）+ 健康。 */
   async function deriveOverview(b) {
-    const { desired, warnings } = syncMod.deriveDesired({
+    const { desired, warnings } = deriveMod.deriveDesired({
       state: b.state, apps: b.apps, groups: b.groups, skills: b.skills, mounts: b.mounts, workspaceIds: b.workspaceIds,
     })
     const cache = await stateMod.loadCheckCache(getStore())
     const skills = b.items
       .map((it) => ({
         ...it,
-        targets: [...(desired.get(it.dir) ?? [])].map(syncMod.targetKey),
+        targets: [...(desired.get(it.dir) ?? [])].map(deriveMod.targetKey),
         upstream: cache.results[it.dir] ?? null,
       }))
     return {
@@ -313,17 +316,17 @@ export function buildApi(scopeGetter, { listWorkspaces = () => [], getStore, bac
 
     async 'search'(payload) {
       session() // 未配置门禁（R-22：search 也在门禁内）
-      return inbound.search(payload.query, Number(payload.limit ?? 20), Number(payload.offset ?? 0))
+      return acquire.search(payload.query, Number(payload.limit ?? 20), Number(payload.offset ?? 0))
     },
 
     async 'repo-skills'(payload) {
       session() // 未配置门禁
-      return inbound.repoSkills(String(payload.repo ?? ''), payload.ref ? String(payload.ref) : 'main')
+      return acquire.repoSkills(String(payload.repo ?? ''), payload.ref ? String(payload.ref) : 'main')
     },
 
     async 'add'(payload) {
       const s = session()
-      const result = await inbound.add({
+      const result = await acquire.add({
         root: s.root,
         store: s.store,
         repo: String(payload.repo ?? ''),
@@ -338,7 +341,7 @@ export function buildApi(scopeGetter, { listWorkspaces = () => [], getStore, bac
 
     async 'check'(payload) {
       const s = session()
-      return inbound.check({
+      return upstream.check({
         root: s.root,
         store: s.store,
         names: Array.isArray(payload.names) ? payload.names.map(String) : undefined,
@@ -348,7 +351,7 @@ export function buildApi(scopeGetter, { listWorkspaces = () => [], getStore, bac
 
     async 'update'(payload) {
       const s = session()
-      const result = await inbound.update({
+      const result = await upstream.update({
         root: s.root,
         store: s.store,
         names: Array.isArray(payload.names) ? payload.names.map(String) : undefined,
@@ -362,26 +365,26 @@ export function buildApi(scopeGetter, { listWorkspaces = () => [], getStore, bac
 
     async 'import'(payload) {
       const s = session()
-      const result = await inbound.importSkill({ root: s.root, store: s.store, path: String(payload.path ?? ''), as: payload.as ? String(payload.as) : undefined, ctx: s })
+      const result = await backupsMod.importSkill({ root: s.root, store: s.store, path: String(payload.path ?? ''), as: payload.as ? String(payload.as) : undefined, ctx: s })
       await refreshCache()
       return result
     },
 
     async 'backups'() {
       const s = session()
-      return inbound.backups({ store: s.store, backupsRoot: s.backupsRoot })
+      return backupsMod.backups({ store: s.store, backupsRoot: s.backupsRoot })
     },
 
     async 'restore'(payload) {
       const s = session()
-      const result = await inbound.restore({ root: s.root, store: s.store, id: String(payload.id ?? ''), backupsRoot: s.backupsRoot, ctx: s })
+      const result = await backupsMod.restore({ root: s.root, store: s.store, id: String(payload.id ?? ''), backupsRoot: s.backupsRoot, ctx: s })
       await refreshCache()
       return result
     },
 
     async 'remove'(payload) {
       const s = session()
-      const result = await inbound.remove({ root: s.root, store: s.store, name: String(payload.name ?? ''), keepFiles: payload.keepFiles === true, backupsRoot: s.backupsRoot, ctx: s })
+      const result = await backupsMod.remove({ root: s.root, store: s.store, name: String(payload.name ?? ''), keepFiles: payload.keepFiles === true, backupsRoot: s.backupsRoot, ctx: s })
       await refreshCache()
       return result
     },
@@ -395,7 +398,7 @@ export function buildApi(scopeGetter, { listWorkspaces = () => [], getStore, bac
       const entries = {}
       for (const workspace of b.workspaceProjects) {
         if (workspaceId !== '' && workspace.workspaceId !== workspaceId) continue
-        entries[workspace.workspaceId] = await syncMod.classifyProjectEntries(b.root, workspace.path)
+        entries[workspace.workspaceId] = await inspectMod.classifyProjectEntries(b.root, workspace.path)
       }
       return { workspaceProjects: b.workspaceProjects, entries, legacyProjects: b.legacyProjects }
     },
@@ -409,7 +412,7 @@ export function buildApi(scopeGetter, { listWorkspaces = () => [], getStore, bac
         throw new SkillManagerError('workspace-not-found', `DSH 工作区「${workspaceId}」不存在或已移除`)
       }
       const path = b.state.projects[workspaceId]
-      const { entries, base } = await syncMod.classifyProjectEntries(s.root, path)
+      const { entries, base } = await inspectMod.classifyProjectEntries(s.root, path)
       const entry = entries.find((item) => item.name === name)
       if (!entry || entry.kind !== 'local-empty') {
         throw new SkillManagerError('bad-claim', `目标不是空目录现场: ${name}`)

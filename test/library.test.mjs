@@ -5,7 +5,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { parseSkillMd, dirHash, scanLibrary, skillDirExists } from '../lib/library.js'
+import { parseSkillMd, dirHash, scanLibrary, skillDirExists } from '../src/core/model/library.js'
 import { mkTmp, cleanup, writeSkill, fakeStore, skillRecord } from './helpers.mjs'
 
 test('parseSkillMd：单行 key: value 与引号剥离', () => {

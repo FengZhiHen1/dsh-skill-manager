@@ -8,7 +8,7 @@ import { homedir } from 'node:os'
 import {
   loadState, saveState, loadCheckCache, saveCheckCache,
   normalizeWorkspaceProjects, mirrorWorkspaceProjects, globalRoot, projectRootOf,
-} from '../lib/state.js'
+} from '../src/core/model/state.js'
 import { fakeStore, assertThrowsCode } from './helpers.mjs'
 
 test('loadState/saveState：投影往返（projects/synced）', async () => {

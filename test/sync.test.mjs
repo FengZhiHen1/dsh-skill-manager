@@ -7,12 +7,12 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdir, realpath, rm, symlink, writeFile, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import {
-  deriveDesired, materializeOne, detachOne, reconcile, health,
-  classifyProjectEntries, isLink, targetKey, targetDirOf,
-} from '../lib/sync.js'
-import { dirHash } from '../lib/library.js'
-import { DSH_APP } from '../lib/state.js'
+import { deriveDesired, targetKey, targetDirOf } from '../src/core/mount/derive.js'
+import { materializeOne, detachOne, isLink } from '../src/core/mount/materialize.js'
+import { health, classifyProjectEntries } from '../src/core/mount/inspect.js'
+import { reconcile } from '../src/core/mount/reconcile.js'
+import { dirHash } from '../src/core/model/library.js'
+import { DSH_APP } from '../src/core/model/state.js'
 import { mkTmp, cleanup, writeSkill } from './helpers.mjs'
 
 const apps = { dsh: { ...DSH_APP } }

@@ -7,8 +7,8 @@
 //   3. 关闭旧域；随后 openStore 用新五表 spec 打开（version 相同，未声明表
 //      被忽略；新 spec 的首次写入会把旧表从文件抹除，迁移自动幂等）。
 
-import { legacySkillManagerSpec } from './store.js'
-import { DEFAULT_GROUP } from './dir.js'
+import { legacySkillManagerSpec } from './storage.js'
+import { DEFAULT_GROUP } from '../core/model/intent.js'
 
 /**
  * 一次性迁移旧意图进 settings。

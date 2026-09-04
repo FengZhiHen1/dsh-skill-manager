@@ -1,8 +1,8 @@
 // dsh-skill-manager — 稳定的业务错误类型。
 //
 // 所有业务失败都抛出 SkillManagerError，HTTP 层把它翻译成统一信封
-// { ok:false, error: { code, message, retryable } }（见 lib/api.js）。
-// 未知异常由 api.js 归类为 internal，不冒泡杀死 Host。
+// { ok:false, error: { code, message, retryable } }（见 src/core/service.js）。
+// 未知异常由 service.js 归类为 internal，不冒泡杀死 Host。
 
 export class SkillManagerError extends Error {
   /** 稳定错误码（见 需求.md R-19 与 插件运行时.md 错误协议）。 */

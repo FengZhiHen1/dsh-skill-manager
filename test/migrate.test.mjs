@@ -3,7 +3,7 @@
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { migrateLegacyIntent } from '../lib/migrate.js'
+import { migrateLegacyIntent } from '../src/adapter/migrate.js'
 import { fakeDomain, skillRecord } from './helpers.mjs'
 
 /** 造一个带旧意图的 legacy 域假句柄。 */

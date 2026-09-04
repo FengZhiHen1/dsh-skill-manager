@@ -5,7 +5,7 @@ import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import assert from 'node:assert/strict'
-import { createStore } from '../lib/store.js'
+import { createStore } from '../src/core/model/store.js'
 
 /** 单表假句柄（Map 支撑）。 */
 function fakeTable() {

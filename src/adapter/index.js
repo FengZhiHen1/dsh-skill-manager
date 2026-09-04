@@ -5,7 +5,7 @@
 //   intentMigrated；validate 形式校验；applies: live 保存即生效）。
 //   用户意图的唯一事实源 = settings.yaml 的 skill-manager 段；浏览器端经
 //   标准 settings 域（settingsScope）直读直写，不经过自定义 HTTP 协议。
-// - 旧 storage 意图一次性迁移（lib/migrate.js）投影进配置。
+// - 旧 storage 意图一次性迁移（src/adapter/migrate.js）投影进配置。
 // - 打开 storage 域 skill_manager（五表投影：skills/synced/projects/
 //   check_cache/backups）；打开失败只记日志，API 统一回 internal，不拖垮 Host。
 // - 对账器：scope.watch 监听配置变更 → 200ms 防抖 → sync（bundle+reconcile+
@@ -18,30 +18,39 @@
 // 部署形态：真实插件包 + cordis.patch.yml insert 行；禁止与 dsh.profile.bundles
 // 同时挂载同一行（双重挂载 → duplicate loader entry id）。
 //
-// 模块布局：
-//   lib/errors.js    — SkillManagerError 稳定错误类型
-//   lib/dir.js       — 配置命名空间（意图 schema + 形式校验）、目录门禁、原子写
-//   lib/store.js     — storage 域 spec（五表投影 + 旧七表迁移 spec）与读写门面
-//   lib/migrate.js   — 旧 storage 意图一次性迁移进 settings
-//   lib/cache.js     — 进程内缓存层（bundle 快照、meta、dirHash、health 代际）
-//   lib/fence.js     — 受信请求围栏
-//   lib/zip.js       — 极简 ZIP 读取器（零依赖）
-//   lib/net.js       — skills.sh / GitHub 网络通道
-//   lib/library.js   — 库扫描、frontmatter、内容哈希基线
-//   lib/groups.js    — 组文档纯推导（意图来自配置）
-//   lib/state.js     — 挂载状态投影、工作区镜像
-//   lib/sync.js      — 挂载推导、物化、对账、健康、项目既有条目
-//   lib/inbound.js   — 搜索/探测/入库/检查/更新/导入/出库/恢复
-//   lib/api.js       — HTTP 信封、三路队列、只读视图与文件/网络操作
+// 模块布局（P1 分层重划，DSR-015；依赖方向 base ← model ← {mount, inbound} ← service ← adapter）：
+//   src/core/base/errors.js       — SkillManagerError 稳定错误类型
+//   src/core/base/fsys.js         — fs/路径原语（safePath、existsDir、原子写、withinRoot、readLinkTarget 等）
+//   src/core/base/cache.js        — 进程内缓存层（bundle 快照、meta、dirHash、health 代际）
+//   src/core/base/zip.js          — 极简 ZIP 读取器（零依赖）
+//   src/core/base/net.js          — skills.sh / GitHub 网络通道
+//   src/core/model/intent.js      — 配置即意图模型（schema、形式校验、requireDir）+ 组纯推导
+//   src/core/model/store.js       — storage 域形状（zod schema、构建器、键）与读写门面
+//   src/core/model/library.js     — 库扫描、frontmatter、内容哈希基线
+//   src/core/model/state.js       — 挂载状态投影、工作区镜像（临时，P2 处理）
+//   src/core/mount/derive.js      — 挂载推导（targetKey/deriveDesired/targetDirOf/拓扑 helpers）
+//   src/core/mount/materialize.js — junction 物化与摘除、git exclude（copy 兜底临时保留，P2 收敛）
+//   src/core/mount/inspect.js     — 只读走查（health、项目既有条目分类；临时，P2/P3 收缩）
+//   src/core/mount/reconcile.js   — 对账编排（摘除 → 清扫 → 物化 → exclude → 写回）
+//   src/core/inbound/zipball.js   — zipball → skill 目录管线与入站域共享原语
+//   src/core/inbound/acquire.js   — 搜索 / 仓库探测 / 入库
+//   src/core/inbound/upstream.js  — 上游检查与更新
+//   src/core/inbound/backups.js   — 本地导入（临时）/ 出库 / 备份列表 / 恢复
+//   src/core/service.js           — 方法表、三路队列、只读视图与文件/网络操作（原 lib/api.js）
+//   src/adapter/settings.js       — settings 命名空间注册（唯一 @deepseek-ai/dsh-settings import）
+//   src/adapter/storage.js        — storage 域 defineDomain/domainTable 包裹与 openStore
+//   src/adapter/migrate.js        — 旧 storage 意图一次性迁移
+//   src/adapter/fence.js          — 受信请求围栏（临时，P4 随 connection.rpc 迁移删除）
+//   src/adapter/index.js          — 本文件：插件入口
 //
 // 权威语义：docs/（本仓库）。
 
-import { registerConfig } from './lib/dir.js'
-import { openStore } from './lib/store.js'
-import { migrateLegacyIntent } from './lib/migrate.js'
-import { createSharedCache } from './lib/cache.js'
-import { ApiError, buildApi, createQueue, readJsonBody, writeJson, writeOk, writeError } from './lib/api.js'
-import { isTrustedApiRequest, trustedHostsOf } from './lib/fence.js'
+import { registerConfig } from './settings.js'
+import { openStore } from './storage.js'
+import { migrateLegacyIntent } from './migrate.js'
+import { createSharedCache } from '../core/base/cache.js'
+import { ApiError, buildApi, createQueue, readJsonBody, writeJson, writeOk, writeError } from '../core/service.js'
+import { isTrustedApiRequest, trustedHostsOf } from './fence.js'
 
 /** 读方法：不排队，直接走进程内 bundle 缓存快照（写屏障由 createQueue.busy 对齐）。 */
 const READ_METHODS = new Set(['overview', 'warm', 'health', 'project-skills', 'backups'])

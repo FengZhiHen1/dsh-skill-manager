@@ -5,8 +5,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readdir } from 'node:fs/promises'
 import { join } from 'node:path'
-import { buildApi, createQueue, readJsonBody, writeError, writeOk } from '../lib/api.js'
-import { isLink } from '../lib/sync.js'
+import { buildApi, createQueue, readJsonBody, writeError, writeOk } from '../src/core/service.js'
+import { isLink } from '../src/core/mount/materialize.js'
 import { mkTmp, cleanup, writeSkill, fakeStore, fakeScope, skillRecord, assertRejectsCode } from './helpers.mjs'
 
 /** 假 res：捕获 status 与 JSON body。 */
@@ -60,7 +60,7 @@ test('已配置但目录缺失：统一 skilldir-missing（插件保持存活）
 })
 
 test('writeError：SkillManagerError → 信封；未知错误 → internal 500', async () => {
-  const { SkillManagerError } = await import('../lib/errors.js')
+  const { SkillManagerError } = await import('../src/core/base/errors.js')
   const res1 = fakeRes()
   writeError(res1, new SkillManagerError('bad-name', '名字不对'))
   assert.equal(res1.status, 200)

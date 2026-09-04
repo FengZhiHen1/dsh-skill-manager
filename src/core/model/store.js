@@ -1,4 +1,4 @@
-// dsh-skill-manager — storage 域声明与存取门面。
+// dsh-skill-manager — storage 域投影形状与存取门面（DSR-015 model 层）。
 //
 // 权威语义见 docs/technical-details/目录配置与状态存储.md：
 // - storage 域 `skill_manager` 是**运行时投影**：用户意图（分组/挂载/禁用）
@@ -8,15 +8,16 @@
 // - groups/mounts 表已删除（意图归配置）；skills 表不再记录 disabled/group
 //   意图字段；self 目录不再登记（本地 skill 即本地文件）。
 // - 域读为内存同步读；写经域写链持久化先行（put/delete/update 均为异步）。
-// - legacySkillManagerSpec 仅供一次性迁移：读旧意图（groups/mounts/
+// - legacy 七表 spec 仅供一次性迁移：读旧意图（groups/mounts/
 //   skills.disabled/group）投影进 settings.yaml，随后不再使用。
 //
-// 本模块是唯一接触 @deepseek-ai/dsh-storage-domain 与 zod 的地方；其余模块
-// 只依赖 createStore 返回的门面。测试用 createStore(fakeDomain) 注入内存假
-// 句柄（fakeDomain.table(name) 返回带同步 get/entries/keys 与异步
+// P1 搬位说明：本文件保留 zod 记录 schema、域形状构建器、键与窄门面；
+// defineDomain/domainTable 的 @deepseek-ai/dsh-storage-domain 包裹与
+// openStore 移至 src/adapter/storage.js（core 不 import @deepseek-ai/*）。
+// 其余模块只依赖 createStore 返回的门面。测试用 createStore(fakeDomain) 注入
+// 内存假句柄（fakeDomain.table(name) 返回带同步 get/entries/keys 与异步
 // put/delete/update 的对象），不依赖真实 storage 服务。
 
-import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
 import { z } from 'zod'
 
 /** github/local 入库元数据；self 为兼容存量记录保留（不再新登记）。 */
@@ -80,11 +81,12 @@ const backupRecord = z.object({
 })
 
 /**
- * 域声明（目录配置与状态存储.md「storage 域形状」）。version 保持 1：storage-json
+ * 域声明构建器（目录配置与状态存储.md「storage 域形状」）。version 保持 1：storage-json
  * 后端对 version 严格相等校验，bump 会让存量域打不开；未声明表在打开时被
  * 忽略，首次新 spec 写入即从文件抹除（迁移窗口期无害）。
+ * @param {{ defineDomain: Function, domainTable: Function }} 平台包裹（adapter 注入）
  */
-export const skillManagerSpec = defineDomain({
+export const buildSkillManagerSpec = ({ defineDomain, domainTable }) => defineDomain({
   name: 'skill_manager',
   version: 1,
   tables: {
@@ -97,10 +99,11 @@ export const skillManagerSpec = defineDomain({
 })
 
 /**
- * 旧七表 spec（含 groups/mounts 与带意图的 skills）——仅供一次性迁移
- * （lib/migrate.js）读取存量意图；迁移完成后不再使用。
+ * 旧七表 spec 构建器（含 groups/mounts 与带意图的 skills）——仅供一次性迁移
+ * （src/adapter/migrate.js）读取存量意图；迁移完成后不再使用。
+ * @param {{ defineDomain: Function, domainTable: Function }} 平台包裹（adapter 注入）
  */
-export const legacySkillManagerSpec = defineDomain({
+export const buildLegacySkillManagerSpec = ({ defineDomain, domainTable }) => defineDomain({
   name: 'skill_manager',
   version: 1,
   tables: {
@@ -123,15 +126,6 @@ export function syncedKey(name, target) {
 export function backupId(name, at = new Date()) {
   const stamp = at.toISOString().replace(/[-:.TZ]/g, '')
   return `${name}-${stamp}`
-}
-
-/**
- * 在 Host apply 内打开域并返回门面；调用方负责把 close 挂进 ctx.effect。
- * @param {object} ctx Host 插件上下文（须注入 storage 服务）
- */
-export async function openStore(ctx) {
-  const domain = await ctx.storage.domain.open(skillManagerSpec)
-  return createStore(domain)
 }
 
 /**

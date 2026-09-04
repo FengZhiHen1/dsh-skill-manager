@@ -7,9 +7,10 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdir, readdir, readFile, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { importSkill, remove, backups, restore, update, check } from '../lib/inbound.js'
-import { isLink } from '../lib/sync.js'
-import { loadCheckCache } from '../lib/state.js'
+import { importSkill, remove, backups, restore } from '../src/core/inbound/backups.js'
+import { update, check } from '../src/core/inbound/upstream.js'
+import { isLink } from '../src/core/mount/materialize.js'
+import { loadCheckCache } from '../src/core/model/state.js'
 import { mkTmp, cleanup, writeSkill, fakeStore, skillRecord, assertRejectsCode } from './helpers.mjs'
 
 const okSync = { results: [], warnings: [], errors: [] }

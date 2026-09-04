@@ -5,9 +5,9 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { createSharedCache, cachedHash, rememberHash, clearHashes, hashOf } from '../lib/cache.js'
-import { dirHash, scanLibrary } from '../lib/library.js'
-import { buildApi, createQueue } from '../lib/api.js'
+import { createSharedCache, cachedHash, rememberHash, clearHashes, hashOf } from '../src/core/base/cache.js'
+import { dirHash, scanLibrary } from '../src/core/model/library.js'
+import { buildApi, createQueue } from '../src/core/service.js'
 import { mkTmp, cleanup, writeSkill, fakeStore, fakeScope } from './helpers.mjs'
 
 test('createQueue：busy/idle 与失败不阻塞后续', async () => {

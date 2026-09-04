@@ -4,7 +4,7 @@
 
 import { join, resolve } from 'node:path'
 import { homedir } from 'node:os'
-import { SkillManagerError } from './errors.js'
+import { SkillManagerError } from '../base/errors.js'
 
 /** dsh App 条目语义（挂载与同步.md「dsh App 语义」）。 */
 export const DSH_APP = {

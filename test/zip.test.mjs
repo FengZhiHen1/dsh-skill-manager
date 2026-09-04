@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { deflateRawSync } from 'node:zlib'
-import { unzip } from '../lib/zip.js'
+import { unzip } from '../src/core/base/zip.js'
 
 /** 构造最小 ZIP（中央目录为准；local 头可含 0 尺寸模拟流式写入形态）。 */
 function buildZip(entries) {

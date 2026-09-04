@@ -2,8 +2,7 @@
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { makeGroups, groupSummary } from '../lib/groups.js'
-import { validateGroupName, DEFAULT_GROUP } from '../lib/dir.js'
+import { makeGroups, groupSummary, validateGroupName, DEFAULT_GROUP } from '../src/core/model/intent.js'
 import { assertThrowsCode } from './helpers.mjs'
 
 test('validateGroupName：长度、保留字与非法字符', () => {

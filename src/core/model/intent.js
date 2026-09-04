@@ -1,7 +1,7 @@
-// dsh-skill-manager — configured skills directory and safe file access.
+// dsh-skill-manager — 配置即意图领域模型（插件运行时.md「配置即意图」；DSR-015 model 层）。
 //
 // 配置命名空间 skill-manager（settings.yaml 的 skill-manager 段）承载全部
-// 用户意图（插件运行时.md「配置即意图」）：
+// 用户意图：
 //   skillsDir      本地 skills 目录（空串 = 未配置）
 //   groups         组集合：{ 组名: { mounts: [{ scope, project }] } }；默认组
 //                  「默认」的 schema 默认挂载 = 全局（原 ensureSeedMounts 语义）
@@ -10,14 +10,15 @@
 // validate 只做形式校验（组名格式/意图形状）；引用完整性（组是否存在、
 // 工作区是否存在）由对账层容忍回落，不在写路径拒绝——settings 写是字段级
 // 原子，跨字段编辑中间态必须放行。
+// P1 搬位说明：本文件 = 原 lib/dir.js 的意图面（settings 命名空间注册与
+// @deepseek-ai import 在 src/adapter/settings.js；fs 原语在 src/core/base/fsys.js）
+// + 原 lib/groups.js 的组纯推导。registerConfig 的 validate 闭包提为
+// validateConfigIntent 具名导出（逻辑逐行未动）。
 
-import { isAbsolute } from 'node:path'
 import { statSync } from 'node:fs'
-import { mkdir, rename, rm, stat, writeFile } from 'node:fs/promises'
-import { dirname, join, normalize, relative, resolve, sep } from 'node:path'
+import { isAbsolute, resolve } from 'node:path'
 import z from 'schemastery'
-import { settingsNamespace } from '@deepseek-ai/dsh-settings'
-import { SkillManagerError } from './errors.js'
+import { SkillManagerError } from '../base/errors.js'
 
 /** Settings namespace for the plugin configuration. */
 export const CONFIG_NS = 'skill-manager'
@@ -61,27 +62,20 @@ export const configSchema = () => z.object({
 })
 
 /**
- * Register the settings namespace. Validation is deliberately form-only:
- * directory existence is a runtime condition handled by requireDir(), and
- * cross-field references (group/workspace existence) are tolerated by the
- * reconciler instead of rejecting writes.
+ * settings 形式校验（原 lib/dir.js registerConfig 内联 validate 闭包，逐行未动；
+ * 引用完整性交由对账层容忍）。
  */
-export function registerConfig(ctx) {
-  const ns = settingsNamespace(CONFIG_NS)
-  return ctx.settings.register(ns, configSchema(), {
-    validate: (value) => {
-      const dir = value?.[SKILLS_DIR_FIELD]
-      if (typeof dir !== 'string' || dir === '') return
-      if (!isAbsolute(dir)) throw new Error('本地 skill 目录必须是绝对路径')
-      for (const name of Object.keys(value?.groups ?? {})) validateGroupName(name)
-      for (const [dir, intent] of Object.entries(value?.skills ?? {})) {
-        if (!intent || typeof intent !== 'object' || Array.isArray(intent)) {
-          throw new Error(`技能意图格式错误：${dir}`)
-        }
-        if (typeof intent.group !== 'string') throw new Error(`技能意图格式错误：${dir}（group 必须是字符串）`)
-      }
-    },
-  })
+export function validateConfigIntent(value) {
+  const dir = value?.[SKILLS_DIR_FIELD]
+  if (typeof dir !== 'string' || dir === '') return
+  if (!isAbsolute(dir)) throw new Error('本地 skill 目录必须是绝对路径')
+  for (const name of Object.keys(value?.groups ?? {})) validateGroupName(name)
+  for (const [dir, intent] of Object.entries(value?.skills ?? {})) {
+    if (!intent || typeof intent !== 'object' || Array.isArray(intent)) {
+      throw new Error(`技能意图格式错误：${dir}`)
+    }
+    if (typeof intent.group !== 'string') throw new Error(`技能意图格式错误：${dir}（group 必须是字符串）`)
+  }
 }
 
 /**
@@ -109,51 +103,35 @@ export function requireDir(scope) {
   return root
 }
 
-/** Resolve a relative path below root, rejecting traversal and root itself. */
-export function safePath(root, rel) {
-  const target = resolve(root, rel)
-  const within = relative(resolve(root), target)
-  if (within === '' || within === '..' || within.startsWith(`..${sep}`) || isAbsolute(within)) {
-    throw new SkillManagerError('bad-path', `路径越出 skills 目录：${rel}`)
+// ---- 组纯推导（原 lib/groups.js，逐行未动）----
+// 组集合与成员归属的唯一事实源是 settings 命名空间（groups 键集合 +
+// skills[dir].group）；本模块只做纯推导，不再操作 storage 表。
+// 虚拟组 默认 不落配置也始终存在。
+
+/**
+ * 从配置意图构造组文档：{ 组名: [成员目录名] }（与推导/对账同形）。
+ * existingDirs 提供时只收仍存在的成员（读取时清理已消失成员）。
+ * @param {object} configGroups settings 的 groups 段
+ * @param {object} configSkills settings 的 skills 段（dir → { disabled, group }）
+ * @param {Set<string>|null} existingDirs 库内目录集合
+ */
+export function makeGroups(configGroups, configSkills, existingDirs = null) {
+  const groups = {}
+  for (const name of Object.keys(configGroups && typeof configGroups === 'object' ? configGroups : {})) {
+    groups[name] = []
   }
-  return target
-}
-
-/** Return whether path exists and is a directory. */
-export async function existsDir(path) {
-  try {
-    return (await stat(path)).isDirectory()
-  } catch {
-    return false
-  }
-}
-
-/** Normalize a relative path for validation and display. */
-export function normalizeRel(rel) {
-  return normalize(rel).replace(/^([/\\])+/, '').replace(/[/\\]+$/, '')
-}
-
-/** Atomically write JSON using a same-directory temporary file and rename. */
-export async function writeJson(root, rel, data) {
-  const file = safePath(root, rel)
-  const dir = dirname(file)
-  await mkdir(dir, { recursive: true })
-  const tmp = join(dir, `.dsh-sm-tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`)
-  try {
-    await writeFile(tmp, JSON.stringify(data, null, 2), 'utf8')
-    try {
-      await rename(tmp, file)
-    } catch (error) {
-      // Windows rename cannot replace an existing target.
-      if (process.platform === 'win32' && error && (error.code === 'EEXIST' || error.code === 'EPERM')) {
-        await rm(file, { force: true })
-        await rename(tmp, file)
-      } else {
-        throw error
-      }
+  const allowed = existingDirs instanceof Set ? existingDirs : null
+  for (const [dir, intent] of Object.entries(configSkills && typeof configSkills === 'object' ? configSkills : {})) {
+    const group = intent?.group
+    if (group && group !== DEFAULT_GROUP && group in groups && (!allowed || allowed.has(dir))) {
+      groups[group].push(dir)
     }
-  } catch (error) {
-    await rm(tmp, { force: true })
-    throw new SkillManagerError('write-failed', `写入 ${rel} 失败：${error.message}`, false)
   }
+  return { version: 1, groups }
+}
+
+/** 组摘要：[{name, count}]。 */
+export function groupSummary(groups) {
+  return Object.entries(groups && typeof groups === 'object' ? groups : {})
+    .map(([name, members]) => ({ name, count: members.length }))
 }

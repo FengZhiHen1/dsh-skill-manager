@@ -5,9 +5,10 @@ import assert from 'node:assert/strict'
 import { readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
-  CONFIG_NS, SKILLS_DIR_FIELD, DEFAULT_GROUP, configSchema, registerConfig, requireDir,
-  safePath, existsDir, writeJson,
-} from '../lib/dir.js'
+  CONFIG_NS, SKILLS_DIR_FIELD, DEFAULT_GROUP, configSchema, requireDir,
+} from '../src/core/model/intent.js'
+import { registerConfig } from '../src/adapter/settings.js'
+import { safePath, existsDir, writeJson } from '../src/core/base/fsys.js'
 import { mkTmp, cleanup, assertThrowsCode } from './helpers.mjs'
 
 test('registerConfig：命名空间与 schema 正确（意图字段齐备）', () => {

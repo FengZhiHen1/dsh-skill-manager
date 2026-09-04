@@ -5,7 +5,7 @@
 import { createHash } from 'node:crypto'
 import { readFile, readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
-import { existsDir } from './dir.js'
+import { existsDir } from '../base/fsys.js'
 
 /** 解析 SKILL.md frontmatter；无 frontmatter 返回 {}。 */
 export function parseSkillMd(text) {

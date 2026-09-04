@@ -1,7 +1,7 @@
 // fence.js 单元测试：回环/受信权威 + 同源标记。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { isTrustedApiRequest, isLoopbackHostname } from '../lib/fence.js'
+import { isTrustedApiRequest, isLoopbackHostname } from '../src/adapter/fence.js'
 
 const req = (headers) => ({ headers })
 

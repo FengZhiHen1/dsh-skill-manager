@@ -2,7 +2,8 @@
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { skillManagerSpec, legacySkillManagerSpec, syncedKey, backupId, createStore } from '../lib/store.js'
+import { skillManagerSpec, legacySkillManagerSpec } from '../src/adapter/storage.js'
+import { syncedKey, backupId, createStore } from '../src/core/model/store.js'
 import { fakeDomain, skillRecord } from './helpers.mjs'
 
 test('spec：域名/版本/五表投影（意图表已删除）', () => {
