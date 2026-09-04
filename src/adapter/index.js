@@ -52,10 +52,10 @@ import { ApiError, buildApi, createQueue, readJsonBody, writeJson, writeOk, writ
 import { isTrustedApiRequest, trustedHostsOf } from './fence.js'
 
 /** 读方法：不排队，直接走进程内 bundle 缓存快照（写屏障由 createQueue.busy 对齐）。 */
-const READ_METHODS = new Set(['overview', 'warm', 'health', 'backups'])
+const READ_METHODS = new Set(['overview', 'warm', 'backups'])
 /** 网络慢方法：独立队列，绝不阻塞读写。 */
 const NET_METHODS = new Set(['check', 'search', 'repo-skills'])
-// 其余方法（add/update/import/remove/restore/sync）= 文件写操作，FIFO 串行。
+// 其余方法（add/update/remove/restore/sync）= 文件写操作，FIFO 串行。
 
 export default {
   name: 'skill-manager',
@@ -115,8 +115,8 @@ export default {
     })
 
     // 对账器：配置变更（settings 直写/外部编辑）→ 200ms 防抖 → sync 对账
-    // （bundle + reconcile + 物化 + 预热缓存）。对账失败进健康列表（health），
-    // 此处只吞异常避免未处理拒绝。写配置的调用方无感知等待。
+    // （bundle + reconcile + junction 物化 + 预热缓存）。对账失败进行状态
+    // （overview 下发），此处只吞异常避免未处理拒绝。写配置的调用方无感知等待。
     let reconcileTimer = null
     const offWatch = scope.watch(() => {
       clearTimeout(reconcileTimer)

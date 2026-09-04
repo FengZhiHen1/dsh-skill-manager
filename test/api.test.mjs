@@ -55,7 +55,7 @@ test('未配置门禁：所有方法统一 skilldir-unconfigured', async () => {
 test('已配置但目录缺失：统一 skilldir-missing（插件保持存活）', async () => {
   const { api } = makeApi({ root: join(await mkTmp(), 'not-there') })
   await assertRejectsCode(api.overview({}), 'skilldir-missing')
-  await assertRejectsCode(api.health({}), 'skilldir-missing')
+  await assertRejectsCode(api.sync({}), 'skilldir-missing')
 })
 
 test('writeError：SkillManagerError → 信封；未知错误 → internal 500', async () => {

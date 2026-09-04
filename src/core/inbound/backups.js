@@ -1,62 +1,17 @@
 // dsh-skill-manager — 出库、备份与恢复（入站操作.md；DSR-015 inbound 层；
 // DSR-017：备份事实源 = 备份目录 + _backup_meta.json（无登记表）；remove 一律
-// 自动备份（keepFiles 废止）；恢复/入库写库目录一律原子换装）。
-// importSkill 为退役端点临时留守（P3 随 import 端点一并删除）：本地导入不再
-// 登记 skills 表（本地 skill 无版本管理，DSR-017）。
+// 自动备份（keepFiles 与本地导入端点一并废止——本地 skill 无版本管理，在
+// 配置目录内自管目录即可，不经插件入库）。
 
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
-import { tmpdir } from 'node:os'
+import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { SkillManagerError } from '../base/errors.js'
 import { atomicSwapDir, canonicalPath, pathsEqual, safePath } from '../base/fsys.js'
 import { dirHash } from '../model/library.js'
 import { backupId } from '../model/store.js'
 import { scanMountLinks } from '../mount/inspect.js'
 import { removeLink } from '../mount/materialize.js'
-import { copyTree, explodeZipball, locateSkillDir, nowIso, pathExists, validateInstallName } from './zipball.js'
-
-/** 本地导入（退役中，P3 删除）。本地 skill 无版本管理：落文件即入库，不登记。 */
-export async function importSkill({ root, path: inputPath, as, ctx }) {
-  const src = resolve(inputPath.replace(/%([^%]+)%/g, (_, v) => process.env[v] ?? `%${v}%`))
-  if (!(await pathExists(src))) throw new SkillManagerError('not-found', `路径不存在: ${inputPath}`)
-  let skillDir
-  let tmp = null
-  const info = await stat(src)
-  if (info.isFile()) {
-    if (!src.toLowerCase().endsWith('.zip')) throw new SkillManagerError('bad-import', '文件导入仅支持 .zip')
-    const payload = await readFile(src)
-    const { files } = explodeZipball(payload)
-    const dir = locateSkillDir(files, undefined)
-    tmp = await mkdtemp(join(tmpdir(), 'dsh-sm-'))
-    const prefix = dir === '' ? '' : `${dir}/`
-    for (const [rel, data] of Object.entries(files)) {
-      if (!rel.startsWith(prefix)) continue
-      const target = join(tmp, rel.slice(prefix.length))
-      if (target.includes('__pycache__')) continue
-      await mkdir(join(target, '..'), { recursive: true })
-      await writeFile(target, data)
-    }
-    skillDir = tmp
-  } else {
-    if (!(await pathExists(join(src, 'SKILL.md')))) {
-      throw new SkillManagerError('no-skill-md', `目录中未找到 SKILL.md: ${src}`)
-    }
-    skillDir = src
-  }
-  const installName = as || skillDir.split(/[\\/]/).pop()
-  validateInstallName(installName)
-  const dest = safePath(root, installName)
-  if (await pathExists(dest)) {
-    if (tmp) await rm(tmp, { recursive: true, force: true })
-    throw new SkillManagerError('name-conflict', `${installName} 已存在，可用改名导入`)
-  }
-  await atomicSwapDir(dest, async (stage) => {
-    await copyTree(skillDir, stage)
-    if (tmp) await rm(tmp, { recursive: true, force: true })
-  })
-  const sync = await ctx.reconcile()
-  return { name: installName, source: 'local', sync }
-}
+import { copyTree, nowIso, pathExists, validateInstallName } from './zipball.js'
 
 /**
  * 出库（入站操作.md「remove」）：仅限 origin:"github"。执行顺序不可交换：

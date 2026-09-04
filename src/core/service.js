@@ -5,7 +5,8 @@
 // skill-manager 段，Host 对账器监听配置变更后台收敛。本层只提供：
 //   - 只读视图：overview（库列表+行状态+工作区投影）、warm、backups
 //   - 网络/文件操作：check / search / repo-skills / add / update / remove /
-//     restore / sync（import、health 端点退役中，P3 删除）
+//     restore / sync（11 端点终表，插件运行时.md；health/import/
+//     project-skills/claim-empty/config 已随 DSR-016/017 废止）
 // 队列：读请求不排队（bundle 缓存快照 + 写屏障）；文件写 FIFO 串行；
 // 网络慢操作独立队列。
 // 信封（临时，P4 删）：{ ok:true, data } / { ok:false, error:{ code, message,
@@ -363,14 +364,6 @@ export function buildApi(scopeGetter, { listWorkspaces = () => [], getStore, bac
       return result
     },
 
-    /** 本地导入（退役中，P3 删除）。 */
-    async 'import'(payload) {
-      const s = session()
-      const result = await backupsMod.importSkill({ root: s.root, path: String(payload.path ?? ''), as: payload.as ? String(payload.as) : undefined, ctx: s })
-      await refreshCache()
-      return result
-    },
-
     async 'backups'() {
       const s = session()
       return backupsMod.backups({ backupsRoot: s.backupsRoot })
@@ -404,12 +397,6 @@ export function buildApi(scopeGetter, { listWorkspaces = () => [], getStore, bac
       const result = await s.reconcile()
       await refreshCache()
       return result
-    },
-
-    /** 独立健康视图已废止（R-03）；端点薄壳临时留守（P3 删除），行状态经 overview 下发。 */
-    async 'health'() {
-      const b = await getBundle()
-      return { issues: mountIssuesOf(b) }
     },
   }
 }

@@ -74,7 +74,6 @@ test('哈希门面：TTL 命中、fresh 强制重算、clearHashes 清空', asyn
 
 test('bundle 缓存：读命中冻结快照；API 写后刷新立即可见；配置变更冷扫', async () => {
   const root = await mkTmp()
-  const src = await mkTmp()
   const groot = await mkTmp()
   try {
     await writeSkill(root, 'pdf')
@@ -86,9 +85,12 @@ test('bundle 缓存：读命中冻结快照；API 写后刷新立即可见；配
     await store.putSkill('pdf', skillRecordSelf())
     const second = await api.overview({})
     assert.equal(second.lib.skills.length, 1)
-    // 文件写操作（import）→ refreshCache 预热 → 随后的读立即可见
-    await writeSkill(src, 'imported')
-    await api.import({ path: join(src, 'imported') })
+    // 文件写操作（sync 写队列）→ refreshCache 预热 → 随后的读立即可见：
+    // 绕过 API 直改磁盘后读仍是冻结快照，写方法收尾才刷新
+    await writeSkill(root, 'imported')
+    const stale = await api.overview({})
+    assert.equal(stale.lib.skills.length, 1) // 写屏障前：缓存不失效
+    await api.sync({})
     const third = await api.overview({})
     assert.equal(third.lib.skills.length, 2)
     // 配置目录变更 → 缓存键失配 → 冷扫新目录
@@ -103,7 +105,6 @@ test('bundle 缓存：读命中冻结快照；API 写后刷新立即可见；配
     }
   } finally {
     await cleanup(root)
-    await cleanup(src)
     await cleanup(groot)
   }
 })
@@ -121,9 +122,10 @@ test('bundle 缓存：并发读返回一致快照', async () => {
   try {
     await writeSkill(root, 'pdf')
     const api = buildApi(() => fakeScope(root), { getStore: () => fakeStore(), backupsRoot: '', globalRoot: groot })
-    const [a, b] = await Promise.all([api.overview({}), api.health({})])
+    const [a, b] = await Promise.all([api.overview({}), api.overview({})])
     assert.equal(a.lib.skills[0].dir, 'pdf')
-    assert.ok(Array.isArray(b.issues))
+    assert.equal(b.lib.skills[0].dir, 'pdf')
+    assert.deepEqual(a, b) // 同一冷扫快照代际，无中间态
   } finally {
     await cleanup(root)
     await cleanup(groot)

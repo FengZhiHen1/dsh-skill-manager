@@ -1,13 +1,13 @@
 // 入站操作（入站操作.md；DSR-017）：出库四步（备份→摘除→删目录→清两表，
 // 仅限 github）、备份列表目录事实源、恢复原子换装与 github-only 登记、
-// 本地导入不登记（端点退役中）、update 本地修改门禁、check 无上游跳态。
-// disable/enable 归配置（settings），无独立操作；网络路径不在单元测试内。
+// update 本地修改门禁、check 无上游跳态。disable/enable 归配置（settings）；
+// 本地导入端点已随 P3 删除；网络路径不在单元测试内。
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdir, readdir, readFile, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { importSkill, remove, backups, restore } from '../src/core/inbound/backups.js'
+import { remove, backups, restore } from '../src/core/inbound/backups.js'
 import { update, check } from '../src/core/inbound/upstream.js'
 import { isLink } from '../src/core/mount/materialize.js'
 import { projectWorkspaces } from '../src/core/mount/derive.js'
@@ -16,33 +16,6 @@ import { mkTmp, cleanup, writeSkill, fakeStore, skillRecord, assertRejectsCode }
 
 const okSync = { results: [], warnings: [], errors: [] }
 const stubCtx = (calls = []) => ({ reconcile: async () => { calls.push('reconcile'); return okSync } })
-
-// ---- 本地导入（退役中：落文件不登记） ----
-
-test('importSkill：本地目录导入 → 文件就位但不写 skills 登记；重名/缺 SKILL.md/非法名拒绝', async () => {
-  const root = await mkTmp()
-  const src = await mkTmp()
-  try {
-    await writeSkill(src, 'local-skill')
-    const store = fakeStore()
-    const calls = []
-    const r = await importSkill({ root, store, path: join(src, 'local-skill'), ctx: stubCtx(calls) })
-    assert.equal(r.name, 'local-skill')
-    assert.equal(r.source, 'local')
-    assert.deepEqual(calls, ['reconcile'])
-    assert.equal(store.getSkill('local-skill'), undefined) // 本地 skill 无版本管理：不登记
-    assert.match(await readFile(join(root, 'local-skill', 'SKILL.md'), 'utf8'), /name: local-skill/)
-
-    await assertRejectsCode(importSkill({ root, store, path: join(src, 'local-skill'), ctx: stubCtx() }), 'name-conflict')
-    await mkdir(join(src, 'no-md'), { recursive: true })
-    await assertRejectsCode(importSkill({ root, store, path: join(src, 'no-md'), ctx: stubCtx() }), 'no-skill-md')
-    await assertRejectsCode(importSkill({ root, store, path: join(src, 'local-skill'), as: 'Bad_Name', ctx: stubCtx() }), 'bad-name')
-    await assertRejectsCode(importSkill({ root, store, path: join(src, 'missing-dir'), ctx: stubCtx() }), 'not-found')
-  } finally {
-    await cleanup(root)
-    await cleanup(src)
-  }
-})
 
 // ---- 出库（四步序） ----
 
