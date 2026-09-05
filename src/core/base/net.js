@@ -147,9 +147,15 @@ export async function searchSkillsSh(query, limit = 20, offset = 0) {
   return { query: data.query ?? query, count: data.count ?? 0, skills: results }
 }
 
-/** 下载并解压 zipball，返回顶层目录内全部文件（相对路径 → Buffer）。 */
+/**
+ * 下载 zipball 二进制（API 形态 URL）。
+ * ⚠ 不用 `github.com/<slug>/archive/…` 主站形态：P9 实测（2026-09-05）本机对
+ * github.com:443 直连持续 connect timeout（undici 不随系统代理），而
+ * api.github.com 全程可达；API 形态与主站 zipball 内容等价（同 302 到 codeload），
+ * 且与 check/repo-skills 同域，共享已被实测验证的连通面。
+ */
 export async function fetchZipball(repoSlug, branch) {
-  const url = `https://github.com/${repoSlug}/archive/refs/heads/${branch}.zip`
+  const url = `https://api.github.com/repos/${repoSlug}/zipball/${encodeURIComponent(branch)}`
   const payload = await ghDownload(url)
   return payload
 }
