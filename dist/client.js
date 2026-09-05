@@ -639,7 +639,10 @@ function ManageView({ call, data, config, reload }) {
     }
   };
   const doCreateGroup = (name) => {
-    config.createGroup(name);
+    if (!config.createGroup(name)) {
+      setCreateOpen(false);
+      return;
+    }
     setCreateOpen(false);
     setGroupFilter(name);
     setNotice({ tone: "ok", text: `\u5DF2\u521B\u5EFA\u5206\u7EC4\u300C${name}\u300D` });
@@ -659,7 +662,7 @@ function ManageView({ call, data, config, reload }) {
       groupFilter === "" ? /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { ...cardStyle, padding: "12px 14px" }, children: [
         /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: cardTitle, children: "\u5F53\u524D\u67E5\u770B\uFF1A\u5168\u90E8\u6280\u80FD" }),
         /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { ...noteText, marginTop: 4 }, children: "\u9009\u62E9\u4E00\u4E2A\u5206\u7EC4\u540E\uFF0C\u53EF\u914D\u7F6E\u5B83\u5728 DSH \u5168\u5C40\u4E0E\u5404\u5DE5\u4F5C\u533A\u7684\u53EF\u7528\u8303\u56F4\u3002" })
-      ] }) : /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(GroupScopePanel, { config, group: groupFilter, workspaces: data.workspaces, onGroupOp: groupOp })
+      ] }) : /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(GroupScopePanel, { config, group: groupFilter, workspaces: data.workspaces, skills: data.lib.skills, onGroupOp: groupOp })
     ] }),
     warningLines.map((w) => /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { ...badgeStyle(T.warn), borderRadius: 10, padding: "9px 12px", marginBottom: 8, fontSize: 12, display: "flex", alignItems: "center", gap: 8 }, children: [
       /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: dotStyle(T.warn) }),
@@ -820,13 +823,36 @@ function CreateGroupDialog({ onCancel, onCreate }) {
     ] })
   ] });
 }
-function GroupScopePanel({ config, group, workspaces, onGroupOp }) {
+function GroupScopePanel({ config, group, workspaces, skills, onGroupOp }) {
   const [renaming, setRenaming] = (0, import_react3.useState)(false);
   const [newName, setNewName] = (0, import_react3.useState)("");
+  const [pendingUnmount, setPendingUnmount] = (0, import_react3.useState)(null);
   const { groups, toggleMount } = config;
   const mounts = groups[group] && groups[group].mounts || [];
   const enabled = (scopeKind, workspaceId) => mounts.some((mount) => mount.scope === scopeKind && (scopeKind === "global" || mount.project === workspaceId));
-  const toggle = (scopeKind, workspaceId, checked) => toggleMount(group, scopeKind, workspaceId, checked);
+  const effectiveGroup = (skill) => {
+    const g = skill.group || "\u9ED8\u8BA4";
+    return Object.prototype.hasOwnProperty.call(groups, g) ? g : "\u9ED8\u8BA4";
+  };
+  const linksOnTarget = (scopeKind, workspaceId) => {
+    const key = scopeKind === "global" ? "global|global" : `project|${workspaceId}`;
+    return skills.filter((s) => effectiveGroup(s) === group && (s.targets || []).includes(key)).length;
+  };
+  const toggle = (scopeKind, workspaceId, checked) => {
+    if (!checked) {
+      const count = linksOnTarget(scopeKind, workspaceId);
+      if (count > 0) {
+        const ws = scopeKind === "project" ? workspaces.find((w) => w.workspaceId === workspaceId) : null;
+        setPendingUnmount({ scopeKind, workspaceId, count, targetName: ws ? ws.title : "DSH \u5168\u5C40" });
+        return;
+      }
+    }
+    toggleMount(group, scopeKind, workspaceId, checked);
+  };
+  const confirmUnmount = () => {
+    toggleMount(group, pendingUnmount.scopeKind, pendingUnmount.workspaceId, false);
+    setPendingUnmount(null);
+  };
   const manageable = group !== "\u9ED8\u8BA4";
   const submitRename = () => {
     const trimmed = newName.trim();
@@ -877,8 +903,23 @@ function GroupScopePanel({ config, group, workspaces, onGroupOp }) {
       ] }, workspace.workspaceId))
     ] }),
     /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { height: 1, background: T.borderL1, flex: "none" } }),
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { ...noteText, paddingTop: 8 }, children: "\u53D6\u6D88\u52FE\u9009\u4F1A\u79FB\u9664\u8BE5\u5206\u7EC4\u5728\u8BE5\u76EE\u6807\u4E0B\u7684\u5168\u90E8 Skill \u94FE\u63A5\u3002" }),
-    manageable && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { ...noteText, paddingTop: 4 }, children: "\u5220\u9664\u7EC4\uFF1A\u6210\u5458\u56DE\u843D\u300C\u9ED8\u8BA4\u300D\u7EC4\uFF0C\u6267\u884C\u524D\u9700\u786E\u8BA4\u3002" })
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { ...noteText, paddingTop: 8 }, children: "\u53D6\u6D88\u52FE\u9009\u4F1A\u79FB\u9664\u8BE5\u5206\u7EC4\u5728\u8BE5\u76EE\u6807\u4E0B\u7684\u5168\u90E8 Skill \u94FE\u63A5\uFF08\u79FB\u9664\u524D\u5C06\u786E\u8BA4\uFF09\u3002" }),
+    manageable && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { ...noteText, paddingTop: 4 }, children: "\u5220\u9664\u7EC4\uFF1A\u6210\u5458\u56DE\u843D\u300C\u9ED8\u8BA4\u300D\u7EC4\uFF0C\u6267\u884C\u524D\u9700\u786E\u8BA4\u3002" }),
+    pendingUnmount && /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(ModalShell, { title: "\u786E\u8BA4\u53D6\u6D88\u6302\u8F7D", width: 420, onMaskClick: () => setPendingUnmount(null), children: [
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { fontSize: 16, fontWeight: 600, marginBottom: 8 }, children: [
+        "\u53D6\u6D88\u300C",
+        group,
+        "\u300D\u5728\u300C",
+        pendingUnmount.targetName,
+        "\u300D\u7684\u6302\u8F7D\uFF1F"
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { color: T.labelSecondary, fontSize: 13, lineHeight: 1.55, marginBottom: 12 }, children: `\u8BE5\u5206\u7EC4\u6709 ${pendingUnmount.count} \u4E2A Skill \u6302\u8F7D\u5728\u6B64\u76EE\u6807\u4E0B\uFF0C\u53D6\u6D88\u540E\u5BF9\u8D26\u4F1A\u79FB\u9664\u8FD9\u4E9B\u94FE\u63A5\u3002` }),
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { borderRadius: 10, padding: "10px 12px", marginBottom: 14, ...badgeStyle(T.warn), fontSize: 12, lineHeight: 1.55 }, children: "\u53EA\u79FB\u9664\u94FE\u63A5\u6307\u9488\uFF0C\u4E0D\u5220\u9664\u6280\u80FD\u5E93\u6587\u4EF6\uFF1B\u91CD\u65B0\u52FE\u9009\u5373\u53EF\u6062\u590D\u6302\u8F7D\u3002" }),
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { display: "flex", justifyContent: "flex-end", gap: 8 }, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(OutlineBtn, { onClick: () => setPendingUnmount(null), children: "\u53D6\u6D88" }),
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(PrimaryBtn, { onClick: confirmUnmount, children: `\u786E\u8BA4\u79FB\u9664 ${pendingUnmount.count} \u6761\u94FE\u63A5` })
+      ] })
+    ] })
   ] });
 }
 
@@ -1146,10 +1187,19 @@ function SkillsSection({ call, workspaces, scope }) {
     editConfig("groups", { ...groups, [group]: { ...groups[group], mounts: next } });
   };
   const createGroup = (name) => {
+    if (Object.prototype.hasOwnProperty.call(groups, name)) {
+      setEditError({ message: `\u5206\u7EC4\u300C${name}\u300D\u5DF2\u5B58\u5728\uFF0C\u5DF2\u62D2\u7EDD\u521B\u5EFA\uFF08\u907F\u514D\u8986\u76D6\u65E2\u6709\u7EC4\u7684\u6302\u8F7D\u89C4\u5219\uFF09`, prompt: null });
+      return false;
+    }
     const baseMounts = (groups["\u9ED8\u8BA4"] && groups["\u9ED8\u8BA4"].mounts || []).map((m) => ({ ...m }));
     editConfig("groups", { ...groups, [name]: { mounts: baseMounts } });
+    return true;
   };
   const renameGroup = (oldName, newName) => {
+    if (Object.prototype.hasOwnProperty.call(groups, newName)) {
+      setEditError({ message: `\u5206\u7EC4\u300C${newName}\u300D\u5DF2\u5B58\u5728\uFF0C\u5DF2\u62D2\u7EDD\u6539\u540D\uFF08\u6539\u540D\u4F1A\u8986\u76D6\u76EE\u6807\u7EC4\u7684\u89C4\u5219\u4E0E\u6210\u5458\uFF09`, prompt: null });
+      return false;
+    }
     const nextGroups = {};
     for (const [name, g] of Object.entries(groups)) nextGroups[name === oldName ? newName : name] = g;
     const nextSkills = {};
@@ -1158,6 +1208,7 @@ function SkillsSection({ call, workspaces, scope }) {
     }
     editConfig("groups", nextGroups);
     editConfig("skills", nextSkills);
+    return true;
   };
   const deleteGroup = (name) => {
     const nextGroups = {};
@@ -1226,7 +1277,7 @@ function SkillsSection({ call, workspaces, scope }) {
     error ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(ErrorLineWrap, { error, root: data && data.root }) : null,
     editError ? /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { style: { ...badgeStyle(T.error), borderRadius: 10, padding: "8px 12px", margin: "8px 12px 0", fontSize: 12, display: "flex", alignItems: "center", gap: 8 }, children: [
       /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { style: { flex: 1 }, children: editError.message }),
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(RepairCopy, { text: editError.prompt })
+      editError.prompt ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(RepairCopy, { text: editError.prompt }) : null
     ] }) : null,
     tab === "manage" && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(ManageView, { call, data, config, reload }),
     tab === "search" && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(SearchView, { call, reload })

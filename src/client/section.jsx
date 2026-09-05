@@ -85,10 +85,22 @@ export function SkillsSection({ call, workspaces, scope }) {
     editConfig('groups', { ...groups, [group]: { ...groups[group], mounts: next } })
   }
   const createGroup = (name) => {
+    // 防御（2026-09-05 走查）：groups 字段是全量覆盖写——撞名会静默覆盖既有组的
+    // 挂载规则，撞「默认」还会连带把默认组重置为复制品。客户端先拒，Host 不拦。
+    if (Object.prototype.hasOwnProperty.call(groups, name)) {
+      setEditError({ message: `分组「${name}」已存在，已拒绝创建（避免覆盖既有组的挂载规则）`, prompt: null })
+      return false
+    }
     const baseMounts = ((groups['默认'] && groups['默认'].mounts) || []).map((m) => ({ ...m }))
     editConfig('groups', { ...groups, [name]: { mounts: baseMounts } })
+    return true
   }
   const renameGroup = (oldName, newName) => {
+    // 防御：nextGroups 以 newName 为键——撞既有组名会静默覆盖目标组的规则与成员。
+    if (Object.prototype.hasOwnProperty.call(groups, newName)) {
+      setEditError({ message: `分组「${newName}」已存在，已拒绝改名（改名会覆盖目标组的规则与成员）`, prompt: null })
+      return false
+    }
     const nextGroups = {}
     for (const [name, g] of Object.entries(groups)) nextGroups[name === oldName ? newName : name] = g
     const nextSkills = {}
@@ -97,6 +109,7 @@ export function SkillsSection({ call, workspaces, scope }) {
     }
     editConfig('groups', nextGroups)
     editConfig('skills', nextSkills)
+    return true
   }
   const deleteGroup = (name) => {
     const nextGroups = {}
@@ -189,7 +202,7 @@ export function SkillsSection({ call, workspaces, scope }) {
         ? (
             <div style={{ ...badgeStyle(T.error), borderRadius: 10, padding: '8px 12px', margin: '8px 12px 0', fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ flex: 1 }}>{editError.message}</span>
-              <RepairCopy text={editError.prompt} />
+              {editError.prompt ? <RepairCopy text={editError.prompt} /> : null}
             </div>
           )
         : null}

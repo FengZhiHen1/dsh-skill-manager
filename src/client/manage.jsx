@@ -165,9 +165,9 @@ export function ManageView({ call, data, config, reload }) {
       if (groupFilter === name && newName) setGroupFilter(newName)
     }
   }
-  // DSR-009：新建成功后跳到新组，便于立即配置它的使用范围。
+  // DSR-009：新建成功后跳到新组，便于立即配置它的使用范围；拒绝（撞名）时错误条已上屏，不再假装成功。
   const doCreateGroup = (name) => {
-    config.createGroup(name)
+    if (!config.createGroup(name)) { setCreateOpen(false); return }
     setCreateOpen(false)
     setGroupFilter(name)
     setNotice({ tone: 'ok', text: `已创建分组「${name}」` })
@@ -197,7 +197,7 @@ export function ManageView({ call, data, config, reload }) {
                 <div style={{ ...noteText, marginTop: 4 }}>选择一个分组后，可配置它在 DSH 全局与各工作区的可用范围。</div>
               </div>
             )
-          : <GroupScopePanel config={config} group={groupFilter} workspaces={data.workspaces} onGroupOp={groupOp} />}
+          : <GroupScopePanel config={config} group={groupFilter} workspaces={data.workspaces} skills={data.lib.skills} onGroupOp={groupOp} />}
       </div>
 
       {/* 非行级警告条（琥珀晕卡逐条，附修复复制入口，DSR-018） */}
@@ -371,16 +371,45 @@ function CreateGroupDialog({ onCancel, onCreate }) {
   )
 }
 
-/** 当前分组的使用范围：直接编辑 settings 配置（本地即时生效，后台对账收敛；插件运行时.md L202）。 */
-function GroupScopePanel({ config, group, workspaces, onGroupOp }) {
+/**
+ * 当前分组的使用范围：直接编辑 settings 配置（本地即时生效，后台对账收敛；插件运行时.md L202）。
+ * 防御（2026-09-05 走查事故）：取消勾选 = 该组在此目标下全部链接被对账摘除——
+ * 波及半径与"点一下复选框"的心智完全不对称，故移除数 >0 时必须经遮罩确认
+ * （与更新确认同一对话框语言），明示目标与链接数、强调只删指针不删文件。
+ */
+function GroupScopePanel({ config, group, workspaces, skills, onGroupOp }) {
   const [renaming, setRenaming] = useState(false)
   const [newName, setNewName] = useState('')
+  const [pendingUnmount, setPendingUnmount] = useState(null) // {scopeKind, workspaceId, count, targetName}
   const { groups, toggleMount } = config
   const mounts = (groups[group] && groups[group].mounts) || []
   const enabled = (scopeKind, workspaceId) => mounts.some((mount) => (
     mount.scope === scopeKind && (scopeKind === 'global' || mount.project === workspaceId)
   ))
-  const toggle = (scopeKind, workspaceId, checked) => toggleMount(group, scopeKind, workspaceId, checked)
+  // 与 Host bundle 同源的失效组回落：组引用不存在 → 成员按「默认」推导（service.js memberships）。
+  const effectiveGroup = (skill) => {
+    const g = skill.group || '默认'
+    return Object.prototype.hasOwnProperty.call(groups, g) ? g : '默认'
+  }
+  const linksOnTarget = (scopeKind, workspaceId) => {
+    const key = scopeKind === 'global' ? 'global|global' : `project|${workspaceId}`
+    return skills.filter((s) => effectiveGroup(s) === group && (s.targets || []).includes(key)).length
+  }
+  const toggle = (scopeKind, workspaceId, checked) => {
+    if (!checked) {
+      const count = linksOnTarget(scopeKind, workspaceId)
+      if (count > 0) {
+        const ws = scopeKind === 'project' ? workspaces.find((w) => w.workspaceId === workspaceId) : null
+        setPendingUnmount({ scopeKind, workspaceId, count, targetName: ws ? ws.title : 'DSH 全局' })
+        return
+      }
+    }
+    toggleMount(group, scopeKind, workspaceId, checked)
+  }
+  const confirmUnmount = () => {
+    toggleMount(group, pendingUnmount.scopeKind, pendingUnmount.workspaceId, false)
+    setPendingUnmount(null)
+  }
   // 「默认」是虚拟组，不可改名/删除（DSR-009 入口收进本卡）
   const manageable = group !== '默认'
   const submitRename = () => {
@@ -439,8 +468,23 @@ function GroupScopePanel({ config, group, workspaces, onGroupOp }) {
             </>
           )}
       <div style={{ height: 1, background: T.borderL1, flex: 'none' }} />
-      <div style={{ ...noteText, paddingTop: 8 }}>取消勾选会移除该分组在该目标下的全部 Skill 链接。</div>
+      <div style={{ ...noteText, paddingTop: 8 }}>取消勾选会移除该分组在该目标下的全部 Skill 链接（移除前将确认）。</div>
       {manageable && <div style={{ ...noteText, paddingTop: 4 }}>删除组：成员回落「默认」组，执行前需确认。</div>}
+      {pendingUnmount && (
+        <ModalShell title="确认取消挂载" width={420} onMaskClick={() => setPendingUnmount(null)}>
+          <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>取消「{group}」在「{pendingUnmount.targetName}」的挂载？</div>
+          <div style={{ color: T.labelSecondary, fontSize: 13, lineHeight: 1.55, marginBottom: 12 }}>
+            {`该分组有 ${pendingUnmount.count} 个 Skill 挂载在此目标下，取消后对账会移除这些链接。`}
+          </div>
+          <div style={{ borderRadius: 10, padding: '10px 12px', marginBottom: 14, ...badgeStyle(T.warn), fontSize: 12, lineHeight: 1.55 }}>
+            只移除链接指针，不删除技能库文件；重新勾选即可恢复挂载。
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+            <OutlineBtn onClick={() => setPendingUnmount(null)}>取消</OutlineBtn>
+            <PrimaryBtn onClick={confirmUnmount}>{`确认移除 ${pendingUnmount.count} 条链接`}</PrimaryBtn>
+          </div>
+        </ModalShell>
+      )}
     </div>
   )
 }
