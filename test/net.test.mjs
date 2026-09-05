@@ -3,7 +3,7 @@
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { GhError, ghApi, ghDownload, normalizeRepoSlug, searchSkillsSh } from '../src/core/base/net.js'
+import { GhError, ghApi, ghDownload, normalizeRepoSlug, searchSkillsSh, classifyFetchError } from '../src/core/base/net.js'
 import { toRpcFailure } from '../src/core/service.js'
 
 function stubFetch(impl) {
@@ -39,6 +39,22 @@ test('ghApi：状态分类 not_found / rate_limited / http_error / unreachable',
     throw new TypeError('fetch failed')
   })
   await assert.rejects(ghApi('/repos/x/y'), (error) => error instanceof GhError && error.kind === 'unreachable')
+  restore()
+})
+
+test('classifyFetchError：TLS 证书类失败点破加速工具归因与对策，其余泛化 unreachable', async () => {
+  const cert = classifyFetchError(Object.assign(new TypeError('fetch failed'), { cause: { code: 'UNABLE_TO_VERIFY_LEAF_SIGNATURE' } }))
+  assert.ok(cert instanceof GhError && cert.kind === 'unreachable')
+  assert.match(cert.message, /TLS 证书校验失败/)
+  assert.match(cert.message, /NODE_EXTRA_CA_CERTS/)
+  const plain = classifyFetchError(Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNREFUSED' } }))
+  assert.equal(plain.message, '网络不可达: fetch failed')
+  assert.equal(classifyFetchError(new Error('x')).kind, 'unreachable') // 无 cause 也兜底
+  // 端到端：ghFetch 的 catch 走本函数 → 证书失败信息可穿透到 ghApi 拒绝面
+  const restore = stubFetch(async () => {
+    throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'CERT_HAS_EXPIRED' } })
+  })
+  await assert.rejects(ghApi('/repos/x/y'), /NODE_EXTRA_CA_CERTS/)
   restore()
 })
 

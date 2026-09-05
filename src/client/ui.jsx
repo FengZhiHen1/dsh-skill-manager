@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import * as primitives from '@deepseek-ai/dsh-client-ui-primitives'
 import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
-import { T, badgeStyle } from './theme.js'
+import { T, S, badgeStyle, dotStyle } from './theme.js'
 
 /** 防御：icon 为可选装饰，缺失时降级为文本箭头，绝不让整卡渲染失败。 */
 export const ChevronIcon = typeof primitives.IconChevronDownOutline14 === 'function' ? primitives.IconChevronDownOutline14 : null
@@ -16,6 +16,23 @@ export const OutlineBtn = (props) => <Button variant="outline" size="sm" {...pro
 export function ErrorLine({ error }) {
   if (!error) return null
   return <div style={{ color: T.error, fontSize: 12, padding: '6px 8px' }}>{String(error.message || error)}</div>
+}
+
+/**
+ * 操作结果通知条（tone 双态）：ok = 灰字一行；warn = 琥珀警示卡（与非行级警告条
+ * 同一视觉语言）。批量语义下单条 skipped/失败必须经 warn 态上屏——历史上只进
+ * muted 灰字，用户在长列表里等于无反馈（2026-09-05 走查反馈）。
+ * @param {{ notice: {tone: 'ok'|'warn', text: string}|null }} props
+ */
+export function NoticeBar({ notice }) {
+  if (!notice) return null
+  if (notice.tone !== 'warn') return <div style={{ ...S.muted, marginBottom: 6 }}>{notice.text}</div>
+  return (
+    <div style={{ ...badgeStyle(T.warn), borderRadius: 10, padding: '9px 12px', marginBottom: 8, fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+      <span style={dotStyle(T.warn)} />
+      <span style={{ flex: 1 }}>{notice.text}</span>
+    </div>
+  )
 }
 
 export function useTick() {

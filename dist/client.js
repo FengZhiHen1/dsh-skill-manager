@@ -158,6 +158,14 @@ function ErrorLine({ error }) {
   if (!error) return null;
   return /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: { color: T.error, fontSize: 12, padding: "6px 8px" }, children: String(error.message || error) });
 }
+function NoticeBar({ notice }) {
+  if (!notice) return null;
+  if (notice.tone !== "warn") return /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: { ...S.muted, marginBottom: 6 }, children: notice.text });
+  return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: { ...badgeStyle(T.warn), borderRadius: 10, padding: "9px 12px", marginBottom: 8, fontSize: 12, display: "flex", alignItems: "center", gap: 8 }, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: dotStyle(T.warn) }),
+    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { flex: 1 }, children: notice.text })
+  ] });
+}
 function useTick() {
   const [tick, setTick] = (0, import_react.useState)(0);
   return [tick, () => setTick((t) => t + 1)];
@@ -523,11 +531,13 @@ function ManageView({ call, data, config, reload }) {
         }
         const r = await call("update", { names: [name], confirmLocalChanges: payload.confirmLocalChanges === true });
         const it = (r.results || []).find((item) => item.name === name);
-        setNotice(it ? `${name}\uFF1A${it.status}${it.reason ? "\uFF08" + it.reason + "\uFF09" : ""}` : `${name}\uFF1A\u66F4\u65B0\u5B8C\u6210`);
+        if (it?.status === "updated") setNotice({ tone: "ok", text: `${name} \u5DF2\u66F4\u65B0\u81F3 ${String(it.commit || "").slice(0, 7)}\uFF08${it.via === "ls-remote" ? "git" : "API"} \u901A\u9053\uFF09` });
+        else if (it) setNotice({ tone: "warn", text: `${name} \u66F4\u65B0\u672A\u5B8C\u6210\uFF08${it.status}\uFF09\uFF1A${it.reason || it.error || "\u672A\u8FD4\u56DE\u539F\u56E0"}` });
+        else setNotice({ tone: "warn", text: `${name}\uFF1A\u66F4\u65B0\u7ED3\u679C\u672A\u542B\u8BE5\u6761\u76EE\uFF0C\u8BF7\u70B9\u300C\u21BB \u5237\u65B0\u300D\u6838\u5BF9\u884C\u72B6\u6001` });
       } else if (action === "remove") {
         if (!window.confirm(`\u786E\u8BA4\u51FA\u5E93 ${name}\uFF1F\u5220\u9664\u524D\u81EA\u52A8\u5907\u4EFD\u5230 DSH HOME \u5907\u4EFD\u533A\uFF08\u81EA\u6709\u76EE\u5F55\u65E0\u5220\u9664\u5165\u53E3\uFF09\u3002`)) return;
         const r = await call("remove", { name });
-        setNotice(r.backup ? `${name} \u5DF2\u51FA\u5E93\uFF0C\u5907\u4EFD\u4E8E ${r.backup}` : `${name} \u5DF2\u51FA\u5E93\uFF08\u76EE\u5F55\u672C\u5DF2\u7F3A\u5931\uFF0C\u65E0\u7269\u53EF\u5907\uFF09`);
+        setNotice({ tone: "ok", text: r.backup ? `${name} \u5DF2\u51FA\u5E93\uFF0C\u5907\u4EFD\u4E8E ${r.backup}` : `${name} \u5DF2\u51FA\u5E93\uFF08\u76EE\u5F55\u672C\u5DF2\u7F3A\u5931\uFF0C\u65E0\u7269\u53EF\u5907\uFF09` });
       }
       reload();
     } catch (e) {
@@ -545,20 +555,24 @@ function ManageView({ call, data, config, reload }) {
     setError(null);
     setNotice(null);
     try {
+      let checkFailed = -1;
       try {
         const r = await call("check", {});
-        const failed = (r || []).filter((it) => it.status === "check_failed").length;
-        setNotice(failed > 0 ? `\u68C0\u67E5\u5B8C\u6210\uFF1B${failed} \u4E2A\u4E0A\u6E38\u4E0D\u53EF\u8FBE` : "\u68C0\u67E5\u5B8C\u6210");
+        checkFailed = (r || []).filter((it) => it.status === "check_failed").length;
       } catch (e) {
         setError(e);
       }
+      let syncProblems = -1;
       try {
         const s = await call("sync", {});
-        const problems = (s?.errors || []).length + (s?.warnings || []).length;
-        if (problems > 0) setNotice(`\u5BF9\u8D26\u5B8C\u6210\uFF1B${problems} \u9879\u73B0\u573A\u9700\u8981\u5173\u6CE8\uFF08\u89C1\u884C\u72B6\u6001/\u8B66\u544A\u6761\uFF09`);
+        syncProblems = (s?.errors || []).length + (s?.warnings || []).length;
       } catch (e) {
         setError(e);
       }
+      const parts = [];
+      if (checkFailed > 0) parts.push(`${checkFailed} \u4E2A\u4E0A\u6E38\u4E0D\u53EF\u8FBE`);
+      if (syncProblems > 0) parts.push(`${syncProblems} \u9879\u73B0\u573A\u9700\u8981\u5173\u6CE8\uFF08\u89C1\u884C\u72B6\u6001/\u8B66\u544A\u6761\uFF09`);
+      setNotice(parts.length > 0 ? { tone: "warn", text: `\u5237\u65B0\u5B8C\u6210\uFF1A${parts.join("\uFF1B")}` } : { tone: "ok", text: "\u5237\u65B0\u5B8C\u6210\uFF1A\u73B0\u573A\u4E00\u81F4" });
       reload();
     } finally {
       setBusy(false);
@@ -584,7 +598,7 @@ function ManageView({ call, data, config, reload }) {
     config.createGroup(name);
     setCreateOpen(false);
     setGroupFilter(name);
-    setNotice(`\u5DF2\u521B\u5EFA\u5206\u7EC4\u300C${name}\u300D`);
+    setNotice({ tone: "ok", text: `\u5DF2\u521B\u5EFA\u5206\u7EC4\u300C${name}\u300D` });
   };
   return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: S.panel, children: [
     /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { marginBottom: 14 }, children: [
@@ -622,7 +636,7 @@ function ManageView({ call, data, config, reload }) {
       ] }),
       /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(GhostBtn, { onClick: refreshAll, disabled: busy, title: "\u91CD\u65B0\u68C0\u67E5\u5168\u90E8\u4E0A\u6E38\u3001\u6267\u884C\u4E00\u6B21\u5B89\u5168\u5BF9\u8D26\u5E76\u5237\u65B0\u5217\u8868", children: "\u21BB \u5237\u65B0" })
     ] }),
-    notice ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { ...S.muted, marginBottom: 6 }, children: notice }) : null,
+    notice ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(NoticeBar, { notice }) : null,
     error ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(ErrorLine, { error }) : null,
     list.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { ...S.muted, padding: 12 }, children: "\u5E93\u4E3A\u7A7A\uFF08\u65E0\u5339\u914D skill\uFF09" }) : list.map((it) => {
       const mountIssues = (it.mount || []).filter((row) => row.issue && row.issue !== "ok");
@@ -861,7 +875,7 @@ function SearchView({ call, reload }) {
       const r = await call("repo-skills", { repo, ref: "main" });
       if (r.candidates.length <= 1) {
         await call("add", { repo, dir: r.candidates[0] && r.candidates[0].path ? r.candidates[0].path : dir, ref: r.branch });
-        setNotice(`\u5DF2\u5165\u5E93 ${repo}`);
+        setNotice({ tone: "ok", text: `\u5DF2\u5165\u5E93 ${repo}` });
         reload();
       } else {
         showCandidates({ repo, branch: r.branch, list: r.candidates });
@@ -897,7 +911,7 @@ function SearchView({ call, reload }) {
         setCandidates(null);
         setSelected(/* @__PURE__ */ new Set());
       }
-      setNotice(`\u5DF2\u5165\u5E93 ${done} \u4E2A${failures.length > 0 ? `\uFF1B\u5931\u8D25 ${failures.length} \u4E2A` : ""}`);
+      setNotice(failures.length > 0 ? { tone: "warn", text: `\u5DF2\u5165\u5E93 ${done} \u4E2A\uFF0C\u5931\u8D25 ${failures.length} \u4E2A\uFF08\u9010\u6761\u539F\u56E0\u89C1\u4E0B\u65B9\u7EA2\u5B57\uFF09` } : { tone: "ok", text: `\u5DF2\u5165\u5E93 ${done} \u4E2A` });
     } finally {
       setBusy(false);
     }
@@ -921,7 +935,7 @@ function SearchView({ call, reload }) {
     ] }),
     /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(DirectAdd, { call, reload, busy, setBusy, setError, onCandidates: showCandidates, onAdded: () => setNotice("\u5DF2\u5165\u5E93") }),
     error ? /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(ErrorLine, { error }) : null,
-    notice ? /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { style: { ...S.muted, marginBottom: 6 }, children: notice }) : null,
+    notice ? /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(NoticeBar, { notice }) : null,
     candidates && /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { style: { marginBottom: 10 }, children: [
       /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(GhostBtn, { onClick: () => {
         setCandidates(null);

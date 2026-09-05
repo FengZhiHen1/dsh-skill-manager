@@ -3,7 +3,7 @@
 import { useState, useMemo } from 'react'
 import { Button, Input, Pill } from '@deepseek-ai/dsh-client-ui-primitives'
 import { T, S, badgeStyle, cardStyle, cardTitle, noteText, dotStyle, sectionHead, statusPillStyle } from './theme.js'
-import { GhostBtn, OutlineBtn, ErrorLine, RowMenu, UpdateConfirmationDialog, ModalShell } from './ui.jsx'
+import { GhostBtn, OutlineBtn, ErrorLine, NoticeBar, RowMenu, UpdateConfirmationDialog, ModalShell } from './ui.jsx'
 import { buildRepairPrompt, RepairCopy, mountIssueRepair } from './repair.jsx'
 
 const ORIGIN_LABEL = { github: 'GitHub', local: '本地', self: '自研' }
@@ -93,12 +93,16 @@ export function ManageView({ call, data, config, reload }) {
           }
         }
         const r = await call('update', { names: [name], confirmLocalChanges: payload.confirmLocalChanges === true })
+        // 批量语义下单条失败不断批（ok:true + skipped 结果）——结果必须按 tone 上屏，
+        // 否则用户确认后石沉大海（2026-09-05 走查反馈：skipped 只进灰字等于无反馈）。
         const it = (r.results || []).find((item) => item.name === name)
-        setNotice(it ? `${name}：${it.status}${it.reason ? '（' + it.reason + '）' : ''}` : `${name}：更新完成`)
+        if (it?.status === 'updated') setNotice({ tone: 'ok', text: `${name} 已更新至 ${String(it.commit || '').slice(0, 7)}（${it.via === 'ls-remote' ? 'git' : 'API'} 通道）` })
+        else if (it) setNotice({ tone: 'warn', text: `${name} 更新未完成（${it.status}）：${it.reason || it.error || '未返回原因'}` })
+        else setNotice({ tone: 'warn', text: `${name}：更新结果未含该条目，请点「↻ 刷新」核对行状态` })
       } else if (action === 'remove') {
         if (!window.confirm(`确认出库 ${name}？删除前自动备份到 DSH HOME 备份区（自有目录无删除入口）。`)) return
         const r = await call('remove', { name })
-        setNotice(r.backup ? `${name} 已出库，备份于 ${r.backup}` : `${name} 已出库（目录本已缺失，无物可备）`)
+        setNotice({ tone: 'ok', text: r.backup ? `${name} 已出库，备份于 ${r.backup}` : `${name} 已出库（目录本已缺失，无物可备）` })
       }
       reload()
     } catch (e) {
@@ -113,25 +117,32 @@ export function ManageView({ call, data, config, reload }) {
   }
 
   // ↻ 刷新（DSR-008/017）：重查全部上游 + 执行一次安全对账 + 刷新列表——Agent 按修复提示词修完现场后的收敛入口。
+  // check 与 sync 的结果合并为一条通知（后写覆盖前写会丢上游不可达计数）；有问题一律 warn 态。
   const refreshAll = async () => {
     setBusy(true)
     setError(null)
     setNotice(null)
     try {
+      let checkFailed = -1
       try {
         const r = await call('check', {})
-        const failed = (r || []).filter((it) => it.status === 'check_failed').length
-        setNotice(failed > 0 ? `检查完成；${failed} 个上游不可达` : '检查完成')
+        checkFailed = (r || []).filter((it) => it.status === 'check_failed').length
       } catch (e) {
         setError(e)
       }
+      let syncProblems = -1
       try {
         const s = await call('sync', {})
-        const problems = (s?.errors || []).length + (s?.warnings || []).length
-        if (problems > 0) setNotice(`对账完成；${problems} 项现场需要关注（见行状态/警告条）`)
+        syncProblems = (s?.errors || []).length + (s?.warnings || []).length
       } catch (e) {
         setError(e)
       }
+      const parts = []
+      if (checkFailed > 0) parts.push(`${checkFailed} 个上游不可达`)
+      if (syncProblems > 0) parts.push(`${syncProblems} 项现场需要关注（见行状态/警告条）`)
+      setNotice(parts.length > 0
+        ? { tone: 'warn', text: `刷新完成：${parts.join('；')}` }
+        : { tone: 'ok', text: '刷新完成：现场一致' })
       reload()
     } finally {
       setBusy(false)
@@ -159,7 +170,7 @@ export function ManageView({ call, data, config, reload }) {
     config.createGroup(name)
     setCreateOpen(false)
     setGroupFilter(name)
-    setNotice(`已创建分组「${name}」`)
+    setNotice({ tone: 'ok', text: `已创建分组「${name}」` })
   }
 
   return (
@@ -213,7 +224,7 @@ export function ManageView({ call, data, config, reload }) {
         </select>
         <GhostBtn onClick={refreshAll} disabled={busy} title="重新检查全部上游、执行一次安全对账并刷新列表">↻ 刷新</GhostBtn>
       </div>
-      {notice ? <div style={{ ...S.muted, marginBottom: 6 }}>{notice}</div> : null}
+      {notice ? <NoticeBar notice={notice} /> : null}
       {error ? <ErrorLine error={error} /> : null}
 
       {/* 行：描边卡片 + 状态徽章 + ⋯ 菜单（按 origin 分化）；挂载失败徽章点击展开明细 */}

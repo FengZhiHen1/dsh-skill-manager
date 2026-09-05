@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { Button, Input } from '@deepseek-ai/dsh-client-ui-primitives'
 import { T, S, badgeStyle, cardStyle, cardTitle, noteText, dotStyle, subCardStyle } from './theme.js'
-import { GhostBtn, OutlineBtn, ErrorLine } from './ui.jsx'
+import { GhostBtn, OutlineBtn, ErrorLine, NoticeBar } from './ui.jsx'
 
 export function SearchView({ call, reload }) {
   const [query, setQuery] = useState('')
@@ -43,7 +43,7 @@ export function SearchView({ call, reload }) {
       const r = await call('repo-skills', { repo, ref: 'main' })
       if (r.candidates.length <= 1) {
         await call('add', { repo, dir: r.candidates[0] && r.candidates[0].path ? r.candidates[0].path : dir, ref: r.branch })
-        setNotice(`已入库 ${repo}`)
+        setNotice({ tone: 'ok', text: `已入库 ${repo}` })
         reload()
       } else {
         showCandidates({ repo, branch: r.branch, list: r.candidates })
@@ -80,7 +80,9 @@ export function SearchView({ call, reload }) {
         setCandidates(null)
         setSelected(new Set())
       }
-      setNotice(`已入库 ${done} 个${failures.length > 0 ? `；失败 ${failures.length} 个` : ''}`)
+      setNotice(failures.length > 0
+        ? { tone: 'warn', text: `已入库 ${done} 个，失败 ${failures.length} 个（逐条原因见下方红字）` }
+        : { tone: 'ok', text: `已入库 ${done} 个` })
     } finally {
       setBusy(false)
     }
@@ -103,7 +105,7 @@ export function SearchView({ call, reload }) {
       {/* 直接添加 = 探测仓库（DSR-007）；多候选交给候选列表选择 */}
       <DirectAdd call={call} reload={reload} busy={busy} setBusy={setBusy} setError={setError} onCandidates={showCandidates} onAdded={() => setNotice('已入库')} />
       {error ? <ErrorLine error={error} /> : null}
-      {notice ? <div style={{ ...S.muted, marginBottom: 6 }}>{notice}</div> : null}
+      {notice ? <NoticeBar notice={notice} /> : null}
       {candidates && (
         <div style={{ marginBottom: 10 }}>
           <GhostBtn onClick={() => { setCandidates(null); setSelected(new Set()) }} disabled={busy}>← 返回搜索</GhostBtn>

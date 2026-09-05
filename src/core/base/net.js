@@ -36,12 +36,43 @@ export class GhError extends Error {
   }
 }
 
+/**
+ * TLS 证书校验失败的 node/OpenSSL 错误码集。最常见诱因：本机 GitHub 加速/代理
+ * 工具（SteamTools、Clash 等）以自签 CA 替换证书——git 通道（ls-remote）经系统
+ * 证书库信任它，而 node fetch 用自带 CA 列表、不读系统证书库，于是出现
+ * 「check 正常、update/add 下载失败」的分裂现场（2026-09-05 实测归因）。
+ */
+const TLS_CERT_CODES = new Set([
+  'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
+  'UNABLE_TO_GET_ISSUER_CERT',
+  'UNABLE_TO_GET_ISSUER_CERT_LOCALLY',
+  'CERT_HAS_EXPIRED',
+  'DEPTH_ZERO_SELF_SIGNED_CERT',
+  'SELF_SIGNED_CERT_IN_CHAIN',
+  'UNKNOWN_CA',
+  'INVALID_CA',
+  'CERT_UNTRUSTED',
+  'CERT_REJECTED',
+])
+
+/** fetch 异常 → GhError 归类（入站操作.md 网络分类）：证书类失败点破归因与对策。 */
+export function classifyFetchError(error) {
+  const code = error?.cause?.code
+  if (typeof code === 'string' && TLS_CERT_CODES.has(code)) {
+    return new GhError(
+      'unreachable',
+      `TLS 证书校验失败（${code}）：疑似本机 GitHub 加速/代理工具替换了证书（node 不读 Windows 系统证书库）。对策：给实例环境变量 NODE_EXTRA_CA_CERTS 指向该工具的根证书 PEM，或关闭其 GitHub 加速后重试。`,
+    )
+  }
+  return new GhError('unreachable', `网络不可达: ${error.message}`)
+}
+
 async function ghFetch(url, timeoutMs = TIMEOUT_MS) {
   let response
   try {
     response = await fetch(url, { headers: UA, signal: AbortSignal.timeout(timeoutMs) })
   } catch (error) {
-    throw new GhError('unreachable', `网络不可达: ${error.message}`)
+    throw classifyFetchError(error)
   }
   if (!response.ok) {
     if (response.status === 404) throw new GhError('not_found', '仓库或分支不存在')
