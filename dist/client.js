@@ -1184,7 +1184,7 @@ function ErrorLineWrap({ error, root }) {
 // src/client/card.jsx
 var import_react6 = require("react");
 var import_jsx_runtime6 = require("react/jsx-runtime");
-function SkillManagerCard({ scope, workspaces }) {
+function SkillManagerCard({ scope, uiWorkspace }) {
   const [open, setOpen] = (0, import_react6.useState)(false);
   const [draft, setDraft] = (0, import_react6.useState)("");
   const [touched, setTouched] = (0, import_react6.useState)(false);
@@ -1262,7 +1262,7 @@ function SkillManagerCard({ scope, workspaces }) {
     setBusy(true);
     setFailed(null);
     try {
-      const path = await workspaces.pickDirectory();
+      const path = await uiWorkspace.pickDirectory();
       if (path) {
         setDraft(path);
         setTouched(true);
@@ -1287,12 +1287,12 @@ function SkillManagerCard({ scope, workspaces }) {
       {
         type: "button",
         "aria-expanded": open,
-        "aria-label": `${open ? "\u6536\u8D77" : "\u5C55\u5F00"}: \u6280\u80FD\u7BA1\u7406\uFF08skill-manager\uFF09`,
+        "aria-label": `${open ? "\u6536\u8D77" : "\u5C55\u5F00"}: \u6280\u80FD\u7BA1\u7406`,
         onClick: () => setOpen(!open),
         style: { width: "100%", appearance: "none", border: 0, background: "none", font: "inherit", color: "inherit", textAlign: "left", cursor: "pointer", display: "flex", alignItems: "center", gap: 12, padding: "14px 16px", borderRadius: 12 },
         children: [
           /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("span", { style: { flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 4 }, children: [
-            /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { style: { fontSize: 15, fontWeight: 600, lineHeight: 1.4, color: T.labelPrimary }, children: "\u6280\u80FD\u7BA1\u7406\uFF08skill-manager\uFF09" }),
+            /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { style: { fontSize: 15, fontWeight: 600, lineHeight: 1.4, color: T.labelPrimary }, children: "\u6280\u80FD\u7BA1\u7406" }),
             /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { style: { fontSize: 13, lineHeight: 1.5, color: T.labelTertiary }, children: "\u914D\u7F6E\u672C\u5730 skills \u76EE\u5F55\uFF08\u7EAF skill \u4FDD\u5B58\u76EE\u5F55\uFF0C\u9ED8\u8BA4\u4E3A\u7A7A\u5373\u672A\u914D\u7F6E\uFF09" })
           ] }),
           dirty ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { style: { flex: "none", borderRadius: 999, padding: "1px 8px", fontSize: 11, lineHeight: "17px", fontWeight: 500, whiteSpace: "nowrap", background: T.bgModulePlatform, color: T.labelSecondary }, children: "\u672A\u4FDD\u5B58" }) : null,
@@ -1370,10 +1370,11 @@ function observeSkillsNavIcon() {
 }
 
 // src/client/index.jsx
-var inject = ["slots", "workspaces", "settingsScope", "remote", "connection"];
+var inject = ["slots", "workspaces", "uiWorkspace", "settingsScope", "remote", "connection"];
 function apply(ctx) {
   const call = createCall(ctx);
   const workspaces = ctx.workspaces;
+  const uiWorkspace = ctx.uiWorkspace;
   const scope = ctx.settingsScope.bind({ namespace: "skill-manager" });
   ctx.effect(() => {
     const offSection = ctx.slots.inject(
@@ -1387,7 +1388,8 @@ function apply(ctx) {
       "settings.plugin.item",
       () => ctx.slots.register(
         // rc.7 起该槽为 keyed：key = 本卡片编辑的 settings 命名空间
-        { name: "settings.plugin.item", key: "skill-manager", inject: () => ({ scope, workspaces }) },
+        // 卡片只需要 scope + uiWorkspace（目录选择器在 uiWorkspace 面上，不在 workspaces 面上）
+        { name: "settings.plugin.item", key: "skill-manager", inject: () => ({ scope, uiWorkspace }) },
         SkillManagerCard
       )
     );

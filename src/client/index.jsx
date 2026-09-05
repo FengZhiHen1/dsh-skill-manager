@@ -8,11 +8,12 @@ import { SkillsSection, bumpSkillSettings } from './section.jsx'
 import { SkillManagerCard } from './card.jsx'
 import { observeSkillsNavIcon } from './nav-icon.js'
 
-export const inject = ['slots', 'workspaces', 'settingsScope', 'remote', 'connection']
+export const inject = ['slots', 'workspaces', 'uiWorkspace', 'settingsScope', 'remote', 'connection']
 
 export function apply(ctx) {
   const call = createCall(ctx)
   const workspaces = ctx.workspaces
+  const uiWorkspace = ctx.uiWorkspace
   const scope = ctx.settingsScope.bind({ namespace: 'skill-manager' })
 
   ctx.effect(() => {
@@ -25,7 +26,8 @@ export function apply(ctx) {
     const offCard = ctx.slots.inject('settings.plugin.item', () =>
       ctx.slots.register(
         // rc.7 起该槽为 keyed：key = 本卡片编辑的 settings 命名空间
-        { name: 'settings.plugin.item', key: 'skill-manager', inject: () => ({ scope, workspaces }) },
+        // 卡片只需要 scope + uiWorkspace（目录选择器在 uiWorkspace 面上，不在 workspaces 面上）
+        { name: 'settings.plugin.item', key: 'skill-manager', inject: () => ({ scope, uiWorkspace }) },
         SkillManagerCard,
       ),
     )

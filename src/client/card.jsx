@@ -6,7 +6,7 @@ import { T } from './theme.js'
 import { ChevronIcon, GhostBtn } from './ui.jsx'
 import { buildRepairPrompt, RepairCopy, settingsRejectedRepair } from './repair.jsx'
 
-export function SkillManagerCard({ scope, workspaces }) {
+export function SkillManagerCard({ scope, uiWorkspace }) {
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState('')
   const [touched, setTouched] = useState(false) // 用户是否编辑过草稿
@@ -87,13 +87,14 @@ export function SkillManagerCard({ scope, workspaces }) {
       setBusy(false)
     }
   }
-  // 原生目录选择：系统选择器（Host native capability）返回绝对路径；取消返回 null 不动草稿。
+  // 原生目录选择：uiWorkspace 服务面（Host native picker）返回绝对路径；取消返回 null 不动草稿。
+  // 注意：pickDirectory 在 uiWorkspace 面上，不在 workspaces（Workspace Controller 管理面）上。
   // 不用浏览器 showDirectoryPicker——File System Access API 不暴露绝对路径，而目录配置需要绝对路径。
   const pickDirectory = async () => {
     setBusy(true)
     setFailed(null)
     try {
-      const path = await workspaces.pickDirectory()
+      const path = await uiWorkspace.pickDirectory()
       if (path) { setDraft(path); setTouched(true) }
     } catch (e) {
       setFailed({
@@ -115,12 +116,12 @@ export function SkillManagerCard({ scope, workspaces }) {
       <button
         type="button"
         aria-expanded={open}
-        aria-label={`${open ? '收起' : '展开'}: 技能管理（skill-manager）`}
+        aria-label={`${open ? '收起' : '展开'}: 技能管理`}
         onClick={() => setOpen(!open)}
         style={{ width: '100%', appearance: 'none', border: 0, background: 'none', font: 'inherit', color: 'inherit', textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', borderRadius: 12 }}
       >
         <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <span style={{ fontSize: 15, fontWeight: 600, lineHeight: 1.4, color: T.labelPrimary }}>技能管理（skill-manager）</span>
+          <span style={{ fontSize: 15, fontWeight: 600, lineHeight: 1.4, color: T.labelPrimary }}>技能管理</span>
           <span style={{ fontSize: 13, lineHeight: 1.5, color: T.labelTertiary }}>配置本地 skills 目录（纯 skill 保存目录，默认为空即未配置）</span>
         </span>
         {dirty
