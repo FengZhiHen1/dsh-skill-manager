@@ -7,11 +7,11 @@
 ## 当前状态
 
 - 需求基线 v2（2026-09 重构）已确认：范围收敛为「集中目录 + 分组挂载分发 + 外部 skill 生命周期」；本地导入、同步矩阵与健康视图、工作区既有条目接管废止为非目标；新增修复提示词需求（R-17）与只读红线（C-03）、自动执行边界（C-04）。
-- 新基线重设计已确认（2026-09-01，design-spec-workshop）：DSR-017（junction-only 物化 + 状态面五表→两表 + 出库限外部 skill + 原子换装，显式回退 DSR-004、部分取代 DSR-006、修订 DSR-015 模块清单）、DSR-018（修复提示词机制：Host 供 facts + Client 统一模板）。代码实施待执行，与 DSR-014/015/016 合并为一次实施批次（见 `TODO.md`）。
-- 实施完成前，全部技术文档描述目标形态，与源码现状（扁平 `lib/`、自建 `/skill-manager/api` 路由、单文件 `client.js`、五表 + copy 兜底旧形态）存在有意的文档-代码窗口。
-- 旧基线设计已落地部分：DSR-001~DSR-013 曾落地到源码（扁平 `lib/` 形态）；单元测试 88 项全绿（2026-09-01 实测，针对旧形态）。
-- 部署（DSR-012）：test profile 经 `link:` 源码直挂；web profile 经 `github:FengZhiHen1/dsh-skill-manager` git 依赖挂载。
-- 待验证项（未实测）：真实 DSH GUI 的客户端模块重建/遮罩确认交互、junction-only 行为与行状态走查的 test-profile 集成冒烟、skills.sh 匿名搜索——清单见 `需求.md` 的 missing evidence 与 `TODO.md`。
+- 新基线重设计已确认（2026-09-01，design-spec-workshop）：DSR-017（junction-only 物化 + 状态面五表→两表 + 出库限外部 skill + 原子换装，显式回退 DSR-004、部分取代 DSR-006、修订 DSR-015 模块清单）、DSR-018（修复提示词机制：Host 供 facts + Client 统一模板）。一次实施批次（DSR-014~018 + 包卫生）已于 2026-09-05 落地完成并通过 test 实例（0.1.2-rc.1）实测门禁。
+- 文档-代码一致性：技术文档描述的就是源码现行形态（`src/core`+`src/adapter`+`src/client` 三层、`connection.rpc` 通道、esbuild 产物 client bundle、两表 + junction-only）；旧形态表述（扁平 `lib/`、自建路由、五表 copy 兜底、`/skill-manager/api` 信封）已随实施退役，如见残留属文档欠账，按「先修文档再修代码」处理。
+- 单测基线：79 项（2026-09-05，`pnpm run check` = 产物新鲜度哨兵 + 语法 + 分层门禁 + node --test）；实测门禁捕获并修复两处真实缺陷（settings 校验器误拒「默认」组键致启动崩溃；zipball 主站 URL 直连不可达改 API 形态），详见 `TODO.md` 与提交历史。
+- 部署（DSR-012）：test profile 经 `link:` 源码直挂（P9 实测完成，2026-09-05）；web profile 经 `github:FengZhiHen1/dsh-skill-manager` git 依赖挂载——本次实施批次推送后的 web 重挂为用户操作，待执行。
+- 待验证项（GUI 浏览器走查）：设置页两视图/⋯ 菜单/挂载失败徽章展开/修复提示词一键复制/遮罩确认对话框渲染/产物改动免重启增量——Host 侧对应语义均已实测（见 `需求.md` missing evidence 节），余下为纯渲染面确认。
 - 本插件不再维护独立设计稿（OpenPencil `.op` 已弃用删除，2026-09-04）：界面视觉与交互细节以设置页实际实现为准；`technical-details/插件运行时.md` 的视图节只承载交互语义与信息架构，不作为视觉规格。
 
 ## 阅读顺序
