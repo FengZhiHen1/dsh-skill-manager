@@ -595,7 +595,7 @@ function ManageView({ call, data, config, reload }) {
       /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }, children: [
         /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_dsh_client_ui_primitives3.Pill, { active: groupFilter === "", onClick: () => setGroupFilter(""), children: `\u5168\u90E8 \xB7 ${data.lib.skills.length}` }),
         /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_dsh_client_ui_primitives3.Pill, { active: groupFilter === "\u9ED8\u8BA4", onClick: () => setGroupFilter("\u9ED8\u8BA4"), children: `\u9ED8\u8BA4 \xB7 ${countForGroup("\u9ED8\u8BA4")}` }),
-        groupNames.map((group) => /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_dsh_client_ui_primitives3.Pill, { active: groupFilter === group, onClick: () => setGroupFilter(group), children: `${group} \xB7 ${countForGroup(group)}` }, group)),
+        groupNames.filter((group) => group !== "\u9ED8\u8BA4").map((group) => /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_dsh_client_ui_primitives3.Pill, { active: groupFilter === group, onClick: () => setGroupFilter(group), children: `${group} \xB7 ${countForGroup(group)}` }, group)),
         /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_dsh_client_ui_primitives3.Pill, { active: false, onClick: () => setCreateOpen(true), children: "\uFF0B \u65B0\u5EFA\u5206\u7EC4" })
       ] }),
       groupFilter === "" ? /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { ...cardStyle, padding: "12px 14px" }, children: [

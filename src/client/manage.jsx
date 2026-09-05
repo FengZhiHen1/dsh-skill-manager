@@ -173,7 +173,8 @@ export function ManageView({ call, data, config, reload }) {
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
           <Pill active={groupFilter === ''} onClick={() => setGroupFilter('')}>{`全部 · ${data.lib.skills.length}`}</Pill>
           <Pill active={groupFilter === '默认'} onClick={() => setGroupFilter('默认')}>{`默认 · ${countForGroup('默认')}`}</Pill>
-          {groupNames.map((group) => (
+          {/* 「默认」上一行已固定渲染（groups 表合法含「默认」键，be9b15d 后不再只是回落伪组），map 中排除防重复 */}
+          {groupNames.filter((group) => group !== '默认').map((group) => (
             <Pill key={group} active={groupFilter === group} onClick={() => setGroupFilter(group)}>{`${group} · ${countForGroup(group)}`}</Pill>
           ))}
           <Pill active={false} onClick={() => setCreateOpen(true)}>＋ 新建分组</Pill>
