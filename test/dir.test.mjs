@@ -49,7 +49,10 @@ test('registerConfig.validate：形式校验（绝对路径/组名/意图形状�
   assert.doesNotThrow(() => validate({ skillsDir: 'E:/not/existing/yet' }))
   // 组名形式
   assert.doesNotThrow(() => validate({ skillsDir: 'E:/s', groups: { 办公: { mounts: [] } } }))
-  assert.throws(() => validate({ skillsDir: 'E:/s', groups: { 默认: { mounts: [] } } }), /保留字/)
+  // 「默认」键合法（schema 种子/挂载载体，docs L40/L47；P9 实测缺陷回归：曾误拒致 boot 崩）；
+  // 「全部」永非法；其余命名组走全量规则（客户端建组预检另拦「默认」输入）。
+  assert.doesNotThrow(() => validate({ skillsDir: 'E:/s', groups: { 默认: { mounts: [{ scope: 'global', project: null }] } } }))
+  assert.throws(() => validate({ skillsDir: 'E:/s', groups: { 全部: { mounts: [] } } }), /保留字/)
   assert.throws(() => validate({ skillsDir: 'E:/s', groups: { 'a/b': { mounts: [] } } }), /不能包含/)
   // 引用完整性不在此拒绝（settings 写是字段级原子，跨字段中间态必须放行）
   assert.doesNotThrow(() => validate({

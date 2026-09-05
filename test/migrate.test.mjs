@@ -4,6 +4,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { migrateLegacyIntent } from '../src/adapter/migrate.js'
+import { validateConfigIntent } from '../src/core/model/intent.js'
 import { fakeDomain, skillRecord } from './helpers.mjs'
 
 /** 造一个带旧意图的 legacy 域假句柄。 */
@@ -38,6 +39,8 @@ test('迁移：意图投影进 settings；self 排除；标记 intentMigrated', 
   assert.deepEqual(patch.groups['办公'], { mounts: [{ scope: 'project', project: 'w1' }] })
   // 意图迁移；self 不迁移
   assert.deepEqual(patch.skills, { pdf: { disabled: true, group: '办公' } })
+  // 迁移产物必须能通过 settings 校验器（P9 实测崩溃锁：两模块语义曾互相矛盾）
+  assert.doesNotThrow(() => validateConfigIntent({ skillsDir: 'E:/s', ...patch }))
 })
 
 test('迁移：已标记 intentMigrated → 跳过', async () => {

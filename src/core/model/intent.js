@@ -69,7 +69,11 @@ export function validateConfigIntent(value) {
   const dir = value?.[SKILLS_DIR_FIELD]
   if (typeof dir !== 'string' || dir === '') return
   if (!isAbsolute(dir)) throw new Error('本地 skill 目录必须是绝对路径')
-  for (const name of Object.keys(value?.groups ?? {})) validateGroupName(name)
+  // 「默认」是虚拟组的合法 groups 键（挂载配置载体，见 docs L40/L47）；保留字
+  // 规则约束的是命名组创建/改名路径（客户端预检仍走 validateGroupName 全量）。
+  for (const name of Object.keys(value?.groups ?? {})) {
+    if (name !== DEFAULT_GROUP) validateGroupName(name)
+  }
   for (const [dir, intent] of Object.entries(value?.skills ?? {})) {
     if (!intent || typeof intent !== 'object' || Array.isArray(intent)) {
       throw new Error(`技能意图格式错误：${dir}`)
