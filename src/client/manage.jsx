@@ -269,17 +269,18 @@ export function ManageView({ call, data, config, reload }) {
                       type="button"
                       title="行操作"
                       disabled={busy}
-                      onClick={() => setMenuFor(menuFor === it.dir ? null : it.dir)}
-                      style={{ border: 'none', background: 'transparent', cursor: busy ? 'default' : 'pointer', fontSize: 16, lineHeight: 1, padding: '3px 6px', borderRadius: 6, color: menuFor === it.dir ? T.labelPrimary : T.labelSecondary }}
+                      onClick={(e) => setMenuFor(menuFor?.dir === it.dir ? null : { dir: it.dir, rect: e.currentTarget.getBoundingClientRect() })}
+                      style={{ border: 'none', background: 'transparent', cursor: busy ? 'default' : 'pointer', fontSize: 16, lineHeight: 1, padding: '3px 6px', borderRadius: 6, color: menuFor?.dir === it.dir ? T.labelPrimary : T.labelSecondary }}
                     >
                       ⋯
                     </button>
                   </div>
-                  {menuFor === it.dir && (
+                  {menuFor?.dir === it.dir && (
                     <RowMenu
                       it={it}
                       groupNames={groupNames}
                       busy={busy}
+                      triggerRect={menuFor.rect}
                       onAction={(action) => rowAction(it.dir, action)}
                       onMove={(group) => moveSkill(it.dir, group)}
                       onClose={() => setMenuFor(null)}

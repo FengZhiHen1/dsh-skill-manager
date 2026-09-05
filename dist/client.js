@@ -189,10 +189,10 @@ function MenuItem({ label, danger, disabled, onClick, onEnter, trailing, childre
         color: danger ? T.error : T.labelPrimary,
         background: hover && !disabled ? T.bgModulePlatform : "transparent"
       },
-      onClick: disabled ? void 0 : onClick,
-      onMouseEnter: () => {
+      onClick: disabled ? void 0 : (event) => onClick?.(event.currentTarget.getBoundingClientRect()),
+      onMouseEnter: (event) => {
         setHover(true);
-        if (onEnter) onEnter();
+        if (onEnter) onEnter(event.currentTarget.getBoundingClientRect());
       },
       onMouseLeave: () => setHover(false),
       children: [
@@ -214,8 +214,51 @@ var menuCardStyle = {
   padding: 6
 };
 var menuDivider = /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: { height: 1, margin: "5px 6px", background: T.borderL2 } });
-function RowMenu({ it, groupNames, busy, onAction, onMove, onClose }) {
-  const [subOpen, setSubOpen] = (0, import_react.useState)(false);
+function RowMenu({ it, groupNames, busy, onAction, onMove, onClose, triggerRect }) {
+  const menuRef = (0, import_react.useRef)(null);
+  const [sub, setSub] = (0, import_react.useState)(null);
+  (0, import_react.useEffect)(() => {
+    const onScroll = (event) => {
+      if (menuRef.current && menuRef.current.contains(event.target)) setSub(null);
+      else onClose();
+    };
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onClose);
+    return () => {
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onClose);
+    };
+  }, []);
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const spaceBelow = vh - triggerRect.bottom - 12;
+  const spaceAbove = triggerRect.top - 12;
+  const dropDown = spaceBelow >= Math.min(260, spaceAbove);
+  const menuStyle = {
+    ...menuCardStyle,
+    position: "fixed",
+    right: Math.max(8, vw - triggerRect.right),
+    maxHeight: Math.max(160, dropDown ? spaceBelow : spaceAbove),
+    overflowY: "auto",
+    ...dropDown ? { top: triggerRect.bottom + 6 } : { bottom: vh - triggerRect.top + 6 }
+  };
+  let subStyle = null;
+  if (sub) {
+    const openLeft = sub.rect.left > 160;
+    const subBelow = vh - sub.rect.top - 12;
+    const subAbove = sub.rect.bottom - 12;
+    const subDown = subBelow >= Math.min(200, subAbove);
+    subStyle = {
+      ...menuCardStyle,
+      position: "fixed",
+      zIndex: 42,
+      minWidth: 124,
+      maxHeight: Math.max(140, subDown ? subBelow : subAbove),
+      overflowY: "auto",
+      ...openLeft ? { right: Math.max(8, vw - sub.rect.left + 6) } : { left: sub.rect.right + 6 },
+      ...subDown ? { top: sub.rect.top - 7 } : { bottom: Math.max(8, vh - sub.rect.bottom - 7) }
+    };
+  }
   const current = it.group || "\u9ED8\u8BA4";
   const allGroups = [.../* @__PURE__ */ new Set([...groupNames, "\u9ED8\u8BA4"])];
   const external = it.origin === "github";
@@ -225,7 +268,7 @@ function RowMenu({ it, groupNames, busy, onAction, onMove, onClose }) {
   };
   return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
     /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: { position: "fixed", inset: 0, zIndex: 40 }, onClick: onClose }),
-    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: { ...menuCardStyle, right: 4, top: "calc(100% - 6px)" }, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { ref: menuRef, style: menuStyle, children: [
       it.missing ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(MenuItem, { label: "\u6062\u590D", disabled: busy, onClick: () => {
         onClose();
         onAction("update");
@@ -248,35 +291,9 @@ function RowMenu({ it, groupNames, busy, onAction, onMove, onClose }) {
         {
           label: "\u79FB\u52A8\u5230\u5206\u7EC4",
           disabled: busy,
-          onEnter: () => setSubOpen(true),
-          onClick: () => setSubOpen((v) => !v),
-          trailing: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { color: T.labelSecondary }, children: "\u25B8" }),
-          children: subOpen && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: { ...menuCardStyle, right: "100%", top: -7, marginRight: 6, minWidth: 124, zIndex: 42 }, children: allGroups.map((group) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
-            "div",
-            {
-              style: {
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                padding: "7px 12px",
-                borderRadius: 6,
-                fontSize: 12,
-                whiteSpace: "nowrap",
-                cursor: "pointer",
-                color: group === current ? T.labelPrimary : T.labelSecondary,
-                fontWeight: group === current ? 500 : 400
-              },
-              onClick: (event) => {
-                event.stopPropagation();
-                pick(group);
-              },
-              children: [
-                /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { width: 12, color: T.labelPrimary }, children: group === current ? "\u2713" : "" }),
-                group
-              ]
-            },
-            group
-          )) })
+          onEnter: (rect) => setSub({ rect }),
+          onClick: (rect) => setSub((v) => v ? null : { rect }),
+          trailing: /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { color: T.labelSecondary }, children: "\u25B8" })
         }
       ),
       external && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
@@ -286,7 +303,33 @@ function RowMenu({ it, groupNames, busy, onAction, onMove, onClose }) {
           onAction("remove");
         } })
       ] })
-    ] })
+    ] }),
+    sub && subStyle && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: subStyle, children: allGroups.map((group) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
+      "div",
+      {
+        style: {
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          padding: "7px 12px",
+          borderRadius: 6,
+          fontSize: 12,
+          whiteSpace: "nowrap",
+          cursor: "pointer",
+          color: group === current ? T.labelPrimary : T.labelSecondary,
+          fontWeight: group === current ? 500 : 400
+        },
+        onClick: (event) => {
+          event.stopPropagation();
+          pick(group);
+        },
+        children: [
+          /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { width: 12, color: T.labelPrimary }, children: group === current ? "\u2713" : "" }),
+          group
+        ]
+      },
+      group
+    )) })
   ] });
 }
 function ModalShell({ title, width = 480, onMaskClick, children }) {
@@ -676,18 +719,19 @@ function ManageView({ call, data, config, reload }) {
                 type: "button",
                 title: "\u884C\u64CD\u4F5C",
                 disabled: busy,
-                onClick: () => setMenuFor(menuFor === it.dir ? null : it.dir),
-                style: { border: "none", background: "transparent", cursor: busy ? "default" : "pointer", fontSize: 16, lineHeight: 1, padding: "3px 6px", borderRadius: 6, color: menuFor === it.dir ? T.labelPrimary : T.labelSecondary },
+                onClick: (e) => setMenuFor(menuFor?.dir === it.dir ? null : { dir: it.dir, rect: e.currentTarget.getBoundingClientRect() }),
+                style: { border: "none", background: "transparent", cursor: busy ? "default" : "pointer", fontSize: 16, lineHeight: 1, padding: "3px 6px", borderRadius: 6, color: menuFor?.dir === it.dir ? T.labelPrimary : T.labelSecondary },
                 children: "\u22EF"
               }
             )
           ] }),
-          menuFor === it.dir && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+          menuFor?.dir === it.dir && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
             RowMenu,
             {
               it,
               groupNames,
               busy,
+              triggerRect: menuFor.rect,
               onAction: (action) => rowAction(it.dir, action),
               onMove: (group) => moveSkill(it.dir, group),
               onClose: () => setMenuFor(null)
