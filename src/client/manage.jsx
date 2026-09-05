@@ -1,9 +1,9 @@
 // dsh-skill-manager — 管理视图（插件运行时.md「视图设计·管理视图」L197-208：分组优先、两视图、行徽章与 ⋯ 菜单按来源分化）。
 // 列表过滤纯前端（零请求）；行状态徽章来自 overview（走查随快照下发）；挂载失败徽章点击展开明细并复制修复提示词（DSR-018）。
 import { useState, useMemo } from 'react'
-import { Button, Input, Pill } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Input, Pill } from '@deepseek-ai/dsh-client-ui-primitives'
 import { T, S, badgeStyle, cardStyle, cardTitle, noteText, dotStyle, sectionHead, statusPillStyle } from './theme.js'
-import { GhostBtn, OutlineBtn, ErrorLine, NoticeBar, RowMenu, UpdateConfirmationDialog, ModalShell } from './ui.jsx'
+import { GhostBtn, OutlineBtn, PrimaryBtn, ErrorLine, NoticeBar, RowMenu, UpdateConfirmationDialog, ModalShell } from './ui.jsx'
 import { buildRepairPrompt, RepairCopy, mountIssueRepair } from './repair.jsx'
 
 const ORIGIN_LABEL = { github: 'GitHub', local: '本地', self: '自研' }
@@ -365,7 +365,7 @@ function CreateGroupDialog({ onCancel, onCreate }) {
       <div style={{ fontSize: 11, color: T.labelSecondary, marginTop: 8 }}>新组复制「默认」组的挂载规则作为起步；组名 1–30 字符。</div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
         <OutlineBtn onClick={onCancel}>取消</OutlineBtn>
-        <Button size="sm" onClick={submit}>新建</Button>
+        <PrimaryBtn onClick={submit}>新建</PrimaryBtn>
       </div>
     </ModalShell>
   )
@@ -404,7 +404,7 @@ function GroupScopePanel({ config, group, workspaces, onGroupOp }) {
                   if (e.key === 'Escape') setRenaming(false)
                 }}
               />
-              <Button size="sm" onClick={submitRename}>保存</Button>
+              <PrimaryBtn onClick={submitRename}>保存</PrimaryBtn>
               <GhostBtn onClick={() => setRenaming(false)}>取消</GhostBtn>
             </div>
           )

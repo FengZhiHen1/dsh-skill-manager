@@ -12,6 +12,13 @@ export const ChevronIcon = typeof primitives.IconChevronDownOutline14 === 'funct
 export const GhostBtn = (props) => <Button variant="ghost" size="sm" {...props} />
 /** 行内主操作按钮（outline sm）。 */
 export const OutlineBtn = (props) => <Button variant="outline" size="sm" {...props} />
+/**
+ * 主行动按钮（primary sm）。⚠ 必须显式声明 variant：宿主 ui-primitives Button
+ * 默认 variant='ghost'（rc.1 tag 实测），不传即静默降级成无框无底的文字按钮，
+ * 与对话框内 outline 取消按钮同排时呈现"一个有框一个没框"（2026-09-05 走查
+ * 反馈）；宿主自身对话框（RiskConfirmation）一律显式 primary。
+ */
+export const PrimaryBtn = (props) => <Button variant="primary" size="sm" {...props} />
 
 export function ErrorLine({ error }) {
   if (!error) return null
@@ -241,7 +248,7 @@ export function UpdateConfirmationDialog({ name, detail, busy, onCancel, onConfi
       </label>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
         <OutlineBtn onClick={onCancel} disabled={busy}>取消</OutlineBtn>
-        <Button size="sm" onClick={onConfirm} disabled={busy || !acknowledged}>{busy ? '更新中…' : '继续更新'}</Button>
+        <PrimaryBtn onClick={onConfirm} disabled={busy || !acknowledged}>{busy ? '更新中…' : '继续更新'}</PrimaryBtn>
       </div>
     </ModalShell>
   )

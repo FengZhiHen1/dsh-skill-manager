@@ -154,6 +154,7 @@ var import_jsx_runtime = require("react/jsx-runtime");
 var ChevronIcon = typeof primitives.IconChevronDownOutline14 === "function" ? primitives.IconChevronDownOutline14 : null;
 var GhostBtn = (props) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", ...props });
 var OutlineBtn = (props) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "outline", size: "sm", ...props });
+var PrimaryBtn = (props) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "primary", size: "sm", ...props });
 function ErrorLine({ error }) {
   if (!error) return null;
   return /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: { color: T.error, fontSize: 12, padding: "6px 8px" }, children: String(error.message || error) });
@@ -365,7 +366,7 @@ function UpdateConfirmationDialog({ name, detail, busy, onCancel, onConfirm }) {
     ] }),
     /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: { display: "flex", justifyContent: "flex-end", gap: 8 }, children: [
       /* @__PURE__ */ (0, import_jsx_runtime.jsx)(OutlineBtn, { onClick: onCancel, disabled: busy, children: "\u53D6\u6D88" }),
-      /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { size: "sm", onClick: onConfirm, disabled: busy || !acknowledged, children: busy ? "\u66F4\u65B0\u4E2D\u2026" : "\u7EE7\u7EED\u66F4\u65B0" })
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)(PrimaryBtn, { onClick: onConfirm, disabled: busy || !acknowledged, children: busy ? "\u66F4\u65B0\u4E2D\u2026" : "\u7EE7\u7EED\u66F4\u65B0" })
     ] })
   ] });
 }
@@ -815,7 +816,7 @@ function CreateGroupDialog({ onCancel, onCreate }) {
     /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { fontSize: 11, color: T.labelSecondary, marginTop: 8 }, children: "\u65B0\u7EC4\u590D\u5236\u300C\u9ED8\u8BA4\u300D\u7EC4\u7684\u6302\u8F7D\u89C4\u5219\u4F5C\u4E3A\u8D77\u6B65\uFF1B\u7EC4\u540D 1\u201330 \u5B57\u7B26\u3002" }),
     /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }, children: [
       /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(OutlineBtn, { onClick: onCancel, children: "\u53D6\u6D88" }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_dsh_client_ui_primitives3.Button, { size: "sm", onClick: submit, children: "\u65B0\u5EFA" })
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(PrimaryBtn, { onClick: submit, children: "\u65B0\u5EFA" })
     ] })
   ] });
 }
@@ -848,7 +849,7 @@ function GroupScopePanel({ config, group, workspaces, onGroupOp }) {
           }
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_dsh_client_ui_primitives3.Button, { size: "sm", onClick: submitRename, children: "\u4FDD\u5B58" }),
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(PrimaryBtn, { onClick: submitRename, children: "\u4FDD\u5B58" }),
       /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(GhostBtn, { onClick: () => setRenaming(false), children: "\u53D6\u6D88" })
     ] }) : /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }, children: [
       /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: cardTitle, children: `\u5F53\u524D\u5206\u7EC4\uFF1A${group}` }),
@@ -975,7 +976,7 @@ function SearchView({ call, reload }) {
           }
         }
       ),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(import_dsh_client_ui_primitives4.Button, { size: "sm", onClick: doSearch, disabled: busy || !query.trim(), children: busy ? "\u641C\u7D22\u4E2D\u2026" : "\u641C\u7D22" })
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(PrimaryBtn, { onClick: doSearch, disabled: busy || !query.trim(), children: busy ? "\u641C\u7D22\u4E2D\u2026" : "\u641C\u7D22" })
     ] }),
     /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(DirectAdd, { call, reload, busy, setBusy, setError, onCandidates: showCandidates, onAdded: () => setNotice("\u5DF2\u5165\u5E93") }),
     error ? /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(ErrorLine, { error }) : null,
@@ -1017,7 +1018,7 @@ function SearchView({ call, reload }) {
       }),
       /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { style: { display: "flex", alignItems: "center", gap: 8, margin: "10px 0" }, children: [
         /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { style: { ...noteText, flex: 1 }, children: `\u5DF2\u9009 ${selected.size} \u4E2A \xB7 \u5171 ${candidates.list.length} \u4E2A\u5019\u9009` }),
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(import_dsh_client_ui_primitives4.Button, { size: "sm", onClick: addSelected, disabled: busy || selected.size === 0, children: busy ? "\u5165\u5E93\u4E2D\u2026" : "\u5165\u5E93\u6240\u9009" })
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(PrimaryBtn, { onClick: addSelected, disabled: busy || selected.size === 0, children: busy ? "\u5165\u5E93\u4E2D\u2026" : "\u5165\u5E93\u6240\u9009" })
       ] }),
       /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { style: { ...badgeStyle(T.warn), borderRadius: 10, padding: "9px 12px", fontSize: 11, lineHeight: 1.6, display: "flex", gap: 8 }, children: [
         /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { style: { ...dotStyle(T.warn), marginTop: 5 } }),

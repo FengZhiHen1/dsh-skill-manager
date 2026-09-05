@@ -1,9 +1,9 @@
 // dsh-skill-manager — 搜索视图（插件运行时.md「视图设计·搜索视图」L210-215；入库唯一通道：skills.sh 搜索或 GitHub 仓库探测）。
 // 本地导入入口随 DSR-017 废止；候选多选批量入库串行逐个 add、单条失败不中断（DSR-008）；搜索失败保留上次结果与原因。
 import { useState } from 'react'
-import { Button, Input } from '@deepseek-ai/dsh-client-ui-primitives'
+import { Input } from '@deepseek-ai/dsh-client-ui-primitives'
 import { T, S, badgeStyle, cardStyle, cardTitle, noteText, dotStyle, subCardStyle } from './theme.js'
-import { GhostBtn, OutlineBtn, ErrorLine, NoticeBar } from './ui.jsx'
+import { GhostBtn, OutlineBtn, PrimaryBtn, ErrorLine, NoticeBar } from './ui.jsx'
 
 export function SearchView({ call, reload }) {
   const [query, setQuery] = useState('')
@@ -100,7 +100,7 @@ export function SearchView({ call, reload }) {
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') doSearch() }}
         />
-        <Button size="sm" onClick={doSearch} disabled={busy || !query.trim()}>{busy ? '搜索中…' : '搜索'}</Button>
+        <PrimaryBtn onClick={doSearch} disabled={busy || !query.trim()}>{busy ? '搜索中…' : '搜索'}</PrimaryBtn>
       </div>
       {/* 直接添加 = 探测仓库（DSR-007）；多候选交给候选列表选择 */}
       <DirectAdd call={call} reload={reload} busy={busy} setBusy={setBusy} setError={setError} onCandidates={showCandidates} onAdded={() => setNotice('已入库')} />
@@ -140,7 +140,7 @@ export function SearchView({ call, reload }) {
           })}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '10px 0' }}>
             <span style={{ ...noteText, flex: 1 }}>{`已选 ${selected.size} 个 · 共 ${candidates.list.length} 个候选`}</span>
-            <Button size="sm" onClick={addSelected} disabled={busy || selected.size === 0}>{busy ? '入库中…' : '入库所选'}</Button>
+            <PrimaryBtn onClick={addSelected} disabled={busy || selected.size === 0}>{busy ? '入库中…' : '入库所选'}</PrimaryBtn>
           </div>
           <div style={{ ...badgeStyle(T.warn), borderRadius: 10, padding: '9px 12px', fontSize: 11, lineHeight: 1.6, display: 'flex', gap: 8 }}>
             <span style={{ ...dotStyle(T.warn), marginTop: 5 }} />
