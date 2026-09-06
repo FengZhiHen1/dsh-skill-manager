@@ -1,7 +1,8 @@
 // card — 插件配置卡片：设置 → 插件 → skill-manager 的 skillsDir 编辑与 pi 接管开关。
 //
 // 边界：只读写 ctx.settingsScope 的 skillsDir/pi 两个字段，不走 RPC；布局与原生 PluginCard 同构。
-// pi 目录不可配：固定按默认路径探测（PI_CODING_AGENT_DIR → ~/.pi/agent），接管只由一个复选框控制。
+// pi 目录不可配：固定按默认路径探测（PI_CODING_AGENT_DIR → ~/.pi/agent）。
+// 两字段统一草稿语义（与原生配置卡一致）：无修改时保存/放弃灰掉，一切修改点保存才生效。
 // 参考：插件运行时.md「插件配置卡片」；DSR-018、DSR-019。
 import { useState, useEffect } from 'react'
 import { T } from './theme.js'
@@ -46,7 +47,9 @@ export function SkillManagerCard({ scope, uiWorkspace }) {
     if (!touched) setDraft(current)
   }, [current, touched])
 
-  const dirty = touched && draft !== current
+  // pi 复选框同为草稿字段（null = 未动）：全部修改统一走保存生效，与原生配置卡同语义。
+  const [piDraft, setPiDraft] = useState(null)
+  const dirty = (touched && draft !== current) || (piDraft !== null && piDraft !== piOn)
 
   /**
    * 失败呈现：组装 footer 显示的 message 与可复制的修复提示词。
@@ -62,6 +65,7 @@ export function SkillManagerCard({ scope, uiWorkspace }) {
     }),
   })
 
+  // 保存：按序写脏字段（skillsDir → pi），逐个核对权威快照；第一个被拒即停，其余草稿保留。
   const save = async () => {
     if (!ready) return
     setBusy(true)
@@ -70,16 +74,31 @@ export function SkillManagerCard({ scope, uiWorkspace }) {
     try {
       // Host validate 拒绝时 set 照常 resolve（客户端 recover 静默回滚，
       // DSH settings-scope.ts 语义）；catch 只剩传输/围栏类失败。
-      await scope.set('skillsDir', attempted)
-      const fresh = scope.getSnapshot()
-      const v = fresh.value && typeof fresh.value === 'object' ? fresh.value : {}
-      const committed = typeof v.skillsDir === 'string' ? v.skillsDir : ''
-      if (committed !== attempted) {
-        // 权威快照 ≠ 尝试值 → 被 validate 拒绝已回滚：回显且草稿保留供修改
-        setFailed(reject(`保存被 Host 校验拒绝，已回滚为「${committed || '未配置'}」（非空目录必须是绝对路径）。`, 'settings-validation-rejected'))
-      } else {
+      if (touched && attempted !== current) {
+        await scope.set('skillsDir', attempted)
+        const fresh = scope.getSnapshot()
+        const v = fresh.value && typeof fresh.value === 'object' ? fresh.value : {}
+        const committed = typeof v.skillsDir === 'string' ? v.skillsDir : ''
+        if (committed !== attempted) {
+          // 权威快照 ≠ 尝试值 → 被 validate 拒绝已回滚：回显且草稿保留供修改
+          setFailed(reject(`保存被 Host 校验拒绝，已回滚为「${committed || '未配置'}」（非空目录必须是绝对路径）。`, 'settings-validation-rejected'))
+          return
+        }
         setDraft(committed)
         setTouched(false)
+      }
+      if (piDraft !== null && piDraft !== piOn) {
+        await scope.set('pi', piDraft)
+        const fresh = scope.getSnapshot()
+        const v = fresh.value && typeof fresh.value === 'object' ? fresh.value : {}
+        if ((v.pi === true) !== piDraft) {
+          setFailed({
+            message: '接管开关保存被拒绝，已恢复原值。',
+            prompt: buildRepairPrompt({ root: current, code: 'settings-validation-rejected', message: '字段 pi 写入被 Host validate 拒绝', repair: settingsRejectedRepair('pi', piDraft, v.pi, current) }),
+          })
+          return
+        }
+        setPiDraft(null)
       }
     } catch (e) {
       setFailed(reject(`写入失败（请求未达 Host）：${e?.message ?? String(e)}`, 'settings-write-failed'))
@@ -91,6 +110,7 @@ export function SkillManagerCard({ scope, uiWorkspace }) {
     setFailed(null)
     setDraft(current)
     setTouched(false)
+    setPiDraft(null)
   }
   const reset = async () => {
     if (!ready) return
@@ -105,30 +125,6 @@ export function SkillManagerCard({ scope, uiWorkspace }) {
       setTouched(false)
     } catch (e) {
       setFailed(reject(`重置失败（请求未达 Host）：${e?.message ?? String(e)}`, 'settings-write-failed'))
-    } finally {
-      setBusy(false)
-    }
-  }
-  // pi 接管开关：布尔字段即时写（不进草稿/保存流程）；被拒判定与目录字段同一快照核对法。
-  const togglePi = async (checked) => {
-    if (!ready) return
-    setBusy(true)
-    setFailed(null)
-    try {
-      await scope.set('pi', checked)
-      const fresh = scope.getSnapshot()
-      const v = fresh.value && typeof fresh.value === 'object' ? fresh.value : {}
-      if ((v.pi === true) !== checked) {
-        setFailed({
-          message: '接管开关写入被拒绝，已恢复原值。',
-          prompt: buildRepairPrompt({ root: current, code: 'settings-validation-rejected', message: '字段 pi 写入被 Host validate 拒绝', repair: settingsRejectedRepair('pi', checked, v.pi, current) }),
-        })
-      }
-    } catch (e) {
-      setFailed({
-        message: `接管开关写入失败（请求未达 Host）：${e?.message ?? String(e)}`,
-        prompt: buildRepairPrompt({ root: current, code: 'settings-write-failed', message: e?.message ?? String(e), repair: null }),
-      })
     } finally {
       setBusy(false)
     }
@@ -216,11 +212,11 @@ export function SkillManagerCard({ scope, uiWorkspace }) {
               <input type="checkbox" checked disabled style={{ accentColor: T.brand, width: 13, height: 13, margin: 0 }} />
               DSH
             </label>
-            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: T.labelPrimary, cursor: ready && !busy ? 'pointer' : 'default' }} title="勾选后 pi 按默认路径被接管：~/.pi/agent/skills 与各项目 .pi/skills">
-              <input type="checkbox" checked={piOn} disabled={busy || !ready} onChange={(e) => togglePi(e.target.checked)} style={{ accentColor: T.brand, width: 13, height: 13, margin: 0 }} />
+            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: T.labelPrimary, cursor: ready && !busy ? 'pointer' : 'default' }} title="勾选后保存生效：pi 按默认路径被接管（~/.pi/agent/skills 与各项目 .pi/skills）">
+              <input type="checkbox" checked={piDraft ?? piOn} disabled={busy || !ready} onChange={(e) => { setPiDraft(e.target.checked); setFailed(null) }} style={{ accentColor: T.brand, width: 13, height: 13, margin: 0 }} />
               pi agent
             </label>
-            <span style={{ fontSize: 12, lineHeight: 1.5, color: T.labelTertiary }}>pi 固定走默认路径（~/.pi/agent），勾选即生效</span>
+            <span style={{ fontSize: 12, lineHeight: 1.5, color: T.labelTertiary }}>pi 固定走默认路径（~/.pi/agent），保存后生效</span>
           </div>
           {/* footer：失败提示（含修复复制入口）+ 放弃/保存（对齐 PluginCard footer） */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, padding: '12px 0 4px', borderTop: `1px solid ${T.borderL2}` }}>

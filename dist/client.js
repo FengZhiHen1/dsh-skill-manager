@@ -1857,7 +1857,8 @@ function SkillManagerCard({ scope, uiWorkspace }) {
   (0, import_react6.useEffect)(() => {
     if (!touched) setDraft(current);
   }, [current, touched]);
-  const dirty = touched && draft !== current;
+  const [piDraft, setPiDraft] = (0, import_react6.useState)(null);
+  const dirty = touched && draft !== current || piDraft !== null && piDraft !== piOn;
   const reject = (message, code) => ({
     message,
     prompt: buildRepairPrompt({
@@ -1873,15 +1874,30 @@ function SkillManagerCard({ scope, uiWorkspace }) {
     setFailed(null);
     const attempted = draft.trim();
     try {
-      await scope.set("skillsDir", attempted);
-      const fresh = scope.getSnapshot();
-      const v = fresh.value && typeof fresh.value === "object" ? fresh.value : {};
-      const committed = typeof v.skillsDir === "string" ? v.skillsDir : "";
-      if (committed !== attempted) {
-        setFailed(reject(`\u4FDD\u5B58\u88AB Host \u6821\u9A8C\u62D2\u7EDD\uFF0C\u5DF2\u56DE\u6EDA\u4E3A\u300C${committed || "\u672A\u914D\u7F6E"}\u300D\uFF08\u975E\u7A7A\u76EE\u5F55\u5FC5\u987B\u662F\u7EDD\u5BF9\u8DEF\u5F84\uFF09\u3002`, "settings-validation-rejected"));
-      } else {
+      if (touched && attempted !== current) {
+        await scope.set("skillsDir", attempted);
+        const fresh = scope.getSnapshot();
+        const v = fresh.value && typeof fresh.value === "object" ? fresh.value : {};
+        const committed = typeof v.skillsDir === "string" ? v.skillsDir : "";
+        if (committed !== attempted) {
+          setFailed(reject(`\u4FDD\u5B58\u88AB Host \u6821\u9A8C\u62D2\u7EDD\uFF0C\u5DF2\u56DE\u6EDA\u4E3A\u300C${committed || "\u672A\u914D\u7F6E"}\u300D\uFF08\u975E\u7A7A\u76EE\u5F55\u5FC5\u987B\u662F\u7EDD\u5BF9\u8DEF\u5F84\uFF09\u3002`, "settings-validation-rejected"));
+          return;
+        }
         setDraft(committed);
         setTouched(false);
+      }
+      if (piDraft !== null && piDraft !== piOn) {
+        await scope.set("pi", piDraft);
+        const fresh = scope.getSnapshot();
+        const v = fresh.value && typeof fresh.value === "object" ? fresh.value : {};
+        if (v.pi === true !== piDraft) {
+          setFailed({
+            message: "\u63A5\u7BA1\u5F00\u5173\u4FDD\u5B58\u88AB\u62D2\u7EDD\uFF0C\u5DF2\u6062\u590D\u539F\u503C\u3002",
+            prompt: buildRepairPrompt({ root: current, code: "settings-validation-rejected", message: "\u5B57\u6BB5 pi \u5199\u5165\u88AB Host validate \u62D2\u7EDD", repair: settingsRejectedRepair("pi", piDraft, v.pi, current) })
+          });
+          return;
+        }
+        setPiDraft(null);
       }
     } catch (e) {
       setFailed(reject(`\u5199\u5165\u5931\u8D25\uFF08\u8BF7\u6C42\u672A\u8FBE Host\uFF09\uFF1A${e?.message ?? String(e)}`, "settings-write-failed"));
@@ -1893,6 +1909,7 @@ function SkillManagerCard({ scope, uiWorkspace }) {
     setFailed(null);
     setDraft(current);
     setTouched(false);
+    setPiDraft(null);
   };
   const reset = async () => {
     if (!ready) return;
@@ -1906,29 +1923,6 @@ function SkillManagerCard({ scope, uiWorkspace }) {
       setTouched(false);
     } catch (e) {
       setFailed(reject(`\u91CD\u7F6E\u5931\u8D25\uFF08\u8BF7\u6C42\u672A\u8FBE Host\uFF09\uFF1A${e?.message ?? String(e)}`, "settings-write-failed"));
-    } finally {
-      setBusy(false);
-    }
-  };
-  const togglePi = async (checked) => {
-    if (!ready) return;
-    setBusy(true);
-    setFailed(null);
-    try {
-      await scope.set("pi", checked);
-      const fresh = scope.getSnapshot();
-      const v = fresh.value && typeof fresh.value === "object" ? fresh.value : {};
-      if (v.pi === true !== checked) {
-        setFailed({
-          message: "\u63A5\u7BA1\u5F00\u5173\u5199\u5165\u88AB\u62D2\u7EDD\uFF0C\u5DF2\u6062\u590D\u539F\u503C\u3002",
-          prompt: buildRepairPrompt({ root: current, code: "settings-validation-rejected", message: "\u5B57\u6BB5 pi \u5199\u5165\u88AB Host validate \u62D2\u7EDD", repair: settingsRejectedRepair("pi", checked, v.pi, current) })
-        });
-      }
-    } catch (e) {
-      setFailed({
-        message: `\u63A5\u7BA1\u5F00\u5173\u5199\u5165\u5931\u8D25\uFF08\u8BF7\u6C42\u672A\u8FBE Host\uFF09\uFF1A${e?.message ?? String(e)}`,
-        prompt: buildRepairPrompt({ root: current, code: "settings-write-failed", message: e?.message ?? String(e), repair: null })
-      });
     } finally {
       setBusy(false);
     }
@@ -2012,11 +2006,14 @@ function SkillManagerCard({ scope, uiWorkspace }) {
           /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("input", { type: "checkbox", checked: true, disabled: true, style: { accentColor: T.brand, width: 13, height: 13, margin: 0 } }),
           "DSH"
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("label", { style: { display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: T.labelPrimary, cursor: ready && !busy ? "pointer" : "default" }, title: "\u52FE\u9009\u540E pi \u6309\u9ED8\u8BA4\u8DEF\u5F84\u88AB\u63A5\u7BA1\uFF1A~/.pi/agent/skills \u4E0E\u5404\u9879\u76EE .pi/skills", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("input", { type: "checkbox", checked: piOn, disabled: busy || !ready, onChange: (e) => togglePi(e.target.checked), style: { accentColor: T.brand, width: 13, height: 13, margin: 0 } }),
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("label", { style: { display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: T.labelPrimary, cursor: ready && !busy ? "pointer" : "default" }, title: "\u52FE\u9009\u540E\u4FDD\u5B58\u751F\u6548\uFF1Api \u6309\u9ED8\u8BA4\u8DEF\u5F84\u88AB\u63A5\u7BA1\uFF08~/.pi/agent/skills \u4E0E\u5404\u9879\u76EE .pi/skills\uFF09", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("input", { type: "checkbox", checked: piDraft ?? piOn, disabled: busy || !ready, onChange: (e) => {
+            setPiDraft(e.target.checked);
+            setFailed(null);
+          }, style: { accentColor: T.brand, width: 13, height: 13, margin: 0 } }),
           "pi agent"
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { style: { fontSize: 12, lineHeight: 1.5, color: T.labelTertiary }, children: "pi \u56FA\u5B9A\u8D70\u9ED8\u8BA4\u8DEF\u5F84\uFF08~/.pi/agent\uFF09\uFF0C\u52FE\u9009\u5373\u751F\u6548" })
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { style: { fontSize: 12, lineHeight: 1.5, color: T.labelTertiary }, children: "pi \u56FA\u5B9A\u8D70\u9ED8\u8BA4\u8DEF\u5F84\uFF08~/.pi/agent\uFF09\uFF0C\u4FDD\u5B58\u540E\u751F\u6548" })
       ] }),
       /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { style: { display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, padding: "12px 0 4px", borderTop: `1px solid ${T.borderL2}` }, children: [
         failed ? /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)(import_jsx_runtime6.Fragment, { children: [
