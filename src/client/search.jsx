@@ -4,7 +4,7 @@
 // 参考：插件运行时.md「搜索视图」；DSR-007、DSR-008、DSR-017。
 import { useState, useRef } from 'react'
 import { Input } from '@deepseek-ai/dsh-client-ui-primitives'
-import { T, S, badgeStyle, cardStyle, cardTitle, noteText, dotStyle, subCardStyle } from './theme.js'
+import { T, S, badgeStyle, cardStyle, cardTitle, noteText, dotStyle, subCardStyle, dividerStyle } from './theme.js'
 import { GhostBtn, OutlineBtn, PrimaryBtn, ErrorLine, NoticeBar } from './ui.jsx'
 
 /**
@@ -22,11 +22,13 @@ export function SearchView({ call, reload, showToast }) {
   const [notice, setNotice] = useState(null)
   const [candidates, setCandidates] = useState(null)
   const [selected, setSelected] = useState(new Set())
+  const [candFilter, setCandFilter] = useState('')
 
-  // 多候选统一入口：搜索入库与探测仓库共用同一候选列表，复选后批量入库
+  // 多候选统一入口：仅 DirectAdd（只知道仓库）进入候选列表
   const showCandidates = (value) => {
     setCandidates(value)
     setSelected(new Set())
+    setCandFilter('')
     setNotice(null)
     setError(null)
   }
@@ -53,8 +55,27 @@ export function SearchView({ call, reload, showToast }) {
     }
   }
 
-  // 探测入库统一流程（搜索行「入库」与直接添加共用，消除复制漂移）：
-  // repo-skills 探测 → 单候选直接入库（候选路径优先，缺省回退传入 dir）/ 多候选进选择列表。
+  // 搜索结果行入库：skills.sh 结果自带精确目录，意图不降级——直接 add 不经仓库探测
+  // （分支回退 main→master 与目录定位兜底在 Host add 内部，探测对此路径是多余的）。
+  const addFromResult = async (repo, directory) => {
+    if (inFlight.current) return
+    inFlight.current = true
+    setBusy(true)
+    setError(null)
+    try {
+      const r = await call('add', { repo, dir: directory || undefined, ref: 'main' })
+      showToast(`已入库 ${r.name}`)
+      reload()
+    } catch (e) {
+      setError(e)
+    } finally {
+      inFlight.current = false
+      setBusy(false)
+    }
+  }
+
+  // 直接添加入库流程（仅 DirectAdd 用——只知道仓库时才有探测必要）：
+  // repo-skills 探测 → 单候选直接入库 / 多候选进选择列表。
   const probeAndAdd = async (repo, ref, dir) => {
     if (inFlight.current) return
     inFlight.current = true
@@ -148,33 +169,56 @@ export function SearchView({ call, reload, showToast }) {
             <div style={{ ...noteText, marginTop: 2 }}>{`发现 ${candidates.list.length} 个含 SKILL.md 的目录，可多选入库。`}</div>
           </div>
           <div style={{ ...cardTitle, marginBottom: 8 }}>选择要入库的 Skill（可多选）</div>
-          {candidates.list.map((c) => {
-            const key = c.path || ''
-            const checked = selected.has(key)
+          {/* 候选多（>8）时出过滤框：长候选列表无过滤不可用（如 37 个候选的仓库） */}
+          {candidates.list.length > 8 && (
+            <div style={{ marginBottom: 8 }}>
+              <Input placeholder="过滤候选…" value={candFilter} onChange={(e) => setCandFilter(e.target.value)} />
+            </div>
+          )}
+          {/* 容器卡 + 分隔线高密度列表 + 内嵌操作条（操作条在滚动区外，不随列表滚丢） */}
+          {(() => {
+            const query = candFilter.trim().toLowerCase()
+            const visible = query === '' ? candidates.list : candidates.list.filter((c) => `${c.path}\n${suggestName(c)}`.toLowerCase().includes(query))
             return (
-              <label key={key || '<root>'} style={{ ...S.row, cursor: busy ? 'default' : 'pointer' }}>
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  disabled={busy}
-                  onChange={() => {
-                    const next = new Set(selected)
-                    if (checked) next.delete(key)
-                    else next.add(key)
-                    setSelected(next)
-                  }}
-                />
-                <span style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ color: T.labelPrimary, fontWeight: 500, fontSize: 12 }}>{c.path || '（仓库根）'}</div>
-                  <div style={noteText}>{`建议名称：${suggestName(c)}`}</div>
-                </span>
-              </label>
+              <div style={{ ...cardStyle, padding: 0, marginBottom: 10 }}>
+                <div style={{ maxHeight: 296, overflowY: 'auto', scrollbarWidth: 'thin' }}>
+                  {visible.map((c, idx) => {
+                    const key = c.path || ''
+                    const checked = selected.has(key)
+                    return (
+                      <div key={key || '<root>'}>
+                        {idx > 0 ? <div style={dividerStyle} /> : null}
+                        <label style={{ ...S.listRow, cursor: busy ? 'default' : 'pointer' }}>
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            disabled={busy}
+                            style={{ accentColor: T.brand, width: 13, height: 13, margin: 0, flex: 'none' }}
+                            onChange={() => {
+                              const next = new Set(selected)
+                              if (checked) next.delete(key)
+                              else next.add(key)
+                              setSelected(next)
+                            }}
+                          />
+                          <span style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ color: T.labelPrimary, fontWeight: 500, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={c.path || '（仓库根）'}>{c.path || '（仓库根）'}</div>
+                            <div style={noteText}>{`建议名称：${suggestName(c)}`}</div>
+                          </span>
+                        </label>
+                      </div>
+                    )
+                  })}
+                  {visible.length === 0 && <div style={{ ...S.muted, padding: '10px 12px' }}>无匹配候选</div>}
+                </div>
+                <div style={dividerStyle} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px' }}>
+                  <span style={{ ...noteText, flex: 1 }}>{`已选 ${selected.size} 个 · 共 ${candidates.list.length} 个候选`}</span>
+                  <PrimaryBtn onClick={addSelected} disabled={busy || selected.size === 0}>{busy ? '入库中…' : '入库所选'}</PrimaryBtn>
+                </div>
+              </div>
             )
-          })}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, margin: '10px 0' }}>
-            <span style={{ ...noteText, flex: 1 }}>{`已选 ${selected.size} 个 · 共 ${candidates.list.length} 个候选`}</span>
-            <PrimaryBtn onClick={addSelected} disabled={busy || selected.size === 0}>{busy ? '入库中…' : '入库所选'}</PrimaryBtn>
-          </div>
+          })()}
           <div style={{ ...badgeStyle(T.warn), borderRadius: 10, padding: '9px 12px', fontSize: 11, lineHeight: 1.6, display: 'flex', gap: 8 }}>
             <span style={{ ...dotStyle(T.warn), marginTop: 5 }} />
             <div>
@@ -196,7 +240,8 @@ export function SearchView({ call, reload, showToast }) {
                         <div style={{ fontWeight: 600, color: T.labelPrimary }}>{s.name}</div>
                         <div style={noteText}>{`${s.repo}${s.directory ? ' / ' + s.directory : ''} · 安装 ${s.installs}`}</div>
                       </div>
-                      <OutlineBtn onClick={() => probeAndAdd(s.repo, 'main', s.directory)} disabled={busy}>入库</OutlineBtn>
+                      {/* 目录意图精确：直接入库，不经仓库探测（分支/定位兜底在 Host add 内部） */}
+                      <OutlineBtn onClick={() => addFromResult(s.repo, s.directory)} disabled={busy}>入库</OutlineBtn>
                     </div>
                   ))}
                 </div>

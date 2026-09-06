@@ -1498,9 +1498,11 @@ function SearchView({ call, reload, showToast }) {
   const [notice, setNotice] = (0, import_react4.useState)(null);
   const [candidates, setCandidates] = (0, import_react4.useState)(null);
   const [selected, setSelected] = (0, import_react4.useState)(/* @__PURE__ */ new Set());
+  const [candFilter, setCandFilter] = (0, import_react4.useState)("");
   const showCandidates = (value) => {
     setCandidates(value);
     setSelected(/* @__PURE__ */ new Set());
+    setCandFilter("");
     setNotice(null);
     setError(null);
   };
@@ -1514,6 +1516,22 @@ function SearchView({ call, reload, showToast }) {
       const r = await call("search", { query });
       setResults(r);
       setCandidates(null);
+    } catch (e) {
+      setError(e);
+    } finally {
+      inFlight.current = false;
+      setBusy(false);
+    }
+  };
+  const addFromResult = async (repo, directory) => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await call("add", { repo, dir: directory || void 0, ref: "main" });
+      showToast(`\u5DF2\u5165\u5E93 ${r.name}`);
+      reload();
     } catch (e) {
       setError(e);
     } finally {
@@ -1612,34 +1630,50 @@ function SearchView({ call, reload, showToast }) {
         /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { style: { ...noteText, marginTop: 2 }, children: `\u53D1\u73B0 ${candidates.list.length} \u4E2A\u542B SKILL.md \u7684\u76EE\u5F55\uFF0C\u53EF\u591A\u9009\u5165\u5E93\u3002` })
       ] }),
       /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { style: { ...cardTitle, marginBottom: 8 }, children: "\u9009\u62E9\u8981\u5165\u5E93\u7684 Skill\uFF08\u53EF\u591A\u9009\uFF09" }),
-      candidates.list.map((c) => {
-        const key = c.path || "";
-        const checked = selected.has(key);
-        return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("label", { style: { ...S.row, cursor: busy ? "default" : "pointer" }, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
-            "input",
-            {
-              type: "checkbox",
-              checked,
-              disabled: busy,
-              onChange: () => {
-                const next = new Set(selected);
-                if (checked) next.delete(key);
-                else next.add(key);
-                setSelected(next);
-              }
-            }
-          ),
-          /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("span", { style: { flex: 1, minWidth: 0 }, children: [
-            /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { style: { color: T.labelPrimary, fontWeight: 500, fontSize: 12 }, children: c.path || "\uFF08\u4ED3\u5E93\u6839\uFF09" }),
-            /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { style: noteText, children: `\u5EFA\u8BAE\u540D\u79F0\uFF1A${suggestName(c)}` })
+      candidates.list.length > 8 && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { style: { marginBottom: 8 }, children: /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(import_dsh_client_ui_primitives4.Input, { placeholder: "\u8FC7\u6EE4\u5019\u9009\u2026", value: candFilter, onChange: (e) => setCandFilter(e.target.value) }) }),
+      (() => {
+        const query2 = candFilter.trim().toLowerCase();
+        const visible = query2 === "" ? candidates.list : candidates.list.filter((c) => `${c.path}
+${suggestName(c)}`.toLowerCase().includes(query2));
+        return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { style: { ...cardStyle, padding: 0, marginBottom: 10 }, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { style: { maxHeight: 296, overflowY: "auto", scrollbarWidth: "thin" }, children: [
+            visible.map((c, idx) => {
+              const key = c.path || "";
+              const checked = selected.has(key);
+              return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { children: [
+                idx > 0 ? /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { style: dividerStyle }) : null,
+                /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("label", { style: { ...S.listRow, cursor: busy ? "default" : "pointer" }, children: [
+                  /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
+                    "input",
+                    {
+                      type: "checkbox",
+                      checked,
+                      disabled: busy,
+                      style: { accentColor: T.brand, width: 13, height: 13, margin: 0, flex: "none" },
+                      onChange: () => {
+                        const next = new Set(selected);
+                        if (checked) next.delete(key);
+                        else next.add(key);
+                        setSelected(next);
+                      }
+                    }
+                  ),
+                  /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("span", { style: { flex: 1, minWidth: 0 }, children: [
+                    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { style: { color: T.labelPrimary, fontWeight: 500, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: c.path || "\uFF08\u4ED3\u5E93\u6839\uFF09", children: c.path || "\uFF08\u4ED3\u5E93\u6839\uFF09" }),
+                    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { style: noteText, children: `\u5EFA\u8BAE\u540D\u79F0\uFF1A${suggestName(c)}` })
+                  ] })
+                ] })
+              ] }, key || "<root>");
+            }),
+            visible.length === 0 && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { style: { ...S.muted, padding: "10px 12px" }, children: "\u65E0\u5339\u914D\u5019\u9009" })
+          ] }),
+          /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { style: dividerStyle }),
+          /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { style: { display: "flex", alignItems: "center", gap: 8, padding: "8px 12px" }, children: [
+            /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { style: { ...noteText, flex: 1 }, children: `\u5DF2\u9009 ${selected.size} \u4E2A \xB7 \u5171 ${candidates.list.length} \u4E2A\u5019\u9009` }),
+            /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(PrimaryBtn, { onClick: addSelected, disabled: busy || selected.size === 0, children: busy ? "\u5165\u5E93\u4E2D\u2026" : "\u5165\u5E93\u6240\u9009" })
           ] })
-        ] }, key || "<root>");
-      }),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { style: { display: "flex", alignItems: "center", gap: 8, margin: "10px 0" }, children: [
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { style: { ...noteText, flex: 1 }, children: `\u5DF2\u9009 ${selected.size} \u4E2A \xB7 \u5171 ${candidates.list.length} \u4E2A\u5019\u9009` }),
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(PrimaryBtn, { onClick: addSelected, disabled: busy || selected.size === 0, children: busy ? "\u5165\u5E93\u4E2D\u2026" : "\u5165\u5E93\u6240\u9009" })
-      ] }),
+        ] });
+      })(),
       /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { style: { ...badgeStyle(T.warn), borderRadius: 10, padding: "9px 12px", fontSize: 11, lineHeight: 1.6, display: "flex", gap: 8 }, children: [
         /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { style: { ...dotStyle(T.warn), marginTop: 5 } }),
         /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { children: [
@@ -1655,7 +1689,7 @@ function SearchView({ call, reload, showToast }) {
           /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { style: { fontWeight: 600, color: T.labelPrimary }, children: s.name }),
           /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { style: noteText, children: `${s.repo}${s.directory ? " / " + s.directory : ""} \xB7 \u5B89\u88C5 ${s.installs}` })
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(OutlineBtn, { onClick: () => probeAndAdd(s.repo, "main", s.directory), disabled: busy, children: "\u5165\u5E93" })
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(OutlineBtn, { onClick: () => addFromResult(s.repo, s.directory), disabled: busy, children: "\u5165\u5E93" })
       ] }, s.key))
     ] }) : null
   ] });
