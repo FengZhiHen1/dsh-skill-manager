@@ -20,13 +20,14 @@ const EXCLUDE_LINES = { dsh: '/.dsh/skills/', pi: '/.pi/skills/' }
  * 幂等：任意子项失败不影响其他子项，失败进 results。
  * @returns {Promise<{results: Array, warnings: Array, errors: Array}>}
  */
-export async function reconcile({ root, memberships, mounts, workspacesById, globalRootPath, piSkillsRoot = null }) {
+export async function reconcile({ root, memberships, mounts, workspacesById, globalRootPath, piSkillsRoot = null, piScanRoot = piSkillsRoot }) {
   const { desired, warnings } = deriveDesired({ memberships, mounts, workspacesById, globalRootPath, piSkillsRoot })
   const results = []
 
   // 1. 摘除 = 孤儿清扫（同一归属判据，无第二张台账）：owned 且不在期望集 → 删链接。
+  //    扫描语义用 piScanRoot（探测到就扫，与开关无关）：关开关后 pi 残留链接在此步摘除。
   //    逐条隔离（与物化同构）：单条摘除失败进 results，不中断其余子项。
-  const links = await scanMountLinks({ root, globalRootPath, workspacesById, piSkillsRoot })
+  const links = await scanMountLinks({ root, globalRootPath, workspacesById, piSkillsRoot: piScanRoot })
   const orphans = await findOrphanLinks({ root, desired, globalRootPath, workspacesById, piSkillsRoot, links })
   for (const link of orphans) {
     try {

@@ -64,14 +64,14 @@ export async function writeSkill(root, name, meta = {}) {
 
 /**
  * 假 settings scope：scope.get() 返回配置意图（skillsDir + 默认组种子 +
- * 可选意图覆盖）。overrides 可传 { groups, skills, intentMigrated, piAgentDir }。
- * piAgentDir 默认指向库内永不创建的桩路径：pi 视为可用但扫描根不存在（readdir 跳过），
- * 隔离本机真实 ~/.pi/agent，测试零环境依赖。
+ * 可选意图覆盖）。overrides 可传 { groups, skills, intentMigrated, pi }。
+ * pi 默认 false（不接管）： Host 侧探测需真实 home，单元测试经 derive/reconcile
+ * 的 piSkillsRoot 参数直注，不经配置开关。
  */
 export function fakeScope(skillsDir, overrides = {}) {
   const base = {
     skillsDir,
-    piAgentDir: join(skillsDir, '__pi_agent_stub__'),
+    pi: false,
     intentMigrated: true,
     groups: { 默认: { mounts: [{ scope: 'global', project: null }] } },
     skills: {},

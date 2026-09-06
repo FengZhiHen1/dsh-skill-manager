@@ -407,6 +407,29 @@ test('reconcile：pi 宿主接管——.pi/skills 双侧物化与摘除、exclud
   }
 })
 
+test('reconcile：pi 开关关闭但目录探测在（期望根 null + 扫描根在）→ pi 残留链接按孤儿摘除（干净退出）', async () => {
+  const f = await fixture()
+  try {
+    await writeSkill(f.root, 'pdf')
+    const piRoot = join(f.tmp, 'pi-agent', 'skills')
+    await mkdir(piRoot, { recursive: true })
+    await symlink(join(f.root, 'pdf'), join(piRoot, 'pdf'), 'junction')
+    const r = await reconcile({
+      root: f.root,
+      memberships: new Map([['pdf', 'g1']]),
+      mounts: [{ group: 'g1', scope: 'global', project: null, hosts: ['dsh', 'pi'] }],
+      workspacesById: f.workspacesById,
+      globalRootPath: f.globalRootPath,
+      piSkillsRoot: null,
+      piScanRoot: piRoot,
+    })
+    assert.match(r.warnings[0], /pi 不可用/)
+    assert.equal(await isLink(join(piRoot, 'pdf')), false)
+    assert.ok(await isLink(join(f.globalRootPath, 'pdf')))
+  } finally {
+    await cleanup(f.tmp)
+  }
+})
 test('reconcile：pi 不可用（piSkillsRoot 缺省）零副作用——pi 侧不扫不建，dsh 侧照常', async () => {
   const f = await fixture()
   try {

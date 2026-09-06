@@ -1829,17 +1829,13 @@ function ErrorLineWrap({ error, root }) {
 // src/client/card.jsx
 var import_react6 = require("react");
 var import_jsx_runtime6 = require("react/jsx-runtime");
-var FIELDS = [
-  { key: "skillsDir", label: "\u672C\u5730 skills \u76EE\u5F55", placeholder: "\u4F8B\u5982 E:\\Project\\Skills\uFF08\u9ED8\u8BA4\u4E3A\u7A7A = \u672A\u914D\u7F6E\uFF09", hint: "\u7EDD\u5BF9\u8DEF\u5F84\uFF1B\u4FDD\u5B58\u540E\u7ACB\u5373\u751F\u6548\uFF0C\u65E0\u9700\u91CD\u542F\u3002", picker: true },
-  { key: "piAgentDir", label: "pi agent \u76EE\u5F55\uFF08\u53EF\u9009\uFF09", placeholder: "\u7559\u7A7A\u81EA\u52A8\u63A2\u6D4B ~/.pi/agent", hint: "\u63A2\u6D4B\u5230\u5373\u51FA\u73B0 pi \u6302\u8F7D\u5165\u53E3\uFF08\u52FE\u9009\u624D\u751F\u6548\uFF09\uFF1B\u63A2\u6D4B\u4E0D\u5230\u5373\u4E0D\u63A5\u7BA1 pi\u3002", picker: false }
-];
 function SkillManagerCard({ scope, uiWorkspace }) {
   const [open, setOpen] = (0, import_react6.useState)(false);
-  const [drafts, setDrafts] = (0, import_react6.useState)({ skillsDir: "", piAgentDir: "" });
-  const [touched, setTouched] = (0, import_react6.useState)({});
+  const [draft, setDraft] = (0, import_react6.useState)("");
+  const [touched, setTouched] = (0, import_react6.useState)(false);
   const [busy, setBusy] = (0, import_react6.useState)(false);
   const [failed, setFailed] = (0, import_react6.useState)(null);
-  const [focused, setFocused] = (0, import_react6.useState)(null);
+  const [focused, setFocused] = (0, import_react6.useState)(false);
   const [snap, setSnap] = (0, import_react6.useState)(() => scope.getSnapshot());
   (0, import_react6.useEffect)(() => {
     let alive = true;
@@ -1855,88 +1851,102 @@ function SkillManagerCard({ scope, uiWorkspace }) {
   }, [scope]);
   const ready = snap.status === "ready";
   const section = snap.value && typeof snap.value === "object" ? snap.value : {};
-  const user = snap.user && typeof snap.user === "object" ? snap.user : {};
-  const currentOf = (key) => typeof section[key] === "string" ? section[key] : "";
-  const snapValueKey = JSON.stringify([currentOf("skillsDir"), currentOf("piAgentDir")]);
+  const current = typeof section.skillsDir === "string" ? section.skillsDir : "";
+  const overridden = Boolean(snap && snap.user && typeof snap.user === "object" && "skillsDir" in snap.user);
+  const piOn = section.pi === true;
   (0, import_react6.useEffect)(() => {
-    setDrafts((prev) => ({
-      skillsDir: touched.skillsDir ? prev.skillsDir : currentOf("skillsDir"),
-      piAgentDir: touched.piAgentDir ? prev.piAgentDir : currentOf("piAgentDir")
-    }));
-  }, [snapValueKey]);
-  const dirtyKeys = FIELDS.map((f) => f.key).filter((key) => touched[key] && drafts[key] !== currentOf(key));
-  const dirty = dirtyKeys.length > 0;
-  const reject = (key, message, code) => ({
+    if (!touched) setDraft(current);
+  }, [current, touched]);
+  const dirty = touched && draft !== current;
+  const reject = (message, code) => ({
     message,
     prompt: buildRepairPrompt({
-      root: currentOf("skillsDir"),
+      root: current,
       code,
       message,
-      repair: settingsRejectedRepair(key, (drafts[key] ?? "").trim(), currentOf(key), currentOf("skillsDir"))
+      repair: settingsRejectedRepair("skillsDir", draft.trim(), current, current)
     })
   });
   const save = async () => {
     if (!ready) return;
     setBusy(true);
     setFailed(null);
+    const attempted = draft.trim();
     try {
-      for (const key of dirtyKeys) {
-        const attempted = (drafts[key] ?? "").trim();
-        try {
-          await scope.set(key, attempted);
-        } catch (e) {
-          setFailed(reject(key, `\u5199\u5165\u300C${key}\u300D\u5931\u8D25\uFF08\u8BF7\u6C42\u672A\u8FBE Host\uFF09\uFF1A${e?.message ?? String(e)}`, "settings-write-failed"));
-          return;
-        }
-        const fresh = scope.getSnapshot();
-        const v = fresh.value && typeof fresh.value === "object" ? fresh.value : {};
-        const committed = typeof v[key] === "string" ? v[key] : "";
-        if (committed !== attempted) {
-          setFailed(reject(key, `\u300C${key}\u300D\u4FDD\u5B58\u88AB Host \u6821\u9A8C\u62D2\u7EDD\uFF0C\u5DF2\u56DE\u6EDA\u4E3A\u300C${committed || "\u672A\u914D\u7F6E"}\u300D\uFF08\u975E\u7A7A\u5FC5\u987B\u662F\u7EDD\u5BF9\u8DEF\u5F84\uFF09\u3002`, "settings-validation-rejected"));
-          return;
-        }
+      await scope.set("skillsDir", attempted);
+      const fresh = scope.getSnapshot();
+      const v = fresh.value && typeof fresh.value === "object" ? fresh.value : {};
+      const committed = typeof v.skillsDir === "string" ? v.skillsDir : "";
+      if (committed !== attempted) {
+        setFailed(reject(`\u4FDD\u5B58\u88AB Host \u6821\u9A8C\u62D2\u7EDD\uFF0C\u5DF2\u56DE\u6EDA\u4E3A\u300C${committed || "\u672A\u914D\u7F6E"}\u300D\uFF08\u975E\u7A7A\u76EE\u5F55\u5FC5\u987B\u662F\u7EDD\u5BF9\u8DEF\u5F84\uFF09\u3002`, "settings-validation-rejected"));
+      } else {
+        setDraft(committed);
+        setTouched(false);
       }
-      setDrafts((prev) => ({ ...prev, ...Object.fromEntries(dirtyKeys.map((key) => [key, (prev[key] ?? "").trim()])) }));
-      setTouched({});
+    } catch (e) {
+      setFailed(reject(`\u5199\u5165\u5931\u8D25\uFF08\u8BF7\u6C42\u672A\u8FBE Host\uFF09\uFF1A${e?.message ?? String(e)}`, "settings-write-failed"));
     } finally {
       setBusy(false);
     }
   };
   const discard = () => {
     setFailed(null);
-    setDrafts((prev) => ({ ...prev, ...Object.fromEntries(dirtyKeys.map((key) => [key, currentOf(key)])) }));
-    setTouched({});
+    setDraft(current);
+    setTouched(false);
   };
-  const reset = async (key) => {
+  const reset = async () => {
     if (!ready) return;
     setBusy(true);
     setFailed(null);
     try {
-      await scope.unset(key);
+      await scope.unset("skillsDir");
       const fresh = scope.getSnapshot();
       const v = fresh.value && typeof fresh.value === "object" ? fresh.value : {};
-      setDrafts((prev) => ({ ...prev, [key]: typeof v[key] === "string" ? v[key] : "" }));
-      setTouched((prev) => ({ ...prev, [key]: false }));
+      setDraft(typeof v.skillsDir === "string" ? v.skillsDir : "");
+      setTouched(false);
     } catch (e) {
-      setFailed(reject(key, `\u91CD\u7F6E\u300C${key}\u300D\u5931\u8D25\uFF08\u8BF7\u6C42\u672A\u8FBE Host\uFF09\uFF1A${e?.message ?? String(e)}`, "settings-write-failed"));
+      setFailed(reject(`\u91CD\u7F6E\u5931\u8D25\uFF08\u8BF7\u6C42\u672A\u8FBE Host\uFF09\uFF1A${e?.message ?? String(e)}`, "settings-write-failed"));
     } finally {
       setBusy(false);
     }
   };
-  const pickDirectory = async (key) => {
+  const togglePi = async (checked) => {
+    if (!ready) return;
+    setBusy(true);
+    setFailed(null);
+    try {
+      await scope.set("pi", checked);
+      const fresh = scope.getSnapshot();
+      const v = fresh.value && typeof fresh.value === "object" ? fresh.value : {};
+      if (v.pi === true !== checked) {
+        setFailed({
+          message: "\u63A5\u7BA1\u5F00\u5173\u5199\u5165\u88AB\u62D2\u7EDD\uFF0C\u5DF2\u6062\u590D\u539F\u503C\u3002",
+          prompt: buildRepairPrompt({ root: current, code: "settings-validation-rejected", message: "\u5B57\u6BB5 pi \u5199\u5165\u88AB Host validate \u62D2\u7EDD", repair: settingsRejectedRepair("pi", checked, v.pi, current) })
+        });
+      }
+    } catch (e) {
+      setFailed({
+        message: `\u63A5\u7BA1\u5F00\u5173\u5199\u5165\u5931\u8D25\uFF08\u8BF7\u6C42\u672A\u8FBE Host\uFF09\uFF1A${e?.message ?? String(e)}`,
+        prompt: buildRepairPrompt({ root: current, code: "settings-write-failed", message: e?.message ?? String(e), repair: null })
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const pickDirectory = async () => {
     setBusy(true);
     setFailed(null);
     try {
       const path = await uiWorkspace.pickDirectory();
       if (path) {
-        setDrafts((prev) => ({ ...prev, [key]: path }));
-        setTouched((prev) => ({ ...prev, [key]: true }));
+        setDraft(path);
+        setTouched(true);
       }
     } catch (e) {
       setFailed({
         message: e && e.message ? `\u9009\u62E9\u76EE\u5F55\u5931\u8D25\uFF1A${e.message}` : "\u9009\u62E9\u76EE\u5F55\u5931\u8D25",
         prompt: buildRepairPrompt({
-          root: currentOf("skillsDir"),
+          root: current,
           code: "directory-picker-failed",
           message: e && e.message ? e.message : "",
           repair: null
@@ -1966,36 +1976,48 @@ function SkillManagerCard({ scope, uiWorkspace }) {
       }
     ),
     open ? /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { style: { borderTop: `1px solid ${T.borderL2}`, margin: "0 16px", paddingBottom: 8 }, children: [
-      FIELDS.map((field) => /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { style: { display: "flex", flexDirection: "column", gap: 6, padding: "12px 0" }, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { style: { display: "flex", flexDirection: "column", gap: 6, padding: "12px 0" }, children: [
         /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { style: { display: "flex", alignItems: "center", gap: 8 }, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("label", { htmlFor: `skill-manager-${field.key}`, style: { flex: 1, minWidth: 0, fontSize: 13, fontWeight: 500, lineHeight: 1.5, color: T.labelPrimary }, children: field.label }),
-          field.key in user ? /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("span", { style: { display: "inline-flex", alignItems: "center", gap: 8 }, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("label", { htmlFor: "skill-manager-skills-dir", style: { flex: 1, minWidth: 0, fontSize: 13, fontWeight: 500, lineHeight: 1.5, color: T.labelPrimary }, children: "\u672C\u5730 skills \u76EE\u5F55" }),
+          overridden ? /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("span", { style: { display: "inline-flex", alignItems: "center", gap: 8 }, children: [
             /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { style: { borderRadius: 999, padding: "1px 8px", fontSize: 11, lineHeight: "17px", whiteSpace: "nowrap", fontWeight: 500, background: T.bgModulePlatform, color: T.labelSecondary }, children: "\u5DF2\u8986\u76D6" }),
-            /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("button", { type: "button", disabled: busy || !ready, onClick: () => reset(field.key), style: { border: "none", background: "none", padding: 0, font: "inherit", fontSize: 12, lineHeight: 1.5, color: T.labelSecondary, cursor: "pointer" }, children: "\u91CD\u7F6E" })
+            /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("button", { type: "button", disabled: busy || !ready, onClick: reset, style: { border: "none", background: "none", padding: 0, font: "inherit", fontSize: 12, lineHeight: 1.5, color: T.labelSecondary, cursor: "pointer" }, children: "\u91CD\u7F6E" })
           ] }) : null
         ] }),
         /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { style: { display: "flex", gap: 8, alignItems: "center" }, children: [
           /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
             "input",
             {
-              id: `skill-manager-${field.key}`,
+              id: "skill-manager-skills-dir",
               type: "text",
-              value: drafts[field.key] ?? "",
-              placeholder: field.placeholder,
+              value: draft,
+              placeholder: "\u4F8B\u5982 E:\\Project\\Skills\uFF08\u9ED8\u8BA4\u4E3A\u7A7A = \u672A\u914D\u7F6E\uFF09",
               onChange: (e) => {
-                setDrafts((prev) => ({ ...prev, [field.key]: e.target.value }));
-                setTouched((prev) => ({ ...prev, [field.key]: true }));
+                setDraft(e.target.value);
+                setTouched(true);
                 setFailed(null);
               },
-              onFocus: () => setFocused(field.key),
-              onBlur: () => setFocused(null),
-              style: { flex: 1, minWidth: 0, height: 34, padding: "0 12px", border: `1px solid ${focused === field.key ? T.brand : T.borderL2}`, borderRadius: 8, background: T.bgLayer3, font: "inherit", fontSize: 13, lineHeight: 1.5, color: T.labelPrimary, outline: "none", boxSizing: "border-box" }
+              onFocus: () => setFocused(true),
+              onBlur: () => setFocused(false),
+              style: { flex: 1, minWidth: 0, height: 34, padding: "0 12px", border: `1px solid ${focused ? T.brand : T.borderL2}`, borderRadius: 8, background: T.bgLayer3, font: "inherit", fontSize: 13, lineHeight: 1.5, color: T.labelPrimary, outline: "none", boxSizing: "border-box" }
             }
           ),
-          field.picker ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(GhostBtn, { disabled: busy || !ready, onClick: () => pickDirectory(field.key), children: "\u9009\u62E9\u2026" }) : null
+          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(GhostBtn, { disabled: busy || !ready, onClick: pickDirectory, children: "\u9009\u62E9\u2026" })
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { style: { margin: 0, fontSize: 12, lineHeight: 1.5, color: T.labelTertiary }, children: field.hint })
-      ] }, field.key)),
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { style: { margin: 0, fontSize: 12, lineHeight: 1.5, color: T.labelTertiary }, children: "\u7EDD\u5BF9\u8DEF\u5F84\uFF1B\u4FDD\u5B58\u540E\u7ACB\u5373\u751F\u6548\uFF0C\u65E0\u9700\u91CD\u542F\u3002" })
+      ] }),
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { style: { display: "flex", alignItems: "center", gap: 14, padding: "2px 0 12px" }, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { style: { fontSize: 13, fontWeight: 500, color: T.labelPrimary }, children: "\u63A5\u7BA1\u5BBF\u4E3B" }),
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("label", { style: { display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: T.labelTertiary, cursor: "default" }, title: "DSH \u662F\u672C\u63D2\u4EF6\u7684\u57FA\u672C\u76D8\uFF0C\u6052\u4E3A\u63A5\u7BA1\u5BBF\u4E3B", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("input", { type: "checkbox", checked: true, disabled: true, style: { accentColor: T.brand, width: 13, height: 13, margin: 0 } }),
+          "DSH"
+        ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("label", { style: { display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: T.labelPrimary, cursor: ready && !busy ? "pointer" : "default" }, title: "\u52FE\u9009\u540E pi \u6309\u9ED8\u8BA4\u8DEF\u5F84\u88AB\u63A5\u7BA1\uFF1A~/.pi/agent/skills \u4E0E\u5404\u9879\u76EE .pi/skills", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("input", { type: "checkbox", checked: piOn, disabled: busy || !ready, onChange: (e) => togglePi(e.target.checked), style: { accentColor: T.brand, width: 13, height: 13, margin: 0 } }),
+          "pi agent"
+        ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { style: { fontSize: 12, lineHeight: 1.5, color: T.labelTertiary }, children: "pi \u56FA\u5B9A\u8D70\u9ED8\u8BA4\u8DEF\u5F84\uFF08~/.pi/agent\uFF09\uFF0C\u52FE\u9009\u5373\u751F\u6548" })
+      ] }),
       /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { style: { display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, padding: "12px 0 4px", borderTop: `1px solid ${T.borderL2}` }, children: [
         failed ? /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)(import_jsx_runtime6.Fragment, { children: [
           /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { style: { flex: 1, minWidth: 0, margin: 0, fontSize: 12, lineHeight: 1.5, color: T.error }, children: failed.message }),

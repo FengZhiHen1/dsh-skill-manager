@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
-  CONFIG_NS, SKILLS_DIR_FIELD, PI_AGENT_DIR_FIELD, DEFAULT_GROUP, configSchema, requireDir, resolvePiAgentDir,
+  CONFIG_NS, SKILLS_DIR_FIELD, PI_FIELD, DEFAULT_GROUP, configSchema, requireDir, probePiAgentDir,
 } from '../src/core/model/intent.js'
 import { registerConfig } from '../src/adapter/settings.js'
 import { atomicSwapDir, safePath, existsDir, writeJson } from '../src/core/base/fsys.js'
@@ -31,7 +31,7 @@ test('registerConfig：命名空间与 schema 正确（意图字段齐备）', (
   // 默认种子：默认组挂载全局（原 ensureSeedMounts 语义，配置化）
   const resolved = schema({})
   assert.equal(resolved[SKILLS_DIR_FIELD], '')
-  assert.equal(resolved[PI_AGENT_DIR_FIELD], '')
+  assert.equal(resolved[PI_FIELD], false)
   assert.equal(resolved.groups[DEFAULT_GROUP].mounts.length, 1)
   assert.equal(resolved.groups[DEFAULT_GROUP].mounts[0].scope, 'global')
   // hosts 缺省回落 ['dsh']：存量无 hosts 键的规则天然仅 DSH（向后兼容）
@@ -50,10 +50,7 @@ test('registerConfig.validate：形式校验（绝对路径/组名/意图形状�
   assert.throws(() => validate({ skillsDir: 'relative/path' }), /绝对路径/)
   assert.doesNotThrow(() => validate({ skillsDir: 'E:/Project/Skills' }))
   assert.doesNotThrow(() => validate({ skillsDir: 'E:/not/existing/yet' }))
-  // piAgentDir：空串放行（自动探测）；相对路径拒绝；hosts 空数组 = 死规则拒绝
-  assert.throws(() => validate({ piAgentDir: 'relative/pi' }), /绝对路径/)
-  assert.doesNotThrow(() => validate({ piAgentDir: '' }))
-  assert.doesNotThrow(() => validate({ piAgentDir: 'E:/pi/agent' }))
+  // hosts 空数组 = 死规则拒绝
   assert.throws(() => validate({ skillsDir: 'E:/s', groups: { 办公: { mounts: [{ scope: 'global', project: null, hosts: [] }] } } }), /宿主/)
   // 组名形式
   assert.doesNotThrow(() => validate({ skillsDir: 'E:/s', groups: { 办公: { mounts: [] } } }))
@@ -184,15 +181,18 @@ test('atomicSwapDir：换装成功则新版就位，移开的旧目录被清掉'
   }
 })
 
-test('resolvePiAgentDir：显式配置直通；空串按注入 home 探测，无 ~/.pi/agent → null', async () => {
-  // 显式配置：不存在也直通（物化按需创建，探测只服务自动路径）
-  assert.equal(resolvePiAgentDir('E:/pi/agent'), join('E:/pi/agent'))
+test('probePiAgentDir：无条件探测——PI_CODING_AGENT_DIR 优先，无 ~/.pi/agent → null', async () => {
   const home = await mkTmp()
   try {
-    // 自动探测：无 .pi/agent → null（pi 不可用三态之一）
-    assert.equal(resolvePiAgentDir('', home), null)
+    // 无 .pi/agent → null（未安装回落）；环境变量优先于默认路径
+    assert.equal(probePiAgentDir(home, {}), null)
     await mkdir(join(home, '.pi', 'agent'), { recursive: true })
-    assert.equal(resolvePiAgentDir('', home), join(home, '.pi', 'agent'))
+    assert.equal(probePiAgentDir(home, {}), join(home, '.pi', 'agent'))
+    const envDir = join(home, 'custom-pi')
+    await mkdir(envDir, { recursive: true })
+    assert.equal(probePiAgentDir(home, { PI_CODING_AGENT_DIR: envDir }), envDir)
+    // 环境变量指向不存在目录 → null（不直通，探测语义只对真实目录成立）
+    assert.equal(probePiAgentDir(home, { PI_CODING_AGENT_DIR: join(home, 'gone') }), null)
   } finally {
     await cleanup(home)
   }

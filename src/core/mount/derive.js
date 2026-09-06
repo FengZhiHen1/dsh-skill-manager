@@ -83,7 +83,7 @@ export function deriveDesired({ memberships, mounts, workspacesById, globalRootP
       warnOnce(`未匹配工作区：组「${m.group}」引用的工作区 ${m.project} 不在当前投影中`)
     }
     if (!piAvailable && Array.isArray(m?.hosts) && m.hosts.includes('pi')) {
-      warnOnce(`pi 不可用：组「${m.group}」的 pi 挂载未生效（未探测到 ~/.pi/agent，可在插件卡片显式配置 pi agent 目录）`)
+      warnOnce(`pi 不可用：组「${m.group}」的 pi 挂载未生效（未勾选接管或探测不到 pi，可在插件卡片勾选接管 pi agent）`)
     }
   }
   const desired = new Map()

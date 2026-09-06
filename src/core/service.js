@@ -7,7 +7,7 @@
 
 import { join } from 'node:path'
 import { SkillManagerError, buildRepair } from './base/errors.js'
-import { requireDir, DEFAULT_GROUP, PI_AGENT_DIR_FIELD, resolvePiAgentDir } from './model/intent.js'
+import { requireDir, DEFAULT_GROUP, PI_FIELD, probePiAgentDir } from './model/intent.js'
 import { createSharedCache, hashOf } from './base/cache.js'
 import { ContractError, parseEndpointPayload } from './model/contract.js'
 import { dirHash } from './model/library.js'
@@ -74,18 +74,22 @@ async function readWorkspaceProjection(listWorkspaces) {
 export function createSession(scopeGetter, listWorkspaces, getStore, backupsRoot, globalRootPath, shared) {
   const root = requireDir(scopeGetter())
   const store = getStore()
-  // pi 接管：每会话现算（配置改指即下次请求生效）。piSkillsRoot = null 即 pi 不可用，
-  // 下游 derive/扫描/物化全部按单宿主（dsh）回落，零行为变化。
-  const piAgentDir = resolvePiAgentDir(scopeGetter().get()?.[PI_AGENT_DIR_FIELD])
-  const piSkillsRoot = piAgentDir === null ? null : join(piAgentDir, 'skills')
+  // pi 探测每会话一次（statSync 便宜）：piScanRoot 是扫描语义——探测到即非空，与开关无关；
+  // 期望语义（piSkillsRoot）在 bundle 内按当下配置叠加开关判定。两者为 null 时下游全按单宿主回落。
+  const piScanRoot = (() => {
+    const dir = probePiAgentDir()
+    return dir === null ? null : join(dir, 'skills')
+  })()
   return {
     root,
     store,
     backupsRoot,
     globalRootPath,
-    piSkillsRoot,
+    piScanRoot,
     async bundle() {
       const config = scopeGetter().get()
+      // 期望语义：开关（pi 字段）开 + 探测到才产 pi 目标；关开关后残留链接按孤儿判据摘除（干净退出）。
+      const piSkillsRoot = config?.[PI_FIELD] === true ? piScanRoot : null
       const configGroups = config?.groups && typeof config.groups === 'object' ? config.groups : {}
       const intentSkills = config?.skills && typeof config.skills === 'object' ? config.skills : {}
       const workspacesById = await readWorkspaceProjection(listWorkspaces)
@@ -124,8 +128,9 @@ export function createSession(scopeGetter, listWorkspaces, getStore, backupsRoot
         return [dir, typeof g === 'string' && g !== '' && (g in configGroups || g === DEFAULT_GROUP) ? g : DEFAULT_GROUP]
       }))
       const { desired, warnings } = deriveDesired({ memberships, mounts, workspacesById, globalRootPath, piSkillsRoot })
-      // 行状态走查与孤儿集共用同一次扫描，结果随 bundle 快照一起失效。
-      const links = await scanMountLinks({ root, globalRootPath, workspacesById, piSkillsRoot })
+      // 行状态走查与孤儿集共用同一次扫描（扫描语义用 piScanRoot：探测到就扫，与开关无关），
+      // 结果随 bundle 快照一起失效。
+      const links = await scanMountLinks({ root, globalRootPath, workspacesById, piSkillsRoot: piScanRoot })
       const mountRows = await walkMountState({ root, desired, links, globalRootPath, workspacesById, piSkillsRoot })
       const orphans = await findOrphanLinks({ root, desired, globalRootPath, workspacesById, piSkillsRoot, links })
       const mountCount = new Map([...workspacesById.keys()].map((id) => [id, 0]))
@@ -154,6 +159,7 @@ export function createSession(scopeGetter, listWorkspaces, getStore, backupsRoot
         mountRows,
         orphans,
         piSkillsRoot,
+        piScanRoot,
       }
     },
     /** 全量对账：现算期望并收敛挂载，junction-only。 */
@@ -165,7 +171,8 @@ export function createSession(scopeGetter, listWorkspaces, getStore, backupsRoot
         mounts: b.mounts,
         workspacesById: b.workspacesById,
         globalRootPath,
-        piSkillsRoot,
+        piSkillsRoot: b.piSkillsRoot,
+        piScanRoot: b.piScanRoot,
       })
     },
   }
@@ -353,7 +360,7 @@ export function buildApi(scopeGetter, { listWorkspaces = () => [], getStore, bac
         backupsRoot: s.backupsRoot,
         workspacesById,
         globalRootPath: globalRoot,
-        piSkillsRoot: s.piSkillsRoot,
+        piSkillsRoot: s.piScanRoot,
       })
       await refreshCache()
       return result
