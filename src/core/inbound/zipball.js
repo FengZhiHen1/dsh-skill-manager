@@ -3,7 +3,7 @@
 // 解包、定位、临时目录物化与文件树复制原语；nowIso/pathExists/validateInstallName
 // 为入站域共享小工具，统一收在本文件（原为 lib/inbound.js 模块内私有 helper）。
 
-import { cp, mkdir, mkdtemp, readdir, stat, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { SkillManagerError } from '../base/errors.js'
@@ -11,16 +11,22 @@ import { unzip } from '../base/zip.js'
 
 const SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 
+/**
+ * 安装名文法校验（C-01；小写字母/数字/连字符）。
+ * @throws {SkillManagerError} bad-name — 不满足文法
+ */
 export function validateInstallName(name) {
   if (!SKILL_NAME.test(name)) {
     throw new SkillManagerError('bad-name', `非法安装名: ${name}（小写字母/数字/连字符）`)
   }
 }
 
+/** 当前时刻 ISO 字符串（时间戳字段统一入口，便于测试替换）。 */
 export function nowIso() {
   return new Date().toISOString()
 }
 
+/** 路径存在性探测（任何 stat 失败含权限都按不存在——调用方以「可占位」处理）。 */
 export async function pathExists(p) {
   try {
     await stat(p)
@@ -30,7 +36,10 @@ export async function pathExists(p) {
   }
 }
 
-/** zipball 字节 → {顶层目录名, 文件: {相对路径: Buffer}}。 */
+/**
+ * zipball 字节 → {顶层目录名, 文件: {相对路径: Buffer}}。
+ * @throws {SkillManagerError} bad-zipball — 顶层目录不唯一，或含越界路径条目（防解包逃逸）
+ */
 export function explodeZipball(payload) {
   const files = unzip(payload)
   const tops = new Set()
@@ -70,6 +79,9 @@ export function skillsFromFiles(files) {
  * 定位 skill 目录。
  * @param {boolean} strict - true 时指定子目录未命中直接报 path-stale（update 用，
  *   防止上游重构后静默装错 skill）；false 回退自动探测（add/repo-skills 用）。
+ * @throws {SkillManagerError} no-skill-md — 仓内无任何 SKILL.md
+ * @throws {SkillManagerError} path-stale — strict 且记录路径在上游失效
+ * @throws {SkillManagerError} needs-selection — 多候选且无法唯一收窄
  */
 export function locateSkillDir(files, subdir, strict = false) {
   const candidates = skillsFromFiles(files)
@@ -92,8 +104,13 @@ export function locateSkillDir(files, subdir, strict = false) {
   return shallowest[0]
 }
 
-/** 把 zipball 内一个 skill 目录物化到临时目录，返回 {tmp, dir}（dir 相对路径）。 */
-export async function materializeSkillDir(payload, subdir, strict = false) {
+/**
+ * 把 zipball 内一个 skill 目录物化到临时目录，返回 {tmp, dir}（dir 相对路径）。
+ * 私有原语——tmp 生命周期只由 {@link withMaterializedSkillDir} 持有，外部不再
+ * 直接调用（防旁路漏清理）。
+ * Side Effects: 在 os.tmpdir() 建目录。
+ */
+async function materializeSkillDir(payload, subdir, strict = false) {
   const { files } = explodeZipball(payload)
   const dir = locateSkillDir(files, subdir, strict)
   const tmp = await mkdtemp(join(tmpdir(), 'dsh-sm-'))
@@ -108,6 +125,26 @@ export async function materializeSkillDir(payload, subdir, strict = false) {
   return { tmp, dir }
 }
 
+/**
+ * materializeSkillDir 的安全包装：fn 拿到 {tmp, dir} 后，无论成功或抛错，
+ * 临时目录必定清理（finally rm force）。fn 须在返回前把内容复制/换装到持久位置。
+ * @param {Buffer} payload zipball 字节
+ * @param {string|undefined} subdir 仓内子目录（可空 = 自动探测）
+ * @param {boolean} strict 传给 locateSkillDir 的严格模式
+ * @param {(env: {tmp: string, dir: string}) => Promise<unknown>} fn 消费回调
+ * @returns fn 的返回值
+ * 错误语义：materializeSkillDir 与 fn 的全部异常原样透传（finally 清 tmp 后继续上抛）。
+ */
+export async function withMaterializedSkillDir(payload, subdir, strict, fn) {
+  const { tmp, dir } = await materializeSkillDir(payload, subdir, strict)
+  try {
+    return await fn({ tmp, dir })
+  } finally {
+    await rm(tmp, { recursive: true, force: true })
+  }
+}
+
+/** 递归复制文件树（跳过 .git 与 __pycache__；符号链接等非普通文件不复制）。 */
 export async function copyTree(src, dest) {
   const entries = await readdir(src, { withFileTypes: true })
   for (const entry of entries) {

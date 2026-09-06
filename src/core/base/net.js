@@ -1,8 +1,12 @@
 // dsh-skill-manager — GitHub / skills.sh 网络通道（对齐 distributor net.py 语义）。
 // 分支解析：GitHub API 主路径，失败回退 git ls-remote（入站操作.md）。
+// 错误协议：GitHub 通道失败抛 GhError（kind 即稳定码，dispatch 直通）；仓库解析/
+// slug/搜索的语义失败直接抛 SkillManagerError（remote-unreachable/bad-repo），
+// 调用方不做文案匹配转译。
 
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import { SkillManagerError } from './errors.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -123,30 +127,45 @@ export async function remoteHead(repoSlug, branch) {
   return { sha: null, status: 'unreachable', via: null, reason: `${reason}；git 回退亦不可达` }
 }
 
-/** 按 branch → main → master 回退解析；全部失败抛 remote-unreachable。 */
+/**
+ * 按 branch → main → master 回退解析远端 commit。
+ * @throws {SkillManagerError} remote-unreachable（可重试）— 三个候选分支均不可达
+ */
 export async function resolveRemote(repoSlug, branch) {
+  let lastReason = ''
   for (const candidate of [...new Set([branch, 'main', 'master'])]) {
     const head = await remoteHead(repoSlug, candidate)
     if (head.sha) return { commit: head.sha, branch: candidate, via: head.via }
+    lastReason = head.reason
   }
-  const head = await remoteHead(repoSlug, branch)
-  throw new Error(
-    `无法解析 ${repoSlug} 的分支（${[branch, 'main', 'master'].join('/')} 均不可达：${head.reason}）`,
+  throw new SkillManagerError(
+    'remote-unreachable',
+    `无法解析 ${repoSlug} 的分支（${[branch, 'main', 'master'].join('/')} 均不可达：${lastReason}）`,
+    true,
+    [{ label: '仓库', value: repoSlug }],
   )
 }
 
-/** 仓库 slug 规范化与校验（目录配置与状态存储.md 校验规则）。 */
+/**
+ * 仓库 slug 规范化与校验（目录配置与状态存储.md 校验规则）。
+ * @throws {SkillManagerError} bad-repo — 归一后仍不满足 owner/repo 文法
+ */
 export function normalizeRepoSlug(slug) {
   let out = String(slug ?? '').trim()
   out = out.replace(/\.git$/, '').replace(/\/+$/, '')
   out = out.replace(/^https?:\/\/github\.com\//, '')
   if (!/^[\w.-]+\/[\w.-]+$/.test(out) || out.split('/').some((part) => part.includes('.'))) {
-    throw new Error(`无效的仓库标识: ${slug}（应为 owner/repo）`)
+    throw new SkillManagerError('bad-repo', `无效的仓库标识: ${slug}（应为 owner/repo）`, false, [
+      { label: '原始输入', value: String(slug ?? '') },
+    ])
   }
   return out
 }
 
-/** skills.sh 搜索（fetch.py search_skills_sh 语义，15 秒超时）。 */
+/**
+ * skills.sh 搜索（fetch.py search_skills_sh 语义，15 秒超时）。
+ * @throws {SkillManagerError} remote-unreachable（可重试）— 请求失败或非 2xx
+ */
 export async function searchSkillsSh(query, limit = 20, offset = 0) {
   const params = new URLSearchParams({ q: query, limit: String(limit), offset: String(offset) })
   let response
@@ -156,9 +175,15 @@ export async function searchSkillsSh(query, limit = 20, offset = 0) {
       signal: AbortSignal.timeout(TIMEOUT_MS),
     })
   } catch (error) {
-    throw new Error(`skills.sh 搜索失败: ${error.message}`)
+    throw new SkillManagerError('remote-unreachable', `skills.sh 搜索失败: ${error.message}`, true, [
+      { label: '查询词', value: String(query) },
+    ])
   }
-  if (!response.ok) throw new Error(`skills.sh 搜索失败: HTTP ${response.status}`)
+  if (!response.ok) {
+    throw new SkillManagerError('remote-unreachable', `skills.sh 搜索失败: HTTP ${response.status}`, true, [
+      { label: '查询词', value: String(query) },
+    ])
+  }
   const data = await response.json()
   const results = []
   for (const s of data.skills ?? []) {

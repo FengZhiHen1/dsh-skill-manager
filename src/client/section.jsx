@@ -8,17 +8,15 @@ import { buildRepairPrompt, RepairCopy, settingsRejectedRepair } from './repair.
 import { ManageView } from './manage.jsx'
 import { SearchView } from './search.jsx'
 
-// 配置变更通知总线：卡片保存/重置 skillsDir（settings/document-updated 由入口转发）→ 技能页自动刷新。
-const settingsListeners = new Set()
-export function subscribeSkillSettings(fn) {
-  settingsListeners.add(fn)
-  return () => settingsListeners.delete(fn)
-}
-export function bumpSkillSettings() {
-  for (const fn of [...settingsListeners]) fn()
-}
-
-export function SkillsSection({ call, workspaces, scope }) {
+/**
+ * 技能页（settings.section 槽位注入组件）。
+ * @param {object} props
+ * @param {(endpoint: string, payload?: object) => Promise<unknown>} props.call RPC 门面
+ * @param {object} props.workspaces 工作区服务面（GroupScopePanel 用）
+ * @param {object} props.scope skill-manager settings scope（直读直写）
+ * @param {(fn: () => void) => () => void} props.subscribeSkillSettings 配置变更总线订阅（入口 apply 闭包持有）
+ */
+export function SkillsSection({ call, workspaces, scope, subscribeSkillSettings }) {
   const [tab, setTab] = useState('manage')
   const [error, setError] = useState(null)
   const [data, setData] = useState(null)
@@ -28,8 +26,7 @@ export function SkillsSection({ call, workspaces, scope }) {
 
   // ---------- 配置即意图（settings 域直读直写，与原生卡片同构） ----------
   const [snap, setSnap] = useState(() => scope.getSnapshot())
-  const [editError, setEditError] = useState(null) // { message, prompt }
-  const [pendingEdit, setPendingEdit] = useState(null) // { field, value }
+  const [editError, setEditError] = useState(null) // { message, prompt|null }
   useEffect(() => {
     let alive = true
     const apply = () => { if (alive) setSnap(scope.getSnapshot()) }
@@ -43,29 +40,39 @@ export function SkillsSection({ call, workspaces, scope }) {
   const skillsIntent = configReady && snap.value.skills && typeof snap.value.skills === 'object' ? snap.value.skills : {}
   const skillsDir = configReady && typeof snap.value.skillsDir === 'string' ? snap.value.skillsDir : ''
 
-  // 写被拒检测：scope.set 失败时 settings 客户端静默回滚（mirror 恢复服务端值）→ 对比检测后提示 + 复制修复提示词。
-  useEffect(() => {
-    if (!pendingEdit) return
-    const current = configReady ? snap.value[pendingEdit.field] : undefined
-    const equal = JSON.stringify(current) === JSON.stringify(pendingEdit.value)
-    if (!equal) {
-      setEditError({
-        message: `配置「${pendingEdit.field}」被拒绝，已恢复原值（组名保留字/非法字符或格式不合法）。`,
-        prompt: buildRepairPrompt({
-          root: data && data.root,
-          code: 'settings-validation-rejected',
-          message: `字段 ${pendingEdit.field} 写入被 Host validate 拒绝`,
-          repair: settingsRejectedRepair(pendingEdit.field, pendingEdit.value, current, data && data.root),
-        }),
-      })
-    }
-    setPendingEdit(null)
-  }, [snap])
-
+  /**
+   * 配置写与拒绝检测。DSH settings-scope.ts 语义：Host validate 拒绝时 mutate
+   * 应答 ok=false，客户端 recover（重载镜像后静默回退），set() **照常 resolve**
+   * 不抛；因此被拒判定 = 写 resolve 后权威快照的该字段 ≠ 尝试值。set() 抛错
+   * 只剩传输/围栏类失败（请求未达 Host），单独呈错——两态都有明确反馈，无静默。
+   * 检测按字段独立比对：多字段编辑（如组改名连改两处）各自的写后快照互不误伤。
+   */
   const editConfig = (field, next) => {
     setEditError(null)
-    setPendingEdit({ field, value: next })
-    scope.set(field, next).catch(() => {})
+    void (async () => {
+      try {
+        await scope.set(field, next)
+      } catch (error) {
+        setEditError({
+          message: `配置「${field}」写入失败（请求未达 Host）：${error?.message ?? String(error)}`,
+          prompt: null,
+        })
+        return
+      }
+      const after = scope.getSnapshot()
+      const value = after && after.value && typeof after.value === 'object' ? after.value : {}
+      if (JSON.stringify(value[field]) !== JSON.stringify(next)) {
+        setEditError({
+          message: `配置「${field}」被拒绝，已恢复原值（组名保留字/非法字符或格式不合法）。`,
+          prompt: buildRepairPrompt({
+            root: data && data.root,
+            code: 'settings-validation-rejected',
+            message: `字段 ${field} 写入被 Host validate 拒绝`,
+            repair: settingsRejectedRepair(field, next, value[field], data && data.root),
+          }),
+        })
+      }
+    })()
   }
   const intentOf = (dir) => skillsIntent[dir] || { disabled: false, group: '默认' }
   const setSkillDisabled = (dir, disabled) => {
@@ -146,7 +153,7 @@ export function SkillsSection({ call, workspaces, scope }) {
     const off = subscribeSkillSettings(load)
     load()
     return off
-  }, [reloadTick])
+  }, [reloadTick, subscribeSkillSettings])
 
   // 配置未就绪（mirror 加载中）→ 骨架；未配置 → 直接引导（不等 overview，配置渲染零网络）。
   if (!configReady) {

@@ -8,6 +8,10 @@
 // internal 兜底）都必须携带 repair；最终提示词文本由 Client 统一模板组装
 // （P6）。未知异常归类 internal，不冒泡杀死 Host。
 
+/**
+ * 稳定业务错误（DSR-018）：service 的 dispatch 把这类错误统一翻译为 Result
+ * 失败侧；code 为 REPAIR_META 码表稳定码，facts 为抛出点携带的现场上下文。
+ */
 export class SkillManagerError extends Error {
   /** 稳定错误码（见 需求.md R-19 与 插件运行时.md 错误协议）。 */
   code
@@ -99,6 +103,13 @@ export const REPAIR_META = {
   'path-stale': {
     summary: '登记记录与库内目录现状不一致（目录被移动或改名）。',
     recommendation: ['确认移动是否有意：有意则按新位置重新入库；无意则恢复原目录名后刷新'],
+  },
+  'backup-meta-invalid': {
+    summary: '备份目录的 _backup_meta.json 损坏或不可读，无法判定恢复类型（区别于「无元数据」的正常本地恢复降级）。',
+    recommendation: [
+      '打开该备份目录查看 _backup_meta.json：能修复 JSON 则修复后重试恢复',
+      '无法修复时改为手工把备份目录内容复制回 skills 目录（等同本地文件恢复，不登记上游）',
+    ],
   },
   'remote-unreachable': {
     summary: '本地无法访问该 skill 的远端来源。',

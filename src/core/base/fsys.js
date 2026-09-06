@@ -7,7 +7,10 @@ import { basename, dirname, isAbsolute, join, normalize, relative, resolve, sep 
 import { mkdir, mkdtemp, readlink, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { SkillManagerError } from './errors.js'
 
-/** Resolve a relative path below root, rejecting traversal and root itself. */
+/**
+ * Resolve a relative path below root, rejecting traversal and root itself.
+ * @throws {SkillManagerError} bad-path — rel 解析后越出 root 或等于 root 自身
+ */
 export function safePath(root, rel) {
   const target = resolve(root, rel)
   const within = relative(resolve(root), target)
@@ -20,7 +23,10 @@ export function safePath(root, rel) {
   return target
 }
 
-/** Return whether path exists and is a directory. */
+/**
+ * Return whether path exists and is a directory.
+ * 边界：任何 stat 失败（不存在/权限/竞态删除）一律 false——调用方按「非目录」处理。
+ */
 export async function existsDir(path) {
   try {
     return (await stat(path)).isDirectory()
@@ -34,7 +40,11 @@ export function normalizeRel(rel) {
   return normalize(rel).replace(/^([/\\])+/, '').replace(/[/\\]+$/, '')
 }
 
-/** Atomically write JSON using a same-directory temporary file and rename. */
+/**
+ * Atomically write JSON using a same-directory temporary file and rename.
+ * @throws {SkillManagerError} bad-path — rel 越出 root（safePath 透传）
+ * @throws {SkillManagerError} write-failed — 写临时文件或 rename 落位失败（携目标路径 facts）
+ */
 export async function writeJson(root, rel, data) {
   const file = safePath(root, rel)
   const dir = dirname(file)
@@ -55,7 +65,7 @@ export async function writeJson(root, rel, data) {
     }
   } catch (error) {
     await rm(tmp, { force: true })
-    throw new SkillManagerError('write-failed', `写入 ${rel} 失败：${error.message}`, false, [
+    throw new SkillManagerError('write-failed', `写入 ${rel} 失败：${error instanceof Error ? error.message : String(error)}`, false, [
       { label: '目标文件', value: String(file) },
     ])
   }
@@ -101,6 +111,8 @@ export function withinRoot(root, target) {
  * 的长路径前缀做 withinRoot 比对会误判非 owned——悬挂孤儿因此逃过清扫。
  * 对策：沿 readlink 结果向上找最近的存在祖先，realpath 展开为长形态后回填
  * 尾段，恢复可与长路径对比的规范目标。
+ *
+ * 边界：失败不抛——全部失败回退空串（调用方据此判「目标不可知」）。
  */
 export async function readLinkTarget(path) {
   try {
@@ -118,7 +130,7 @@ export async function readLinkTarget(path) {
       for (;;) {
         try {
           return join(await realpath(cur), ...tail.reverse())
-        } catch {
+        } catch { // quality-floor: ignore silent-catch 逐级存在性探测：realpath 失败=「该层不存在」的预期信号，继续上走，全程失败回退 raw
           // cur 不存在：再向上走一层
         }
         const up = dirname(cur)
@@ -142,6 +154,9 @@ export async function readLinkTarget(path) {
  * 整体改名移开 → 新目录顶上 → 删除旧目录。任何一步失败：已移开的旧目录
  * 放回原位，临时目录清理，抛出原错误——dest 全程要么是完整旧版要么是
  * 完整新版。
+ *
+ * @throws {SkillManagerError} 业务错误（buildFn 抛出）原样透传
+ * @throws {SkillManagerError} write-failed — 纯 fs 失败（mkdtemp/rename/rm），携目标路径 facts
  */
 export async function atomicSwapDir(dest, buildFn) {
   try {

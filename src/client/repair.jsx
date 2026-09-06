@@ -5,8 +5,13 @@ import { useState, useEffect } from 'react'
 import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
 import { T } from './theme.js'
 
-/** 剪贴板写入（clipboard API 失败回退 execCommand）。 */
-export function copyText(text) {
+/**
+ * 剪贴板写入：clipboard API 优先，失败或非安全上下文回退隐藏 textarea +
+ * execCommand。边界：两条通道都失败返回 false（调用方如实回显，不谎报成功）。
+ * @param {string} text 待复制文本
+ * @returns {Promise<boolean>} 是否确认写入剪贴板
+ */
+export async function copyText(text) {
   const fallback = () => {
     const ta = document.createElement('textarea')
     ta.value = text
@@ -14,14 +19,24 @@ export function copyText(text) {
     ta.style.opacity = '0'
     document.body.appendChild(ta)
     ta.select()
-    try { document.execCommand('copy') } catch { /* 忽略 */ }
+    let ok = false
+    try {
+      ok = document.execCommand('copy') === true
+    } catch {
+      ok = false // execCommand 不可用（现代浏览器已弃用面）：如实返回失败
+    }
     document.body.removeChild(ta)
+    return ok
   }
   if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(text).catch(fallback)
-  } else {
-    fallback()
+    try {
+      await navigator.clipboard.writeText(text)
+      return true
+    } catch {
+      return fallback() // 权限/非安全上下文等失败 → 老通道再试
+    }
   }
+  return fallback()
 }
 
 /** repair 为 null（transport 失败等）时的本地兜底 facts：保证任何失败都有复制入口。 */
@@ -67,22 +82,25 @@ export function buildRepairPrompt({ root, code, message, repair }) {
   return lines.join('\n')
 }
 
-/** 一键复制按钮：复制成功短暂回显「已复制」。 */
+/** 一键复制按钮：按 copyText 的真实结果短暂回显「已复制 / 复制失败」，不预设成功。 */
 export function RepairCopy({ text, label = '复制修复提示词' }) {
-  const [copied, setCopied] = useState(false)
+  const [result, setResult] = useState(null) // 'copied' | 'failed' | null
   useEffect(() => {
-    if (!copied) return undefined
-    const timer = setTimeout(() => setCopied(false), 1600)
+    if (!result) return undefined
+    const timer = setTimeout(() => setResult(null), 1600)
     return () => clearTimeout(timer)
-  }, [copied])
+  }, [result])
+  const click = () => {
+    copyText(text).then((ok) => setResult(ok ? 'copied' : 'failed'))
+  }
   return (
     <Button
       size="sm"
       variant="outline"
-      onClick={() => { copyText(text); setCopied(true) }}
+      onClick={click}
       style={{ fontSize: 11, padding: '2px 8px', whiteSpace: 'nowrap' }}
     >
-      {copied ? '已复制' : label}
+      {result === 'copied' ? '已复制' : result === 'failed' ? '复制失败' : label}
     </Button>
   )
 }

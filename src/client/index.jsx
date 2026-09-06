@@ -2,24 +2,39 @@
 // 导出 { inject, apply }（esbuild 产 dist/client.js，__ModuleLoader__ 工厂契约包裹）；
 // 注册两槽位（settings.section=技能页 / settings.plugin.item=keyed 配置卡），订阅 settings 文档事件驱动技能页刷新，
 // 挂导航图标补丁；全部 disposer 进 Fiber effect，卸载即清理。
-
 import { createCall } from './api.js'
-import { SkillsSection, bumpSkillSettings } from './section.jsx'
+import { SkillsSection } from './section.jsx'
 import { SkillManagerCard } from './card.jsx'
 import { observeSkillsNavIcon } from './nav-icon.js'
 
 export const inject = ['slots', 'workspaces', 'uiWorkspace', 'settingsScope', 'remote', 'connection']
 
+/**
+ * Client apply：建调用门面与配置变更总线，注册技能页/配置卡两槽位、订阅
+ * settings 文档事件、挂导航图标补丁；disposer 全部随本 fiber 处置。
+ */
 export function apply(ctx) {
   const call = createCall(ctx)
   const workspaces = ctx.workspaces
   const uiWorkspace = ctx.uiWorkspace
   const scope = ctx.settingsScope.bind({ namespace: 'skill-manager' })
 
+  // 配置变更通知总线：卡片保存/重置 skillsDir（settings/document-updated 由
+  // 下方转发）→ 技能页自动刷新。持有在 apply 闭包而非模块顶层——避免模块级
+  // 可变单例跨 fiber 重载/HMR 泄漏（知识库 03 §7.3）。
+  const settingsListeners = new Set()
+  const subscribeSkillSettings = (fn) => {
+    settingsListeners.add(fn)
+    return () => settingsListeners.delete(fn)
+  }
+  const bumpSkillSettings = () => {
+    for (const fn of [...settingsListeners]) fn()
+  }
+
   ctx.effect(() => {
     const offSection = ctx.slots.inject('settings.section', () =>
       ctx.slots.register(
-        { name: 'settings.section', id: 'skills', order: 16, label: '技能', inject: () => ({ call, workspaces, scope }) },
+        { name: 'settings.section', id: 'skills', order: 16, label: '技能', inject: () => ({ call, workspaces, scope, subscribeSkillSettings }) },
         SkillsSection,
       ),
     )

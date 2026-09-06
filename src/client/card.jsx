@@ -1,11 +1,19 @@
 // dsh-skill-manager — 插件配置卡片（插件运行时.md「插件配置卡片」L187/L219；设置→插件→skill-manager）。
 // 与 DSH 原生 PluginCard 同构：li > header（名称/描述/未保存标记/折叠箭头）+ body（字段 + footer：放弃/保存）；
-// 数据经 settings 域（ctx.settingsScope）直读直写 skillsDir；校验拒绝在 footer 回显且草稿保留，附修复复制入口（DSR-018）。
+// 数据经 settings 域（ctx.settingsScope）直读直写 skillsDir。Host validate 拒绝时
+// scope.set 照常 resolve（客户端 recover 静默回滚，settings-scope.ts 语义），被拒判定
+// = 写后权威快照 ≠ 尝试值；草稿保留供修改，附修复复制入口（DSR-018）。
 import { useState, useEffect } from 'react'
 import { T } from './theme.js'
 import { ChevronIcon, GhostBtn } from './ui.jsx'
 import { buildRepairPrompt, RepairCopy, settingsRejectedRepair } from './repair.jsx'
 
+/**
+ * skill-manager 配置卡片（settings.plugin.item keyed 槽位组件）。
+ * @param {object} props
+ * @param {object} props.scope skill-manager settings scope（直读直写）
+ * @param {{ pickDirectory: () => Promise<string|null> }} props.uiWorkspace 原生目录选择服务面
+ */
 export function SkillManagerCard({ scope, uiWorkspace }) {
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState('')
@@ -38,12 +46,13 @@ export function SkillManagerCard({ scope, uiWorkspace }) {
 
   const dirty = touched && draft !== current
 
-  const reject = (e) => ({
-    message: e && e.message ? e.message : '保存失败',
+  /** 失败呈现（DSR-018 卡片面）：message 人话 + repair 复制入口；code 区分被拒与传输失败。 */
+  const reject = (message, code) => ({
+    message,
     prompt: buildRepairPrompt({
       root: current,
-      code: 'settings-validation-rejected',
-      message: e && e.message ? e.message : '',
+      code,
+      message,
       repair: settingsRejectedRepair('skillsDir', draft.trim(), current, current),
     }),
   })
@@ -52,15 +61,23 @@ export function SkillManagerCard({ scope, uiWorkspace }) {
     if (!ready) return
     setBusy(true)
     setFailed(null)
+    const attempted = draft.trim()
     try {
-      await scope.set('skillsDir', draft.trim())
+      // Host validate 拒绝时 set 照常 resolve（客户端 recover 静默回滚，
+      // DSH settings-scope.ts 语义）；catch 只剩传输/围栏类失败。
+      await scope.set('skillsDir', attempted)
       const fresh = scope.getSnapshot()
       const v = fresh.value && typeof fresh.value === 'object' ? fresh.value : {}
-      setDraft(typeof v.skillsDir === 'string' ? v.skillsDir : '')
-      setTouched(false)
+      const committed = typeof v.skillsDir === 'string' ? v.skillsDir : ''
+      if (committed !== attempted) {
+        // 权威快照 ≠ 尝试值 → 被 validate 拒绝已回滚：回显且草稿保留供修改
+        setFailed(reject(`保存被 Host 校验拒绝，已回滚为「${committed || '未配置'}」（非空目录必须是绝对路径）。`, 'settings-validation-rejected'))
+      } else {
+        setDraft(committed)
+        setTouched(false)
+      }
     } catch (e) {
-      // Host 校验拒绝（如非绝对路径）以错误回显，草稿保留供修改，不落盘
-      setFailed(reject(e))
+      setFailed(reject(`写入失败（请求未达 Host）：${e?.message ?? String(e)}`, 'settings-write-failed'))
     } finally {
       setBusy(false)
     }
@@ -82,7 +99,7 @@ export function SkillManagerCard({ scope, uiWorkspace }) {
       setDraft(typeof v.skillsDir === 'string' ? v.skillsDir : '')
       setTouched(false)
     } catch (e) {
-      setFailed(reject(e))
+      setFailed(reject(`重置失败（请求未达 Host）：${e?.message ?? String(e)}`, 'settings-write-failed'))
     } finally {
       setBusy(false)
     }

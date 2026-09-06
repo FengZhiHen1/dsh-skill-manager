@@ -30,7 +30,10 @@ export const DEFAULT_GROUP = '默认'
 const RESERVED_GROUPS = new Set(['默认', '全部'])
 const BAD_GROUP_CHARS = /[/\\:*?"<>|\x00-\x1f]/
 
-/** 组名校验（形式约束；settings validate 与客户端建组共用同一规则）。 */
+/**
+ * 组名校验（形式约束；settings validate 与客户端建组共用同一规则）。
+ * @throws {SkillManagerError} bad-group-name — 空/超长/保留字/含非法字符
+ */
 export function validateGroupName(name) {
   if (typeof name !== 'string' || name.length === 0 || name.length > 30) {
     throw new SkillManagerError('bad-group-name', '组名长度必须为 1 到 30 个字符')
@@ -62,8 +65,10 @@ export const configSchema = () => z.object({
 })
 
 /**
- * settings 形式校验（原 lib/dir.js registerConfig 内联 validate 闭包，逐行未动；
- * 引用完整性交由对账层容忍）。
+ * settings 形式校验（原 lib/dir.js registerConfig 内联 validate 闭包；引用完整性
+ * 交由对账层容忍）。skillsDir 为空跳过（未配置不拦编辑）。
+ * @throws {Error} 非绝对路径 / 非法组名（validateGroupName 转抛）/ 意图形状错误
+ *   ——settings validate 契约以消息面呈现，不要求稳定码
  */
 export function validateConfigIntent(value) {
   const dir = value?.[SKILLS_DIR_FIELD]
@@ -86,6 +91,8 @@ export function validateConfigIntent(value) {
  * Resolve the currently configured skills directory and require it to exist.
  * The setting is read on every call so live configuration changes apply
  * immediately.
+ * @throws {SkillManagerError} skilldir-unconfigured — 未配置或空串
+ * @throws {SkillManagerError} skilldir-missing — 已配置但目录不存在/非目录/不可访问
  */
 export function requireDir(scope) {
   const dir = scope.get()[SKILLS_DIR_FIELD]

@@ -99,7 +99,7 @@ async function readSkillMeta(mdPath, meta, key) {
   let parsed = {}
   try {
     parsed = parseSkillMd(await readFile(mdPath, 'utf8'))
-  } catch {
+  } catch { // quality-floor: ignore silent-catch 签名与读取间竞态删除/权限失败按「无 SKILL.md」降级，单目录异常不中断整库扫描
     // 读失败按无 SKILL.md 处理
   }
   if (meta !== undefined) meta.set(key, { sig, hasSkillMd: true, meta: parsed })
@@ -110,8 +110,9 @@ async function readSkillMeta(mdPath, meta, key) {
  * 库扫描：配置目录直接子目录 + 表中 origin 非 self 但目录缺失的条目（missing）。
  * 列表项：name、dir、description、origin(self/github/local)、hasSkillMd、commit、
  * disabled、missing、group（所属组，虚拟组为 默认）。
- * 副作用（仅域写入）：目录存在而表无记录 → 补登记 origin:'self'；记录缺
- * content_hash 且目录在 → 回填基线。
+ * 纯读视图（与测试契约同断言）：不写 storage——本地目录无版本管理不登记；
+ * github 记录缺 content_hash 不回填，基线只由入站路径（add/update）维护。
+ * disabled/group 为占位默认值，意图字段由 API 层叠加配置（settings.skills）。
  * @param {object} opts `{ meta }`：meta 为共享缓存（createSharedCache().meta），
  *        未改动目录的解析结果按 stat 签名复用，重扫退化为 N 次 stat。
  */

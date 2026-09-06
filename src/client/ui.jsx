@@ -20,6 +20,7 @@ export const OutlineBtn = (props) => <Button variant="outline" size="sm" {...pro
  */
 export const PrimaryBtn = (props) => <Button variant="primary" size="sm" {...props} />
 
+/** 页级/行级错误单行呈现（无修复入口的轻量面；带复制入口的用 section 的 ErrorLineWrap）。 */
 export function ErrorLine({ error }) {
   if (!error) return null
   return <div style={{ color: T.error, fontSize: 12, padding: '6px 8px' }}>{String(error.message || error)}</div>
@@ -42,6 +43,7 @@ export function NoticeBar({ notice }) {
   )
 }
 
+/** 手动刷新计数器：返回 [tick, bump]，bump 触发依赖它的 useEffect 重跑。 */
 export function useTick() {
   const [tick, setTick] = useState(0)
   return [tick, () => setTick((t) => t + 1)]
@@ -77,6 +79,7 @@ export function MenuItem({ label, danger, disabled, onClick, onEnter, trailing, 
   )
 }
 
+/** 浮层菜单卡基元（主/子菜单共用；定位由 RowMenu 按 fixed 几何覆写）。 */
 export const menuCardStyle = {
   position: 'absolute',
   zIndex: 41,
@@ -87,6 +90,7 @@ export const menuCardStyle = {
   boxShadow: '0 8px 24px rgba(0,0,0,.18)',
   padding: 6,
 }
+/** 菜单分隔线（不可变元素常量）。 */
 export const menuDivider = <div style={{ height: 1, margin: '5px 6px', background: T.borderL2 }} />
 
 /**
@@ -233,8 +237,7 @@ export function ModalShell({ title, width = 480, onMaskClick, children }) {
 }
 
 /** 覆盖本地修改的真实遮罩对话框；不用 window.confirm，确保风险与操作范围可见。 */
-export function UpdateConfirmationDialog({ name, detail, busy, onCancel, onConfirm }) {
-  const [acknowledged, setAcknowledged] = useState(false)
+export function UpdateConfirmationDialog({ name, detail, busy, onCancel, onConfirm }) {  const [acknowledged, setAcknowledged] = useState(false)
   return (
     <ModalShell title={`更新 ${name}？`} onMaskClick={onCancel}>
       <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>{`更新 ${name}？`}</div>
@@ -249,6 +252,25 @@ export function UpdateConfirmationDialog({ name, detail, busy, onCancel, onConfi
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
         <OutlineBtn onClick={onCancel} disabled={busy}>取消</OutlineBtn>
         <PrimaryBtn onClick={onConfirm} disabled={busy || !acknowledged}>{busy ? '更新中…' : '继续更新'}</PrimaryBtn>
+      </div>
+    </ModalShell>
+  )
+}
+
+/**
+ * 通用风险确认遮罩（出库/删组共用），与更新确认同一遮罩语言——不用
+ * window.confirm：原生框无主题、文案一行，操作范围不可见。
+ * @param {{ title: string, body: string, warning?: string, confirmLabel: string, busy?: boolean, onCancel: () => void, onConfirm: () => void }} props
+ */
+export function ConfirmDialog({ title, body, warning, confirmLabel, busy = false, onCancel, onConfirm }) {
+  return (
+    <ModalShell title={title} width={420} onMaskClick={busy ? undefined : onCancel}>
+      <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>{title}</div>
+      <div style={{ color: T.labelSecondary, fontSize: 13, lineHeight: 1.55, marginBottom: 12 }}>{body}</div>
+      {warning ? <div style={{ borderRadius: 10, padding: '10px 12px', marginBottom: 14, ...badgeStyle(T.warn), fontSize: 12, lineHeight: 1.55 }}>{warning}</div> : null}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+        <OutlineBtn onClick={onCancel} disabled={busy}>取消</OutlineBtn>
+        <PrimaryBtn onClick={onConfirm} disabled={busy}>{busy ? '处理中…' : confirmLabel}</PrimaryBtn>
       </div>
     </ModalShell>
   )

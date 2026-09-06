@@ -370,12 +370,23 @@ function UpdateConfirmationDialog({ name, detail, busy, onCancel, onConfirm }) {
     ] })
   ] });
 }
+function ConfirmDialog({ title, body, warning, confirmLabel, busy = false, onCancel, onConfirm }) {
+  return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(ModalShell, { title, width: 420, onMaskClick: busy ? void 0 : onCancel, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: { fontSize: 16, fontWeight: 600, marginBottom: 8 }, children: title }),
+    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: { color: T.labelSecondary, fontSize: 13, lineHeight: 1.55, marginBottom: 12 }, children: body }),
+    warning ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: { borderRadius: 10, padding: "10px 12px", marginBottom: 14, ...badgeStyle(T.warn), fontSize: 12, lineHeight: 1.55 }, children: warning }) : null,
+    /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: { display: "flex", justifyContent: "flex-end", gap: 8 }, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)(OutlineBtn, { onClick: onCancel, disabled: busy, children: "\u53D6\u6D88" }),
+      /* @__PURE__ */ (0, import_jsx_runtime.jsx)(PrimaryBtn, { onClick: onConfirm, disabled: busy, children: busy ? "\u5904\u7406\u4E2D\u2026" : confirmLabel })
+    ] })
+  ] });
+}
 
 // src/client/repair.jsx
 var import_react2 = require("react");
 var import_dsh_client_ui_primitives2 = require("@deepseek-ai/dsh-client-ui-primitives");
 var import_jsx_runtime2 = require("react/jsx-runtime");
-function copyText(text) {
+async function copyText(text) {
   const fallback = () => {
     const ta = document.createElement("textarea");
     ta.value = text;
@@ -383,17 +394,24 @@ function copyText(text) {
     ta.style.opacity = "0";
     document.body.appendChild(ta);
     ta.select();
+    let ok = false;
     try {
-      document.execCommand("copy");
+      ok = document.execCommand("copy") === true;
     } catch {
+      ok = false;
     }
     document.body.removeChild(ta);
+    return ok;
   };
   if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(text).catch(fallback);
-  } else {
-    fallback();
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      return fallback();
+    }
   }
+  return fallback();
 }
 function fallbackRepair({ operation = "unknown", code = "internal", message = "" } = {}) {
   const transport = code === "transport";
@@ -428,23 +446,23 @@ function buildRepairPrompt({ root, code, message, repair }) {
   return lines.join("\n");
 }
 function RepairCopy({ text, label = "\u590D\u5236\u4FEE\u590D\u63D0\u793A\u8BCD" }) {
-  const [copied, setCopied] = (0, import_react2.useState)(false);
+  const [result, setResult] = (0, import_react2.useState)(null);
   (0, import_react2.useEffect)(() => {
-    if (!copied) return void 0;
-    const timer = setTimeout(() => setCopied(false), 1600);
+    if (!result) return void 0;
+    const timer = setTimeout(() => setResult(null), 1600);
     return () => clearTimeout(timer);
-  }, [copied]);
+  }, [result]);
+  const click = () => {
+    copyText(text).then((ok) => setResult(ok ? "copied" : "failed"));
+  };
   return /* @__PURE__ */ (0, import_jsx_runtime2.jsx)(
     import_dsh_client_ui_primitives2.Button,
     {
       size: "sm",
       variant: "outline",
-      onClick: () => {
-        copyText(text);
-        setCopied(true);
-      },
+      onClick: click,
       style: { fontSize: 11, padding: "2px 8px", whiteSpace: "nowrap" },
-      children: copied ? "\u5DF2\u590D\u5236" : label
+      children: result === "copied" ? "\u5DF2\u590D\u5236" : result === "failed" ? "\u590D\u5236\u5931\u8D25" : label
     }
   );
 }
@@ -514,6 +532,8 @@ function ManageView({ call, data, config, reload }) {
   const [error, setError] = (0, import_react3.useState)(null);
   const [notice, setNotice] = (0, import_react3.useState)(null);
   const [pendingUpdate, setPendingUpdate] = (0, import_react3.useState)(null);
+  const [pendingRemove, setPendingRemove] = (0, import_react3.useState)(null);
+  const [pendingGroupDelete, setPendingGroupDelete] = (0, import_react3.useState)(null);
   const [menuFor, setMenuFor] = (0, import_react3.useState)(null);
   const [createOpen, setCreateOpen] = (0, import_react3.useState)(false);
   const [expandedMount, setExpandedMount] = (0, import_react3.useState)(null);
@@ -557,6 +577,10 @@ function ManageView({ call, data, config, reload }) {
       setSkillDisabled(name, false);
       return;
     }
+    if (action === "remove" && payload.confirmed !== true) {
+      setPendingRemove({ name });
+      return;
+    }
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -579,7 +603,6 @@ function ManageView({ call, data, config, reload }) {
         else if (it) setNotice({ tone: "warn", text: `${name} \u66F4\u65B0\u672A\u5B8C\u6210\uFF08${it.status}\uFF09\uFF1A${it.reason || it.error || "\u672A\u8FD4\u56DE\u539F\u56E0"}` });
         else setNotice({ tone: "warn", text: `${name}\uFF1A\u66F4\u65B0\u7ED3\u679C\u672A\u542B\u8BE5\u6761\u76EE\uFF0C\u8BF7\u70B9\u300C\u21BB \u5237\u65B0\u300D\u6838\u5BF9\u884C\u72B6\u6001` });
       } else if (action === "remove") {
-        if (!window.confirm(`\u786E\u8BA4\u51FA\u5E93 ${name}\uFF1F\u5220\u9664\u524D\u81EA\u52A8\u5907\u4EFD\u5230 DSH HOME \u5907\u4EFD\u533A\uFF08\u81EA\u6709\u76EE\u5F55\u65E0\u5220\u9664\u5165\u53E3\uFF09\u3002`)) return;
         const r = await call("remove", { name });
         setNotice({ tone: "ok", text: r.backup ? `${name} \u5DF2\u51FA\u5E93\uFF0C\u5907\u4EFD\u4E8E ${r.backup}` : `${name} \u5DF2\u51FA\u5E93\uFF08\u76EE\u5F55\u672C\u5DF2\u7F3A\u5931\uFF0C\u65E0\u7269\u53EF\u5907\uFF09` });
       }
@@ -630,13 +653,18 @@ function ManageView({ call, data, config, reload }) {
   };
   const groupOp = (action, name, newName) => {
     if (action === "delete") {
-      if (!window.confirm(`\u5220\u9664\u7EC4 ${name}\uFF1F\u6210\u5458\u5C06\u56DE\u843D\u300C\u9ED8\u8BA4\u300D\u7EC4`)) return;
-      deleteGroup(name);
-      if (groupFilter === name) setGroupFilter("\u9ED8\u8BA4");
+      setPendingGroupDelete(name);
     } else if (action === "rename") {
       renameGroup(name, newName);
       if (groupFilter === name && newName) setGroupFilter(newName);
     }
+  };
+  const confirmDeleteGroup = () => {
+    const name = pendingGroupDelete;
+    setPendingGroupDelete(null);
+    if (!name) return;
+    deleteGroup(name);
+    if (groupFilter === name) setGroupFilter("\u9ED8\u8BA4");
   };
   const doCreateGroup = (name) => {
     if (!config.createGroup(name)) {
@@ -768,6 +796,33 @@ function ManageView({ call, data, config, reload }) {
           setPendingUpdate(null);
           rowAction(name, "update", { confirmLocalChanges: true });
         }
+      }
+    ),
+    pendingRemove && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+      ConfirmDialog,
+      {
+        title: `\u51FA\u5E93\u300C${pendingRemove.name}\u300D\uFF1F`,
+        body: "\u4EC5 GitHub \u6765\u6E90\u7684 Skill \u53EF\u51FA\u5E93\uFF08\u81EA\u7814/\u672C\u5730\u76EE\u5F55\u65E0\u5220\u9664\u5165\u53E3\uFF0C\u5728\u6280\u80FD\u76EE\u5F55\u5185\u81EA\u7BA1\uFF09\u3002",
+        warning: "\u6267\u884C\u987A\u5E8F\uFF1A\u5148\u628A\u6574\u76EE\u5F55\u81EA\u52A8\u5907\u4EFD\u5230 DSH HOME \u5907\u4EFD\u533A \u2192 \u6458\u9664\u5168\u90E8\u6302\u8F7D\u94FE\u63A5 \u2192 \u5220\u9664\u5E93\u5185\u76EE\u5F55 \u2192 \u6E05\u7406\u767B\u8BB0\u4E0E\u68C0\u67E5\u7F13\u5B58\u3002settings \u91CC\u7684\u5206\u7EC4\u5F52\u5C5E\u4E0D\u968F\u51FA\u5E93\u6D88\u5931\uFF0C\u91CD\u65B0\u5165\u5E93\u81EA\u7136\u843D\u56DE\u539F\u7EC4\u3002",
+        confirmLabel: "\u786E\u8BA4\u51FA\u5E93",
+        busy,
+        onCancel: () => setPendingRemove(null),
+        onConfirm: () => {
+          const name = pendingRemove.name;
+          setPendingRemove(null);
+          rowAction(name, "remove", { confirmed: true });
+        }
+      }
+    ),
+    pendingGroupDelete && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+      ConfirmDialog,
+      {
+        title: `\u5220\u9664\u5206\u7EC4\u300C${pendingGroupDelete}\u300D\uFF1F`,
+        body: `\u8BE5\u7EC4\u5F53\u524D ${countForGroup(pendingGroupDelete)} \u4E2A\u6210\u5458\uFF0C\u5220\u9664\u540E\u6210\u5458\u56DE\u843D\u300C\u9ED8\u8BA4\u300D\u7EC4\u3002`,
+        warning: "\u4E0D\u5220\u9664\u4EFB\u4F55 Skill \u6587\u4EF6\uFF1B\u4F46\u8BE5\u7EC4\u7684\u6302\u8F7D\u89C4\u5219\u968F\u4E4B\u79FB\u9664\uFF0C\u6309\u6B64\u89C4\u5219\u6302\u51FA\u53BB\u7684\u94FE\u63A5\u4F1A\u5728\u5BF9\u8D26\u65F6\u88AB\u6458\u9664\uFF08\u56DE\u843D\u300C\u9ED8\u8BA4\u300D\u7EC4\u7684\u89C4\u5219\uFF09\u3002",
+        confirmLabel: "\u786E\u8BA4\u5220\u9664\u5206\u7EC4",
+        onCancel: () => setPendingGroupDelete(null),
+        onConfirm: confirmDeleteGroup
       }
     )
   ] });
@@ -1019,7 +1074,7 @@ function SearchView({ call, reload }) {
       ),
       /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(PrimaryBtn, { onClick: doSearch, disabled: busy || !query.trim(), children: busy ? "\u641C\u7D22\u4E2D\u2026" : "\u641C\u7D22" })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(DirectAdd, { call, reload, busy, setBusy, setError, onCandidates: showCandidates, onAdded: () => setNotice("\u5DF2\u5165\u5E93") }),
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(DirectAdd, { call, reload, busy, setBusy, setError, onCandidates: showCandidates, onAdded: () => setNotice({ tone: "ok", text: "\u5DF2\u5165\u5E93" }) }),
     error ? /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(ErrorLine, { error }) : null,
     notice ? /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(NoticeBar, { notice }) : null,
     candidates && /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { style: { marginBottom: 10 }, children: [
@@ -1115,15 +1170,7 @@ function DirectAdd({ call, reload, busy, setBusy, setError, onCandidates, onAdde
 
 // src/client/section.jsx
 var import_jsx_runtime5 = require("react/jsx-runtime");
-var settingsListeners = /* @__PURE__ */ new Set();
-function subscribeSkillSettings(fn) {
-  settingsListeners.add(fn);
-  return () => settingsListeners.delete(fn);
-}
-function bumpSkillSettings() {
-  for (const fn of [...settingsListeners]) fn();
-}
-function SkillsSection({ call, workspaces, scope }) {
+function SkillsSection({ call, workspaces, scope, subscribeSkillSettings }) {
   const [tab, setTab] = (0, import_react5.useState)("manage");
   const [error, setError] = (0, import_react5.useState)(null);
   const [data, setData] = (0, import_react5.useState)(null);
@@ -1131,7 +1178,6 @@ function SkillsSection({ call, workspaces, scope }) {
   const [reloadTick, reload] = useTick();
   const [snap, setSnap] = (0, import_react5.useState)(() => scope.getSnapshot());
   const [editError, setEditError] = (0, import_react5.useState)(null);
-  const [pendingEdit, setPendingEdit] = (0, import_react5.useState)(null);
   (0, import_react5.useEffect)(() => {
     let alive = true;
     const apply2 = () => {
@@ -1148,28 +1194,32 @@ function SkillsSection({ call, workspaces, scope }) {
   const groups = configReady && snap.value.groups && typeof snap.value.groups === "object" ? snap.value.groups : {};
   const skillsIntent = configReady && snap.value.skills && typeof snap.value.skills === "object" ? snap.value.skills : {};
   const skillsDir = configReady && typeof snap.value.skillsDir === "string" ? snap.value.skillsDir : "";
-  (0, import_react5.useEffect)(() => {
-    if (!pendingEdit) return;
-    const current = configReady ? snap.value[pendingEdit.field] : void 0;
-    const equal = JSON.stringify(current) === JSON.stringify(pendingEdit.value);
-    if (!equal) {
-      setEditError({
-        message: `\u914D\u7F6E\u300C${pendingEdit.field}\u300D\u88AB\u62D2\u7EDD\uFF0C\u5DF2\u6062\u590D\u539F\u503C\uFF08\u7EC4\u540D\u4FDD\u7559\u5B57/\u975E\u6CD5\u5B57\u7B26\u6216\u683C\u5F0F\u4E0D\u5408\u6CD5\uFF09\u3002`,
-        prompt: buildRepairPrompt({
-          root: data && data.root,
-          code: "settings-validation-rejected",
-          message: `\u5B57\u6BB5 ${pendingEdit.field} \u5199\u5165\u88AB Host validate \u62D2\u7EDD`,
-          repair: settingsRejectedRepair(pendingEdit.field, pendingEdit.value, current, data && data.root)
-        })
-      });
-    }
-    setPendingEdit(null);
-  }, [snap]);
   const editConfig = (field, next) => {
     setEditError(null);
-    setPendingEdit({ field, value: next });
-    scope.set(field, next).catch(() => {
-    });
+    void (async () => {
+      try {
+        await scope.set(field, next);
+      } catch (error2) {
+        setEditError({
+          message: `\u914D\u7F6E\u300C${field}\u300D\u5199\u5165\u5931\u8D25\uFF08\u8BF7\u6C42\u672A\u8FBE Host\uFF09\uFF1A${error2?.message ?? String(error2)}`,
+          prompt: null
+        });
+        return;
+      }
+      const after = scope.getSnapshot();
+      const value = after && after.value && typeof after.value === "object" ? after.value : {};
+      if (JSON.stringify(value[field]) !== JSON.stringify(next)) {
+        setEditError({
+          message: `\u914D\u7F6E\u300C${field}\u300D\u88AB\u62D2\u7EDD\uFF0C\u5DF2\u6062\u590D\u539F\u503C\uFF08\u7EC4\u540D\u4FDD\u7559\u5B57/\u975E\u6CD5\u5B57\u7B26\u6216\u683C\u5F0F\u4E0D\u5408\u6CD5\uFF09\u3002`,
+          prompt: buildRepairPrompt({
+            root: data && data.root,
+            code: "settings-validation-rejected",
+            message: `\u5B57\u6BB5 ${field} \u5199\u5165\u88AB Host validate \u62D2\u7EDD`,
+            repair: settingsRejectedRepair(field, next, value[field], data && data.root)
+          })
+        });
+      }
+    })();
   };
   const intentOf = (dir) => skillsIntent[dir] || { disabled: false, group: "\u9ED8\u8BA4" };
   const setSkillDisabled = (dir, disabled) => {
@@ -1240,7 +1290,7 @@ function SkillsSection({ call, workspaces, scope }) {
     const off = subscribeSkillSettings(load);
     load();
     return off;
-  }, [reloadTick]);
+  }, [reloadTick, subscribeSkillSettings]);
   if (!configReady) {
     return /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { style: S.panel, children: /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { style: S.muted, children: "\u52A0\u8F7D\u4E2D\u2026" }) });
   }
@@ -1322,12 +1372,12 @@ function SkillManagerCard({ scope, uiWorkspace }) {
     if (!touched) setDraft(current);
   }, [current, touched]);
   const dirty = touched && draft !== current;
-  const reject = (e) => ({
-    message: e && e.message ? e.message : "\u4FDD\u5B58\u5931\u8D25",
+  const reject = (message, code) => ({
+    message,
     prompt: buildRepairPrompt({
       root: current,
-      code: "settings-validation-rejected",
-      message: e && e.message ? e.message : "",
+      code,
+      message,
       repair: settingsRejectedRepair("skillsDir", draft.trim(), current, current)
     })
   });
@@ -1335,14 +1385,20 @@ function SkillManagerCard({ scope, uiWorkspace }) {
     if (!ready) return;
     setBusy(true);
     setFailed(null);
+    const attempted = draft.trim();
     try {
-      await scope.set("skillsDir", draft.trim());
+      await scope.set("skillsDir", attempted);
       const fresh = scope.getSnapshot();
       const v = fresh.value && typeof fresh.value === "object" ? fresh.value : {};
-      setDraft(typeof v.skillsDir === "string" ? v.skillsDir : "");
-      setTouched(false);
+      const committed = typeof v.skillsDir === "string" ? v.skillsDir : "";
+      if (committed !== attempted) {
+        setFailed(reject(`\u4FDD\u5B58\u88AB Host \u6821\u9A8C\u62D2\u7EDD\uFF0C\u5DF2\u56DE\u6EDA\u4E3A\u300C${committed || "\u672A\u914D\u7F6E"}\u300D\uFF08\u975E\u7A7A\u76EE\u5F55\u5FC5\u987B\u662F\u7EDD\u5BF9\u8DEF\u5F84\uFF09\u3002`, "settings-validation-rejected"));
+      } else {
+        setDraft(committed);
+        setTouched(false);
+      }
     } catch (e) {
-      setFailed(reject(e));
+      setFailed(reject(`\u5199\u5165\u5931\u8D25\uFF08\u8BF7\u6C42\u672A\u8FBE Host\uFF09\uFF1A${e?.message ?? String(e)}`, "settings-write-failed"));
     } finally {
       setBusy(false);
     }
@@ -1363,7 +1419,7 @@ function SkillManagerCard({ scope, uiWorkspace }) {
       setDraft(typeof v.skillsDir === "string" ? v.skillsDir : "");
       setTouched(false);
     } catch (e) {
-      setFailed(reject(e));
+      setFailed(reject(`\u91CD\u7F6E\u5931\u8D25\uFF08\u8BF7\u6C42\u672A\u8FBE Host\uFF09\uFF1A${e?.message ?? String(e)}`, "settings-write-failed"));
     } finally {
       setBusy(false);
     }
@@ -1486,11 +1542,19 @@ function apply(ctx) {
   const workspaces = ctx.workspaces;
   const uiWorkspace = ctx.uiWorkspace;
   const scope = ctx.settingsScope.bind({ namespace: "skill-manager" });
+  const settingsListeners = /* @__PURE__ */ new Set();
+  const subscribeSkillSettings = (fn) => {
+    settingsListeners.add(fn);
+    return () => settingsListeners.delete(fn);
+  };
+  const bumpSkillSettings = () => {
+    for (const fn of [...settingsListeners]) fn();
+  };
   ctx.effect(() => {
     const offSection = ctx.slots.inject(
       "settings.section",
       () => ctx.slots.register(
-        { name: "settings.section", id: "skills", order: 16, label: "\u6280\u80FD", inject: () => ({ call, workspaces, scope }) },
+        { name: "settings.section", id: "skills", order: 16, label: "\u6280\u80FD", inject: () => ({ call, workspaces, scope, subscribeSkillSettings }) },
         SkillsSection
       )
     );

@@ -5,6 +5,12 @@ import { Input } from '@deepseek-ai/dsh-client-ui-primitives'
 import { T, S, badgeStyle, cardStyle, cardTitle, noteText, dotStyle, subCardStyle } from './theme.js'
 import { GhostBtn, OutlineBtn, PrimaryBtn, ErrorLine, NoticeBar } from './ui.jsx'
 
+/**
+ * 搜索视图（settings.section 内页签组件）。
+ * @param {object} props
+ * @param {(endpoint: string, payload?: object) => Promise<unknown>} props.call RPC 门面
+ * @param {() => void} props.reload 入库成功后重读 overview
+ */
 export function SearchView({ call, reload }) {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState(null)
@@ -102,8 +108,9 @@ export function SearchView({ call, reload }) {
         />
         <PrimaryBtn onClick={doSearch} disabled={busy || !query.trim()}>{busy ? '搜索中…' : '搜索'}</PrimaryBtn>
       </div>
-      {/* 直接添加 = 探测仓库（DSR-007）；多候选交给候选列表选择 */}
-      <DirectAdd call={call} reload={reload} busy={busy} setBusy={setBusy} setError={setError} onCandidates={showCandidates} onAdded={() => setNotice('已入库')} />
+      {/* 直接添加 = 探测仓库（DSR-007）；多候选交给候选列表选择。notice 必须是
+          {tone,text} 形状——NoticeBar 按对象字段渲染，裸字符串会渲染成空反馈条。 */}
+      <DirectAdd call={call} reload={reload} busy={busy} setBusy={setBusy} setError={setError} onCandidates={showCandidates} onAdded={() => setNotice({ tone: 'ok', text: '已入库' })} />
       {error ? <ErrorLine error={error} /> : null}
       {notice ? <NoticeBar notice={notice} /> : null}
       {candidates && (

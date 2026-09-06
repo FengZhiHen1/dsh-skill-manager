@@ -90,8 +90,7 @@ test('remove：仅限 github 登记；自研/本地目录无删除入口；missi
 
 // ---- 备份列表（目录事实源） ----
 
-test('backups：以目录实际内容为准；无 meta 备份仍展示（has_meta=false，名字回退 id）', async () => {
-  const backupsRoot = await mkTmp()
+test('backups：以目录实际内容为准；无 meta 备份仍展示（has_meta=false，名字回退 id）', async () => {  const backupsRoot = await mkTmp()
   try {
     const withMeta = join(backupsRoot, 'pdf-20260820000000000')
     await mkdir(withMeta, { recursive: true })
@@ -105,6 +104,26 @@ test('backups：以目录实际内容为准；无 meta 备份仍展示（has_met
     assert.equal(byId['pdf-20260820000000000'].time, '2026-08-20T00:00:00.000Z')
     assert.equal(byId['mine-20260821000000000'].has_meta, false)
     assert.equal(byId['mine-20260821000000000'].name, 'mine')
+  } finally {
+    await cleanup(backupsRoot)
+  }
+})
+
+test('backups：meta 损坏（JSON 无效/形状非法）→ meta_corrupt=true 仍降级展示，不抛', async () => {
+  const backupsRoot = await mkTmp()
+  try {
+    const broken = join(backupsRoot, 'pdf-20260820000000000')
+    await mkdir(broken, { recursive: true })
+    await writeFile(join(broken, '_backup_meta.json'), '{ 这不是 JSON', 'utf8')
+    const shaped = join(backupsRoot, 'arr-20260820000000000')
+    await mkdir(shaped, { recursive: true })
+    await writeFile(join(shaped, '_backup_meta.json'), '[]', 'utf8')
+    const list = await backups({ backupsRoot })
+    const byId = Object.fromEntries(list.map((b) => [b.id, b]))
+    assert.equal(byId['pdf-20260820000000000'].has_meta, false)
+    assert.equal(byId['pdf-20260820000000000'].meta_corrupt, true)
+    assert.equal(byId['pdf-20260820000000000'].name, 'pdf') // 名字仍回退 id 剥时间戳
+    assert.equal(byId['arr-20260820000000000'].meta_corrupt, true)
   } finally {
     await cleanup(backupsRoot)
   }
@@ -175,6 +194,30 @@ test('restore：无 meta / self / local 快照 = 本地文件恢复不登记；�
     await writeFile(join(clash, '_backup_meta.json'), JSON.stringify({ name: 'pdf' }), 'utf8')
     await writeSkill(root, 'pdf')
     await assertRejectsCode(restore({ root, store, id: 'pdf-20260820000000002', backupsRoot, ctx: stubCtx() }), 'name-conflict')
+  } finally {
+    await cleanup(root)
+    await cleanup(backupsRoot)
+  }
+})
+
+test('restore：meta 损坏/形状非法 → backup-meta-invalid 硬拒（类型无法判定不静默恢复，无副作用）', async () => {
+  const root = await mkTmp()
+  const backupsRoot = await mkTmp()
+  try {
+    const store = fakeStore()
+    const broken = join(backupsRoot, 'pdf-20260820000000000')
+    await mkdir(broken, { recursive: true })
+    await writeFile(join(broken, 'SKILL.md'), '---\nname: pdf\n---\n', 'utf8')
+    await writeFile(join(broken, '_backup_meta.json'), '{ 这不是 JSON', 'utf8')
+    await assertRejectsCode(restore({ root, store, id: 'pdf-20260820000000000', backupsRoot, ctx: stubCtx() }), 'backup-meta-invalid')
+
+    const shaped = join(backupsRoot, 'arr-20260820000000000')
+    await mkdir(shaped, { recursive: true })
+    await writeFile(join(shaped, '_backup_meta.json'), '[]', 'utf8')
+    await assertRejectsCode(restore({ root, store, id: 'arr-20260820000000000', backupsRoot, ctx: stubCtx() }), 'backup-meta-invalid')
+
+    assert.equal(store.getSkill('pdf'), undefined) // 硬拒不留部分状态
+    await assert.rejects(readFile(join(root, 'pdf', 'SKILL.md'), 'utf8'))
   } finally {
     await cleanup(root)
     await cleanup(backupsRoot)

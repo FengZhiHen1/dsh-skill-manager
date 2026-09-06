@@ -54,7 +54,8 @@ export function toTransportError(error, endpoint, budgetMs = API_TIMEOUT_MS) {
 /**
  * 创建调用门面（旧 fetch('/skill-manager/api') 信封通道的替代品）。
  * @param {{ connection: { rpc: { call: Function } } }} ctx Client 插件上下文（inject 含 connection）
- * @returns {(endpoint: string, payload?: object) => Promise<unknown>} 成功返回 value；失败抛 RpcError
+ * @returns {(endpoint: string, payload?: object) => Promise<unknown>} 成功返回 value
+ * @throws {RpcError} 失败统一抛（业务失败带 code/repair；transport 失败 code='transport'）
  */
 export function createCall(ctx) {
   return async (endpoint, payload = {}) => {

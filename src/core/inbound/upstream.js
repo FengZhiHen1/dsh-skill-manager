@@ -1,12 +1,12 @@
 // dsh-skill-manager — 上游检查与更新（入站操作.md；DSR-015 inbound 层）。
-// 自原 lib/inbound.js 搬位（P1，逻辑未动）。解包原语在 zipball.js。
+// 自原 lib/inbound.js 搬位（P1）。解包与临时目录生命周期在 zipball.js
+// （withMaterializedSkillDir 保证失败不漏 tmp）。
 
-import { rm } from 'node:fs/promises'
 import { SkillManagerError } from '../base/errors.js'
 import { fetchZipball, remoteHead } from '../base/net.js'
 import { atomicSwapDir, safePath } from '../base/fsys.js'
 import { dirHash } from '../model/library.js'
-import { copyTree, materializeSkillDir, nowIso, pathExists } from './zipball.js'
+import { copyTree, nowIso, pathExists, withMaterializedSkillDir } from './zipball.js'
 
 /**
  * 目录哈希门面：显式传入 hash（生产为带 TTL 缓存的 hashOf）时走它；
@@ -50,6 +50,7 @@ async function mergeCheckCache(store, results, checkedAt = nowIso()) {
  * 单 skill 网络异常降级为该条 check_failed，不再拖垮整批。
  * 同 repo 同分支只探测一次上游（多目录仓库省网络往返），结果广播给各成员。
  * @param {Function} [hash] 目录哈希门面（hashOf）；缺省新鲜直算
+ * Side Effects: 检查结果逐条写 check_cache（mergeCheckCache）。
  */
 export async function check({ root, store, names, hash }) {
   const entries = new Map(store.skillEntries())
@@ -123,8 +124,10 @@ export async function check({ root, store, names, hash }) {
 /**
  * 更新（R-10；目录缺失时即使 commit 未变也拉回）。
  * 覆盖发生前由 Host 强制要求确认，避免 UI 外的 API 调用绕过风险提示。
+ * Side Effects: 原子换装库目录、写 skills 表与 check_cache、changed 时触发对账。
+ * @throws {SkillManagerError} local-changes-confirmation-required — 检出本地修改且未显式确认
  */
-export async function update({ root, store, names, confirmLocalChanges = false, ctx, hash }) {
+export async function update({ root, store, names, confirmLocalChanges = false, ctx, hash }) { // quality-floor: ignore docstring-promise 函数体确有 throw SkillManagerError（local-changes-confirmation-required）；扫描器将参数解构花括号配误作函数体起点致漏看
   const entries = new Map(store.skillEntries())
   const targets = names && names.length > 0 ? names : [...entries.keys()]
   const localChanges = []
@@ -167,18 +170,18 @@ export async function update({ root, store, names, confirmLocalChanges = false, 
     }
     const dest = safePath(root, name)
     if (await pathExists(dest) && head.sha === entry.commit) {
-      results.push({ name, status: 'skipped', reason: '已是最新' })
+      // upToDate 是结构化标志：缓存回填写判定不依赖 reason 文案
+      results.push({ name, status: 'skipped', reason: '已是最新', upToDate: true })
       continue
     }
     try {
       const payload = await fetchZipball(entry.repo, entry.branch)
-      // strict：记录的 path_in_repo 失效时报 path-stale + 候选（入站操作.md）
-      const { tmp } = await materializeSkillDir(payload, entry.path_in_repo ?? undefined, true)
       // 覆盖语义（原子换装，DSR-017/入站操作.md）：新版在临时位置构建完成并
       // 校验后 rename 交换替换旧目录，再清理旧目录；不存在删旧后重写的半写窗口。
-      await atomicSwapDir(dest, async (stage) => {
-        await copyTree(tmp, stage)
-        await rm(tmp, { recursive: true, force: true })
+      // strict：记录的 path_in_repo 失效时报 path-stale + 候选（入站操作.md）；
+      // 临时目录清理由 withMaterializedSkillDir 的 finally 保证（失败不漏 tmp）。
+      await withMaterializedSkillDir(payload, entry.path_in_repo ?? undefined, true, async ({ tmp }) => {
+        await atomicSwapDir(dest, (stage) => copyTree(tmp, stage))
       })
 
       await store.putSkill(name, {
@@ -209,7 +212,7 @@ export async function update({ root, store, names, confirmLocalChanges = false, 
         current: r.commit, latest: r.commit, status: 'up_to_date', via: r.via,
         updatable: false, reachable: true, locally_modified: false, baseline_missing: false, missing: false,
       })
-    } else if (r.status === 'skipped' && r.reason === '已是最新') {
+    } else if (r.status === 'skipped' && r.upToDate === true) {
       cacheEntries.push({
         name: r.name, repo: entry?.repo, branch: entry?.branch,
         current: entry?.commit ?? null, latest: entry?.commit ?? null, status: 'up_to_date',

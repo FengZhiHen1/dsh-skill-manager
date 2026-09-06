@@ -6,12 +6,20 @@
 // 实现取舍：相比设计文档初稿的 fflate 依赖，零依赖方案免去 pnpm 安装链，
 // 与仓库既有零依赖插件风格（dsh-guardrails）一致；GitHub zipball 为标准
 // deflate ZIP，本读取器足以覆盖。若未来需要 zip64/加密/分卷，再换库。
+// 错误协议：结构损坏/不支持形态一律抛 SkillManagerError('bad-zipball')，
+// 经 dispatch 落码表模板（REPAIR_META['bad-zipball']）。
 
 import { inflateRawSync } from 'node:zlib'
+import { SkillManagerError } from './errors.js'
 
 const EOCD_SIG = 0x06054b50
 const CEN_SIG = 0x02014b50
 const LOC_SIG = 0x04034b50
+
+/** 结构损坏 → 统一 bad-zipball（消息保留原诊断文本）。 */
+function badZip(detail) {
+  return new SkillManagerError('bad-zipball', `ZIP 结构异常：${detail}`)
+}
 
 /** 在尾部 64KB+22 字节内反向查找 EOCD（容忍任意长度注释）。 */
 function findEocd(buffer) {
@@ -19,13 +27,14 @@ function findEocd(buffer) {
   for (let i = buffer.length - 22; i >= start; i -= 1) {
     if (buffer.readUInt32LE(i) === EOCD_SIG) return i
   }
-  throw new Error('ZIP 结构异常：找不到中央目录结束标记')
+  throw badZip('找不到中央目录结束标记')
 }
 
 /**
  * 解包 ZIP 字节流。
  * @param {Buffer} buffer
  * @returns {Record<string, Buffer>} 文件名（正斜杠相对路径）→ 内容。
+ * @throws {SkillManagerError} bad-zipball — 中央目录缺失/越界/条目损坏/压缩方法不支持
  */
 export function unzip(buffer) {
   const eocd = findEocd(buffer)
@@ -34,13 +43,13 @@ export function unzip(buffer) {
   const cenOffset = buffer.readUInt32LE(eocd + 16)
   if (count === 0) return {}
   const cenEnd = cenOffset + cenSize
-  if (cenEnd > buffer.length) throw new Error('ZIP 结构异常：中央目录越界')
+  if (cenEnd > buffer.length) throw badZip('中央目录越界')
 
   const entries = new Map()
   let pos = cenOffset
   for (let i = 0; i < count; i += 1) {
     if (pos + 46 > cenEnd || buffer.readUInt32LE(pos) !== CEN_SIG) {
-      throw new Error('ZIP 结构异常：中央目录条目损坏')
+      throw badZip('中央目录条目损坏')
     }
     const method = buffer.readUInt16LE(pos + 10)
     const compressedSize = buffer.readUInt32LE(pos + 24) // 中央目录偏移 24 是压缩尺寸（20 是未压缩尺寸）
@@ -61,7 +70,7 @@ export function unzip(buffer) {
 
 function readEntryBody(buffer, localOffset, method, compressedSize) {
   if (localOffset + 30 > buffer.length || buffer.readUInt32LE(localOffset) !== LOC_SIG) {
-    throw new Error('ZIP 结构异常：本地文件头损坏')
+    throw badZip('本地文件头损坏')
   }
   const nameLen = buffer.readUInt16LE(localOffset + 26)
   const extraLen = buffer.readUInt16LE(localOffset + 28)
@@ -69,5 +78,5 @@ function readEntryBody(buffer, localOffset, method, compressedSize) {
   const data = buffer.subarray(dataStart, dataStart + compressedSize)
   if (method === 0) return Buffer.from(data)
   if (method === 8) return inflateRawSync(data)
-  throw new Error(`ZIP 条目使用了不支持的压缩方法 ${method}`)
+  throw badZip(`条目使用了不支持的压缩方法 ${method}`)
 }

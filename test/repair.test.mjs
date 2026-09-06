@@ -14,7 +14,7 @@ const STABLE_CODES = [
   'bad-name', 'bad-path', 'bad-repo', 'bad-group-name', 'bad-zipball',
   'name-conflict', 'needs-selection', 'no-skill-md', 'not-found',
   'not-removable', 'already-installed', 'path-stale', 'remote-unreachable',
-  'target-occupied', 'wrong-target', 'write-failed',
+  'target-occupied', 'wrong-target', 'write-failed', 'backup-meta-invalid',
   'local-changes-confirmation-required',
   'not_found', 'http_error', 'rate_limited', 'unreachable',
   'unknown-endpoint',

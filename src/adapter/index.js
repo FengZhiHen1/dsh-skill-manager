@@ -63,6 +63,9 @@ export default {
     })
 
     // storage 域（单实例打开；apply 同步返回，域异步就绪。失败仅降级 API，不拖垮 Host）。
+    // 关闭经 async disposer 挂进 fiber dispose 并 await：fiber 从 UNLOADING 推进到
+    // DISPOSED 前会等 Promise disposer 结算——保证重载/依赖重启时旧域先关，
+    // 新 apply 的 openStore 不会撞 already-open（与迁移先行同一时序纪律）。
     let store = null
     let storeError = null
     const storeReady = migratePromise
@@ -80,8 +83,13 @@ export default {
       if (store === null) throw storeError ?? new Error('storage 域尚未就绪')
       return store
     }
-    ctx.effect(() => () => {
-      void storeReady.then((opened) => opened?.close())
+    ctx.effect(() => async () => {
+      const opened = await storeReady
+      try {
+        await opened?.close()
+      } catch (error) {
+        ctx.logger?.warn?.(`dsh-skill-manager: storage 域关闭失败：${error?.message ?? String(error)}`)
+      }
     }, 'dsh-skill-manager: close storage domain')
 
     // 备份树根（$DSH_HOME/skill-manager/backups/）。
@@ -116,6 +124,8 @@ export default {
     })
 
     // 启动预热：配置过目录时延迟 1s 后台扫一次并缓存 health，首次打开设置页秒出。
+    // 预热失败静默是可接受降级：冷扫兜底由首次真实读承担，错误面在 overview
+    // 自有 Result 里呈现，启动期无需日志噪声。
     const warmTimer = setTimeout(() => {
       void api.warm().catch(() => {})
     }, 1000)

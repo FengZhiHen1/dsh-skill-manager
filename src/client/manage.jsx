@@ -3,7 +3,7 @@
 import { useState, useMemo } from 'react'
 import { Input, Pill } from '@deepseek-ai/dsh-client-ui-primitives'
 import { T, S, badgeStyle, cardStyle, cardTitle, noteText, dotStyle, sectionHead, statusPillStyle } from './theme.js'
-import { GhostBtn, OutlineBtn, PrimaryBtn, ErrorLine, NoticeBar, RowMenu, UpdateConfirmationDialog, ModalShell } from './ui.jsx'
+import { GhostBtn, OutlineBtn, PrimaryBtn, ErrorLine, NoticeBar, RowMenu, UpdateConfirmationDialog, ConfirmDialog, ModalShell } from './ui.jsx'
 import { buildRepairPrompt, RepairCopy, mountIssueRepair } from './repair.jsx'
 
 const ORIGIN_LABEL = { github: 'GitHub', local: '本地', self: '自研' }
@@ -17,6 +17,17 @@ function targetLabel(target, workspaces) {
   return ws ? ws.title : `工作区 ${id.slice(0, 8)}…`
 }
 
+/**
+ * 管理视图（插件运行时.md「视图设计·管理视图」）：分组优先两段式——
+ * 上段组胶囊选择 + 当前组使用范围（settings 直写即时生效），下段技能库行
+ * （过滤纯前端零请求；状态徽章来自 overview 走查；⋯ 菜单按来源分化；
+ * 出库/删组/取消挂载/覆盖更新等破坏性动作一律遮罩确认，DSR-018 失败带复制入口）。
+ * @param {object} props
+ * @param {Function} props.call RPC 门面
+ * @param {object} props.data overview 聚合（root/lib/health/workspaces）
+ * @param {object} props.config 配置意图读写门面（SkillsSection 组装）
+ * @param {() => void} props.reload 重读 overview
+ */
 export function ManageView({ call, data, config, reload }) {
   const [origin, setOrigin] = useState('')
   const [groupFilter, setGroupFilter] = useState('默认')
@@ -25,6 +36,8 @@ export function ManageView({ call, data, config, reload }) {
   const [error, setError] = useState(null)
   const [notice, setNotice] = useState(null)
   const [pendingUpdate, setPendingUpdate] = useState(null)
+  const [pendingRemove, setPendingRemove] = useState(null) // { name }：出库遮罩确认
+  const [pendingGroupDelete, setPendingGroupDelete] = useState(null) // 组名：删组遮罩确认
   const [menuFor, setMenuFor] = useState(null)
   const [createOpen, setCreateOpen] = useState(false)
   const [expandedMount, setExpandedMount] = useState(null)
@@ -76,6 +89,8 @@ export function ManageView({ call, data, config, reload }) {
     // 配置层操作（禁用/启用）：settings 直写，本地即时生效（0 延迟），Host 对账器后台收敛
     if (action === 'disable') { setSkillDisabled(name, true); return }
     if (action === 'enable') { setSkillDisabled(name, false); return }
+    // 出库先过遮罩确认（与更新/取消挂载同一对话框语言）；确认后带 confirmed 重入执行
+    if (action === 'remove' && payload.confirmed !== true) { setPendingRemove({ name }); return }
     setBusy(true)
     setError(null)
     setNotice(null)
@@ -100,7 +115,6 @@ export function ManageView({ call, data, config, reload }) {
         else if (it) setNotice({ tone: 'warn', text: `${name} 更新未完成（${it.status}）：${it.reason || it.error || '未返回原因'}` })
         else setNotice({ tone: 'warn', text: `${name}：更新结果未含该条目，请点「↻ 刷新」核对行状态` })
       } else if (action === 'remove') {
-        if (!window.confirm(`确认出库 ${name}？删除前自动备份到 DSH HOME 备份区（自有目录无删除入口）。`)) return
         const r = await call('remove', { name })
         setNotice({ tone: 'ok', text: r.backup ? `${name} 已出库，备份于 ${r.backup}` : `${name} 已出库（目录本已缺失，无物可备）` })
       }
@@ -157,13 +171,18 @@ export function ManageView({ call, data, config, reload }) {
   }
   const groupOp = (action, name, newName) => {
     if (action === 'delete') {
-      if (!window.confirm(`删除组 ${name}？成员将回落「默认」组`)) return
-      deleteGroup(name)
-      if (groupFilter === name) setGroupFilter('默认')
+      setPendingGroupDelete(name) // 删组波及成员归属与挂载规则，走遮罩确认（不用 window.confirm）
     } else if (action === 'rename') {
       renameGroup(name, newName)
       if (groupFilter === name && newName) setGroupFilter(newName)
     }
+  }
+  const confirmDeleteGroup = () => {
+    const name = pendingGroupDelete
+    setPendingGroupDelete(null)
+    if (!name) return
+    deleteGroup(name)
+    if (groupFilter === name) setGroupFilter('默认')
   }
   // DSR-009：新建成功后跳到新组，便于立即配置它的使用范围；拒绝（撞名）时错误条已上屏，不再假装成功。
   const doCreateGroup = (name) => {
@@ -320,6 +339,31 @@ export function ManageView({ call, data, config, reload }) {
             setPendingUpdate(null)
             rowAction(name, 'update', { confirmLocalChanges: true })
           }}
+        />
+      )}
+      {pendingRemove && (
+        <ConfirmDialog
+          title={`出库「${pendingRemove.name}」？`}
+          body="仅 GitHub 来源的 Skill 可出库（自研/本地目录无删除入口，在技能目录内自管）。"
+          warning="执行顺序：先把整目录自动备份到 DSH HOME 备份区 → 摘除全部挂载链接 → 删除库内目录 → 清理登记与检查缓存。settings 里的分组归属不随出库消失，重新入库自然落回原组。"
+          confirmLabel="确认出库"
+          busy={busy}
+          onCancel={() => setPendingRemove(null)}
+          onConfirm={() => {
+            const name = pendingRemove.name
+            setPendingRemove(null)
+            rowAction(name, 'remove', { confirmed: true })
+          }}
+        />
+      )}
+      {pendingGroupDelete && (
+        <ConfirmDialog
+          title={`删除分组「${pendingGroupDelete}」？`}
+          body={`该组当前 ${countForGroup(pendingGroupDelete)} 个成员，删除后成员回落「默认」组。`}
+          warning="不删除任何 Skill 文件；但该组的挂载规则随之移除，按此规则挂出去的链接会在对账时被摘除（回落「默认」组的规则）。"
+          confirmLabel="确认删除分组"
+          onCancel={() => setPendingGroupDelete(null)}
+          onConfirm={confirmDeleteGroup}
         />
       )}
     </div>

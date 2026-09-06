@@ -23,7 +23,10 @@ export function globalRoot(globalRootPath) {
   return join('~', '.dsh', 'skills')
 }
 
-/** 活动工作区投影 → { workspaceId -> {workspaceId, title, path} }（重复/缺段以 workspace-unavailable 拒绝）。 */
+/**
+ * 活动工作区投影 → { workspaceId -> {workspaceId, title, path} }。
+ * @throws {SkillManagerError} workspace-unavailable — 条目缺 id/path 或重复 id（注册表异常形状）
+ */
 export function projectWorkspaces(list) {
   const byId = new Map()
   for (const ws of Array.isArray(list) ? list : []) {
