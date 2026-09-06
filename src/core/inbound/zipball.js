@@ -134,8 +134,7 @@ export async function withMaterializedSkillDir(payload, subdir, strict, fn) {
     return await fn({ tmp, dir })
   } finally {
     // 清理失败不得遮蔽在途的业务错误（finally 抛出会替换原异常）。
-    await rm(tmp, { recursive: true, force: true }).catch(() => {
-      // tmp 残留归系统临时目录清理范畴，不阻断调用方
+    await rm(tmp, { recursive: true, force: true }).catch(() => { // quality-floor: ignore silent-catch 清理失败不得遮蔽在途业务错误，tmp 残留归系统临时目录清理范畴
     })
   }
 }

@@ -82,6 +82,10 @@ function needOneOf(v, path, allowed) {
 function opt(v, path, check) {
   if (v !== void 0) check(v, path);
 }
+function parseTargetKey(key) {
+  const m = /^(dsh|pi):(global|project)\|(.+)$/.exec(String(key));
+  return m === null ? null : { host: m[1], scope: m[2], project: m[3] };
+}
 function checkRecordShape(r, path) {
   needObj(r, path);
   needStr(r.checked_at, `${path}.checked_at`);
@@ -176,6 +180,10 @@ var PARSERS = {
       needStr(issue.issue, `${path}.health.issues[${i}].issue`);
     });
     needArr(v.workspaces, `${path}.workspaces`).forEach((ws, i) => workspaceShape(ws, `${path}.workspaces[${i}]`));
+    needObj(v.agents, `${path}.agents`);
+    needObj(v.agents.pi, `${path}.agents.pi`);
+    needBool(v.agents.pi.available, `${path}.agents.pi.available`);
+    needStrOrNull(v.agents.pi.skillsRoot, `${path}.agents.pi.skillsRoot`);
   },
   warm(v, path) {
     needObj(v, path);
@@ -778,11 +786,12 @@ var ORIGIN_OPTIONS = [
   { id: "self", label: "\u81EA\u7814/\u672C\u5730" }
 ];
 function targetLabel(target, workspaces) {
-  if (typeof target !== "string") return String(target ?? "\u2014");
-  if (target.startsWith("global|")) return "DSH \u5168\u5C40";
-  const id = target.slice("project|".length);
-  const ws = workspaces.find((w) => w.workspaceId === id);
-  return ws ? ws.title : `\u5DE5\u4F5C\u533A ${id.slice(0, 8)}\u2026`;
+  const p = typeof target === "string" ? parseTargetKey(target) : null;
+  if (!p) return String(target ?? "\u2014");
+  if (p.scope === "global") return p.host === "pi" ? "pi \u7528\u6237\u7EA7" : "DSH \u5168\u5C40";
+  const ws = workspaces.find((w) => w.workspaceId === p.project);
+  const base = ws ? ws.title : `\u5DE5\u4F5C\u533A ${p.project.slice(0, 8)}\u2026`;
+  return p.host === "pi" ? `${base} \xB7 pi` : base;
 }
 function primaryStatus(it) {
   const mountIssues = it.mount.filter((row) => row.issue && row.issue !== "ok");
@@ -970,7 +979,7 @@ function ManageView({ call, data, config, reload }) {
         groupFilter === "" ? /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { ...cardStyle, padding: "12px 14px" }, children: [
           /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: cardTitle, children: "\u5F53\u524D\u67E5\u770B\uFF1A\u5168\u90E8\u6280\u80FD" }),
           /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { ...noteText, marginTop: 4 }, children: "\u9009\u62E9\u5DE6\u4FA7\u5206\u7EC4\uFF0C\u53EF\u914D\u7F6E\u5B83\u5728 DSH \u5168\u5C40\u4E0E\u5404\u5DE5\u4F5C\u533A\u7684\u53EF\u7528\u8303\u56F4\u3002" })
-        ] }) : /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(GroupScopePanel, { config, group: groupFilter, workspaces: data.workspaces, skills: data.lib.skills, onGroupOp: groupOp }),
+        ] }) : /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(GroupScopePanel, { config, group: groupFilter, workspaces: data.workspaces, skills: data.lib.skills, onGroupOp: groupOp, piAvailable: data.agents?.pi?.available === true }),
         warningLines.map((w) => /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { ...badgeStyle(T.warn), borderRadius: 10, padding: "9px 12px", margin: "8px 0", fontSize: 12, display: "flex", alignItems: "center", gap: 8 }, children: [
           /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: dotStyle(T.warn) }),
           /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: { flex: 1 }, children: w.text }),
@@ -1153,7 +1162,7 @@ function GroupNav({ groups, selected, total, countForGroup, onSelect, onCreate }
     ] })
   ] });
 }
-function ScopeRow({ checked, title, hint, count, onToggle }) {
+function ScopeRow({ checked, title, hint, count, onToggle, trailing }) {
   const [hover, setHover] = (0, import_react3.useState)(false);
   return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(
     "label",
@@ -1165,8 +1174,33 @@ function ScopeRow({ checked, title, hint, count, onToggle }) {
         /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("input", { type: "checkbox", checked, onChange: (event) => onToggle(event.target.checked), style: { accentColor: T.brand, width: 13, height: 13, margin: 0, flex: "none" } }),
         /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: { fontWeight: 500, color: T.labelPrimary, flex: "none" }, children: title }),
         hint ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: { ...noteText, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: hint, children: hint }) : /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: { flex: 1 } }),
-        count > 0 ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: { ...pillBase, flex: "none" }, children: `${count} \u4E2A\u7EC4\u4F7F\u7528` }) : null
+        count > 0 ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: { ...pillBase, flex: "none" }, children: `${count} \u4E2A\u7EC4\u4F7F\u7528` }) : null,
+        trailing || null
       ]
+    }
+  );
+}
+function HostChip({ label, active, onToggle, title }) {
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+    "button",
+    {
+      type: "button",
+      title,
+      onClick: (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        onToggle(!active);
+      },
+      style: {
+        ...pillBase,
+        border: "none",
+        font: "inherit",
+        fontSize: 10,
+        padding: "0 7px",
+        cursor: "pointer",
+        ...active ? { background: `color-mix(in srgb, ${T.brand} 16%, transparent)`, color: T.labelPrimary, fontWeight: 500 } : { background: T.bgModulePlatform, color: T.labelTertiary }
+      },
+      children: label
     }
   );
 }
@@ -1214,34 +1248,59 @@ function CreateGroupDialog({ onCancel, onCreate }) {
     ] })
   ] });
 }
-function GroupScopePanel({ config, group, workspaces, skills, onGroupOp }) {
+function GroupScopePanel({ config, group, workspaces, skills, onGroupOp, piAvailable = false }) {
   const [renaming, setRenaming] = (0, import_react3.useState)(false);
   const [newName, setNewName] = (0, import_react3.useState)("");
   const [opsOpen, setOpsOpen] = (0, import_react3.useState)(false);
   const [showAllWs, setShowAllWs] = (0, import_react3.useState)(false);
   const [wsFilter, setWsFilter] = (0, import_react3.useState)("");
   const [pendingUnmount, setPendingUnmount] = (0, import_react3.useState)(null);
-  const { groups, toggleMount } = config;
+  const { groups, toggleMount, toggleHost } = config;
   const mounts = groups[group] && groups[group].mounts || [];
-  const enabled = (scopeKind, workspaceId) => mounts.some((mount) => mount.scope === scopeKind && (scopeKind === "global" || mount.project === workspaceId));
+  const findMount = (scopeKind, workspaceId) => mounts.find((mount) => mount.scope === scopeKind && (scopeKind === "global" || mount.project === workspaceId));
+  const enabled = (scopeKind, workspaceId) => Boolean(findMount(scopeKind, workspaceId));
+  const hostsOf = (scopeKind, workspaceId) => {
+    const m = findMount(scopeKind, workspaceId);
+    if (!m) return [];
+    return Array.isArray(m.hosts) && m.hosts.length > 0 ? m.hosts : ["dsh"];
+  };
   const effectiveGroup = (skill) => {
     const g = skill.group || "\u9ED8\u8BA4";
     return Object.prototype.hasOwnProperty.call(groups, g) ? g : "\u9ED8\u8BA4";
   };
   const linksOnTarget = (scopeKind, workspaceId) => {
-    const key = scopeKind === "global" ? "global|global" : `project|${workspaceId}`;
-    return skills.filter((s) => effectiveGroup(s) === group && s.targets.includes(key)).length;
+    const base = scopeKind === "global" ? "global|global" : `project|${workspaceId}`;
+    return skills.filter((s) => effectiveGroup(s) === group && (s.targets.includes(`dsh:${base}`) || s.targets.includes(`pi:${base}`))).length;
   };
   const toggle = (scopeKind, workspaceId, checked) => {
     if (!checked) {
       const count = linksOnTarget(scopeKind, workspaceId);
       if (count > 0) {
         const ws = scopeKind === "project" ? workspaces.find((w) => w.workspaceId === workspaceId) : null;
-        setPendingUnmount({ scopeKind, workspaceId, count, targetName: ws ? ws.title : "DSH \u5168\u5C40" });
+        setPendingUnmount({ scopeKind, workspaceId, count, targetName: ws ? ws.title : "\u5168\u5C40", hosts: hostsOf(scopeKind, workspaceId) });
         return;
       }
     }
     toggleMount(group, scopeKind, workspaceId, checked);
+  };
+  const toggleHostChip = (scopeKind, workspaceId, host, on) => {
+    if (on) {
+      toggleHost(group, scopeKind, workspaceId, host, true);
+      return;
+    }
+    if (hostsOf(scopeKind, workspaceId).length <= 1) {
+      toggle(scopeKind, workspaceId, false);
+      return;
+    }
+    toggleHost(group, scopeKind, workspaceId, host, false);
+  };
+  const hostChipsFor = (scopeKind, workspaceId) => {
+    if (!piAvailable || !enabled(scopeKind, workspaceId)) return null;
+    const hosts = hostsOf(scopeKind, workspaceId);
+    return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("span", { style: { display: "inline-flex", gap: 4, flex: "none" }, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(HostChip, { label: "DSH", title: "DSH \u4FA7\u751F\u6548\uFF08\u5168\u5C40\u6839 / \u5DE5\u4F5C\u533A .dsh/skills\uFF09", active: hosts.includes("dsh"), onToggle: (on) => toggleHostChip(scopeKind, workspaceId, "dsh", on) }),
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(HostChip, { label: "pi", title: "pi \u4FA7\u751F\u6548\uFF08pi \u7528\u6237\u7EA7 / \u5DE5\u4F5C\u533A .pi/skills\uFF09", active: hosts.includes("pi"), onToggle: (on) => toggleHostChip(scopeKind, workspaceId, "pi", on) })
+    ] });
   };
   const confirmUnmount = () => {
     toggleMount(group, pendingUnmount.scopeKind, pendingUnmount.workspaceId, false);
@@ -1308,7 +1367,17 @@ ${w.path}`.toLowerCase().includes(wsFilter.trim().toLowerCase())) : showAllWs ? 
     ] }),
     renaming && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { ...noteText, marginBottom: 8 }, children: "\u6539\u540D\u7ACB\u5373\u751F\u6548\uFF1A\u5206\u7EC4\u6210\u5458\u4E0E\u6302\u8F7D\u89C4\u5219\u540C\u6B65\u6539\u540D\uFF0CSkill \u672C\u4F53\u4E0D\u53D7\u5F71\u54CD\u3002" }),
     /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: dividerStyle }),
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { padding: "4px 0" }, children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(ScopeRow, { checked: enabled("global"), title: "DSH \u5168\u5C40", hint: "\u5BF9\u6240\u6709 DSH \u9879\u76EE\u751F\u6548", count: 0, onToggle: (checked) => toggle("global", null, checked) }) }),
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { padding: "4px 0" }, children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+      ScopeRow,
+      {
+        checked: enabled("global"),
+        title: piAvailable ? "\u5168\u5C40" : "DSH \u5168\u5C40",
+        hint: piAvailable ? "DSH \u5168\u5C40\u4E0E pi \u7528\u6237\u7EA7\uFF0C\u6309\u53F3\u4FA7\u5BBF\u4E3B\u9009\u62E9\u751F\u6548\u9762" : "\u5BF9\u6240\u6709 DSH \u9879\u76EE\u751F\u6548",
+        count: 0,
+        onToggle: (checked) => toggle("global", null, checked),
+        trailing: hostChipsFor("global", null)
+      }
+    ) }),
     /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: dividerStyle }),
     workspaces.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { ...S.muted, padding: "8px 0" }, children: "\u5F53\u524D\u6CA1\u6709 DSH \u5DE5\u4F5C\u533A\uFF1B\u8BF7\u5728 DSH \u539F\u751F\u5DE5\u4F5C\u533A\u754C\u9762\u521B\u5EFA\u6216\u6253\u5F00\u9879\u76EE\u3002" }) : /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(import_jsx_runtime3.Fragment, { children: [
       /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { display: "flex", alignItems: "center", gap: 8, padding: "8px 2px 6px" }, children: [
@@ -1325,7 +1394,8 @@ ${w.path}`.toLowerCase().includes(wsFilter.trim().toLowerCase())) : showAllWs ? 
             title: workspace.title,
             hint: workspace.path,
             count: workspace.mountCount,
-            onToggle: (checked) => toggle("project", workspace.workspaceId, checked)
+            onToggle: (checked) => toggle("project", workspace.workspaceId, checked),
+            trailing: hostChipsFor("project", workspace.workspaceId)
           },
           workspace.workspaceId
         )),
@@ -1350,7 +1420,7 @@ ${w.path}`.toLowerCase().includes(wsFilter.trim().toLowerCase())) : showAllWs ? 
         "\u300D\u7684\u6302\u8F7D\uFF1F"
       ] }),
       /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { color: T.labelSecondary, fontSize: 13, lineHeight: 1.55, marginBottom: 12 }, children: `\u8BE5\u5206\u7EC4\u6709 ${pendingUnmount.count} \u4E2A Skill \u6302\u8F7D\u5728\u6B64\u76EE\u6807\u4E0B\uFF0C\u53D6\u6D88\u540E\u5BF9\u8D26\u4F1A\u79FB\u9664\u8FD9\u4E9B\u94FE\u63A5\u3002` }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { borderRadius: 10, padding: "10px 12px", marginBottom: 14, ...badgeStyle(T.warn), fontSize: 12, lineHeight: 1.55 }, children: "\u53EA\u79FB\u9664\u94FE\u63A5\u6307\u9488\uFF0C\u4E0D\u5220\u9664\u6280\u80FD\u5E93\u6587\u4EF6\uFF1B\u91CD\u65B0\u52FE\u9009\u5373\u53EF\u6062\u590D\u6302\u8F7D\u3002" }),
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { borderRadius: 10, padding: "10px 12px", marginBottom: 14, ...badgeStyle(T.warn), fontSize: 12, lineHeight: 1.55 }, children: `\u53EA\u79FB\u9664\u94FE\u63A5\u6307\u9488\uFF0C\u4E0D\u5220\u9664\u6280\u80FD\u5E93\u6587\u4EF6${pendingUnmount.hosts.includes("pi") ? "\uFF1B\u672C\u76EE\u6807\u542B pi \u5BBF\u4E3B\uFF0C.pi/skills \u4E0E pi \u7528\u6237\u7EA7\u94FE\u63A5\u4E00\u5E76\u6458\u9664" : ""}\uFF1B\u91CD\u65B0\u52FE\u9009\u5373\u53EF\u6062\u590D\u6302\u8F7D\u3002` }),
       /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { display: "flex", justifyContent: "flex-end", gap: 8 }, children: [
         /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(OutlineBtn, { onClick: () => setPendingUnmount(null), children: "\u53D6\u6D88" }),
         /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(PrimaryBtn, { onClick: confirmUnmount, children: `\u786E\u8BA4\u79FB\u9664 ${pendingUnmount.count} \u6761\u94FE\u63A5` })
@@ -1633,7 +1703,18 @@ function SkillsSection({ call, workspaces, scope, subscribeSkillSettings }) {
     const key = `${scopeKind}|${workspaceId ?? ""}`;
     const exists = mounts.some((m) => `${m.scope}|${m.project ?? ""}` === key);
     if (exists === checked) return;
-    const next = checked ? [...mounts.filter((m) => `${m.scope}|${m.project ?? ""}` !== key), { scope: scopeKind, project: scopeKind === "project" ? workspaceId : null }] : mounts.filter((m) => `${m.scope}|${m.project ?? ""}` !== key);
+    const next = checked ? [...mounts.filter((m) => `${m.scope}|${m.project ?? ""}` !== key), { scope: scopeKind, project: scopeKind === "project" ? workspaceId : null, hosts: ["dsh"] }] : mounts.filter((m) => `${m.scope}|${m.project ?? ""}` !== key);
+    editConfig("groups", { ...groups, [group]: { ...groups[group], mounts: next } });
+  };
+  const toggleHost = (group, scopeKind, workspaceId, host, on) => {
+    const mounts = groups[group] && groups[group].mounts || [];
+    const key = `${scopeKind}|${workspaceId ?? ""}`;
+    const next = mounts.map((m) => {
+      if (`${m.scope}|${m.project ?? ""}` !== key) return m;
+      const hosts = Array.isArray(m.hosts) && m.hosts.length > 0 ? m.hosts : ["dsh"];
+      const nextHosts = on ? [.../* @__PURE__ */ new Set([...hosts, host])] : hosts.filter((h) => h !== host);
+      return nextHosts.length === 0 ? m : { ...m, hosts: nextHosts };
+    });
     editConfig("groups", { ...groups, [group]: { ...groups[group], mounts: next } });
   };
   const createGroup = (name) => {
@@ -1670,7 +1751,7 @@ function SkillsSection({ call, workspaces, scope, subscribeSkillSettings }) {
     editConfig("groups", nextGroups);
     editConfig("skills", nextSkills);
   };
-  const config = { groups, skillsIntent, intentOf, editConfig, setSkillDisabled, moveSkill, toggleMount, createGroup, renameGroup, deleteGroup };
+  const config = { groups, skillsIntent, intentOf, editConfig, setSkillDisabled, moveSkill, toggleMount, toggleHost, createGroup, renameGroup, deleteGroup };
   const loadSeq = (0, import_react5.useRef)(0);
   const load = () => {
     setError(null);
@@ -1748,13 +1829,17 @@ function ErrorLineWrap({ error, root }) {
 // src/client/card.jsx
 var import_react6 = require("react");
 var import_jsx_runtime6 = require("react/jsx-runtime");
+var FIELDS = [
+  { key: "skillsDir", label: "\u672C\u5730 skills \u76EE\u5F55", placeholder: "\u4F8B\u5982 E:\\Project\\Skills\uFF08\u9ED8\u8BA4\u4E3A\u7A7A = \u672A\u914D\u7F6E\uFF09", hint: "\u7EDD\u5BF9\u8DEF\u5F84\uFF1B\u4FDD\u5B58\u540E\u7ACB\u5373\u751F\u6548\uFF0C\u65E0\u9700\u91CD\u542F\u3002", picker: true },
+  { key: "piAgentDir", label: "pi agent \u76EE\u5F55\uFF08\u53EF\u9009\uFF09", placeholder: "\u7559\u7A7A\u81EA\u52A8\u63A2\u6D4B ~/.pi/agent", hint: "\u63A2\u6D4B\u5230\u5373\u51FA\u73B0 pi \u6302\u8F7D\u5165\u53E3\uFF08\u52FE\u9009\u624D\u751F\u6548\uFF09\uFF1B\u63A2\u6D4B\u4E0D\u5230\u5373\u4E0D\u63A5\u7BA1 pi\u3002", picker: false }
+];
 function SkillManagerCard({ scope, uiWorkspace }) {
   const [open, setOpen] = (0, import_react6.useState)(false);
-  const [draft, setDraft] = (0, import_react6.useState)("");
-  const [touched, setTouched] = (0, import_react6.useState)(false);
+  const [drafts, setDrafts] = (0, import_react6.useState)({ skillsDir: "", piAgentDir: "" });
+  const [touched, setTouched] = (0, import_react6.useState)({});
   const [busy, setBusy] = (0, import_react6.useState)(false);
   const [failed, setFailed] = (0, import_react6.useState)(null);
-  const [focused, setFocused] = (0, import_react6.useState)(false);
+  const [focused, setFocused] = (0, import_react6.useState)(null);
   const [snap, setSnap] = (0, import_react6.useState)(() => scope.getSnapshot());
   (0, import_react6.useEffect)(() => {
     let alive = true;
@@ -1770,78 +1855,88 @@ function SkillManagerCard({ scope, uiWorkspace }) {
   }, [scope]);
   const ready = snap.status === "ready";
   const section = snap.value && typeof snap.value === "object" ? snap.value : {};
-  const current = typeof section.skillsDir === "string" ? section.skillsDir : "";
-  const overridden = Boolean(snap && snap.user && typeof snap.user === "object" && "skillsDir" in snap.user);
+  const user = snap.user && typeof snap.user === "object" ? snap.user : {};
+  const currentOf = (key) => typeof section[key] === "string" ? section[key] : "";
+  const snapValueKey = JSON.stringify([currentOf("skillsDir"), currentOf("piAgentDir")]);
   (0, import_react6.useEffect)(() => {
-    if (!touched) setDraft(current);
-  }, [current, touched]);
-  const dirty = touched && draft !== current;
-  const reject = (message, code) => ({
+    setDrafts((prev) => ({
+      skillsDir: touched.skillsDir ? prev.skillsDir : currentOf("skillsDir"),
+      piAgentDir: touched.piAgentDir ? prev.piAgentDir : currentOf("piAgentDir")
+    }));
+  }, [snapValueKey]);
+  const dirtyKeys = FIELDS.map((f) => f.key).filter((key) => touched[key] && drafts[key] !== currentOf(key));
+  const dirty = dirtyKeys.length > 0;
+  const reject = (key, message, code) => ({
     message,
     prompt: buildRepairPrompt({
-      root: current,
+      root: currentOf("skillsDir"),
       code,
       message,
-      repair: settingsRejectedRepair("skillsDir", draft.trim(), current, current)
+      repair: settingsRejectedRepair(key, (drafts[key] ?? "").trim(), currentOf(key), currentOf("skillsDir"))
     })
   });
   const save = async () => {
     if (!ready) return;
     setBusy(true);
     setFailed(null);
-    const attempted = draft.trim();
     try {
-      await scope.set("skillsDir", attempted);
-      const fresh = scope.getSnapshot();
-      const v = fresh.value && typeof fresh.value === "object" ? fresh.value : {};
-      const committed = typeof v.skillsDir === "string" ? v.skillsDir : "";
-      if (committed !== attempted) {
-        setFailed(reject(`\u4FDD\u5B58\u88AB Host \u6821\u9A8C\u62D2\u7EDD\uFF0C\u5DF2\u56DE\u6EDA\u4E3A\u300C${committed || "\u672A\u914D\u7F6E"}\u300D\uFF08\u975E\u7A7A\u76EE\u5F55\u5FC5\u987B\u662F\u7EDD\u5BF9\u8DEF\u5F84\uFF09\u3002`, "settings-validation-rejected"));
-      } else {
-        setDraft(committed);
-        setTouched(false);
+      for (const key of dirtyKeys) {
+        const attempted = (drafts[key] ?? "").trim();
+        try {
+          await scope.set(key, attempted);
+        } catch (e) {
+          setFailed(reject(key, `\u5199\u5165\u300C${key}\u300D\u5931\u8D25\uFF08\u8BF7\u6C42\u672A\u8FBE Host\uFF09\uFF1A${e?.message ?? String(e)}`, "settings-write-failed"));
+          return;
+        }
+        const fresh = scope.getSnapshot();
+        const v = fresh.value && typeof fresh.value === "object" ? fresh.value : {};
+        const committed = typeof v[key] === "string" ? v[key] : "";
+        if (committed !== attempted) {
+          setFailed(reject(key, `\u300C${key}\u300D\u4FDD\u5B58\u88AB Host \u6821\u9A8C\u62D2\u7EDD\uFF0C\u5DF2\u56DE\u6EDA\u4E3A\u300C${committed || "\u672A\u914D\u7F6E"}\u300D\uFF08\u975E\u7A7A\u5FC5\u987B\u662F\u7EDD\u5BF9\u8DEF\u5F84\uFF09\u3002`, "settings-validation-rejected"));
+          return;
+        }
       }
-    } catch (e) {
-      setFailed(reject(`\u5199\u5165\u5931\u8D25\uFF08\u8BF7\u6C42\u672A\u8FBE Host\uFF09\uFF1A${e?.message ?? String(e)}`, "settings-write-failed"));
+      setDrafts((prev) => ({ ...prev, ...Object.fromEntries(dirtyKeys.map((key) => [key, (prev[key] ?? "").trim()])) }));
+      setTouched({});
     } finally {
       setBusy(false);
     }
   };
   const discard = () => {
     setFailed(null);
-    setDraft(current);
-    setTouched(false);
+    setDrafts((prev) => ({ ...prev, ...Object.fromEntries(dirtyKeys.map((key) => [key, currentOf(key)])) }));
+    setTouched({});
   };
-  const reset = async () => {
+  const reset = async (key) => {
     if (!ready) return;
     setBusy(true);
     setFailed(null);
     try {
-      await scope.unset("skillsDir");
+      await scope.unset(key);
       const fresh = scope.getSnapshot();
       const v = fresh.value && typeof fresh.value === "object" ? fresh.value : {};
-      setDraft(typeof v.skillsDir === "string" ? v.skillsDir : "");
-      setTouched(false);
+      setDrafts((prev) => ({ ...prev, [key]: typeof v[key] === "string" ? v[key] : "" }));
+      setTouched((prev) => ({ ...prev, [key]: false }));
     } catch (e) {
-      setFailed(reject(`\u91CD\u7F6E\u5931\u8D25\uFF08\u8BF7\u6C42\u672A\u8FBE Host\uFF09\uFF1A${e?.message ?? String(e)}`, "settings-write-failed"));
+      setFailed(reject(key, `\u91CD\u7F6E\u300C${key}\u300D\u5931\u8D25\uFF08\u8BF7\u6C42\u672A\u8FBE Host\uFF09\uFF1A${e?.message ?? String(e)}`, "settings-write-failed"));
     } finally {
       setBusy(false);
     }
   };
-  const pickDirectory = async () => {
+  const pickDirectory = async (key) => {
     setBusy(true);
     setFailed(null);
     try {
       const path = await uiWorkspace.pickDirectory();
       if (path) {
-        setDraft(path);
-        setTouched(true);
+        setDrafts((prev) => ({ ...prev, [key]: path }));
+        setTouched((prev) => ({ ...prev, [key]: true }));
       }
     } catch (e) {
       setFailed({
         message: e && e.message ? `\u9009\u62E9\u76EE\u5F55\u5931\u8D25\uFF1A${e.message}` : "\u9009\u62E9\u76EE\u5F55\u5931\u8D25",
         prompt: buildRepairPrompt({
-          root: current,
+          root: currentOf("skillsDir"),
           code: "directory-picker-failed",
           message: e && e.message ? e.message : "",
           repair: null
@@ -1863,7 +1958,7 @@ function SkillManagerCard({ scope, uiWorkspace }) {
         children: [
           /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("span", { style: { flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 4 }, children: [
             /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { style: { fontSize: 15, fontWeight: 600, lineHeight: 1.4, color: T.labelPrimary }, children: "\u6280\u80FD\u7BA1\u7406" }),
-            /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { style: { fontSize: 13, lineHeight: 1.5, color: T.labelTertiary }, children: "\u914D\u7F6E\u672C\u5730 skills \u76EE\u5F55\uFF08\u7EAF skill \u4FDD\u5B58\u76EE\u5F55\uFF0C\u9ED8\u8BA4\u4E3A\u7A7A\u5373\u672A\u914D\u7F6E\uFF09" })
+            /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { style: { fontSize: 13, lineHeight: 1.5, color: T.labelTertiary }, children: "\u914D\u7F6E\u672C\u5730 skills \u76EE\u5F55\u4E0E pi agent \u63A5\u7BA1\uFF08\u9ED8\u8BA4\u4E3A\u7A7A\u5373\u672A\u914D\u7F6E\uFF09" })
           ] }),
           dirty ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { style: { flex: "none", borderRadius: 999, padding: "1px 8px", fontSize: 11, lineHeight: "17px", fontWeight: 500, whiteSpace: "nowrap", background: T.bgModulePlatform, color: T.labelSecondary }, children: "\u672A\u4FDD\u5B58" }) : null,
           ChevronIcon ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(ChevronIcon, { style: { flex: "none", color: T.labelTertiary, transition: "transform .16s", transform: open ? "rotate(180deg)" : void 0 } }) : /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { style: { flex: "none", color: T.labelTertiary, fontSize: 12 }, children: open ? "\u25BE" : "\u25B8" })
@@ -1871,36 +1966,36 @@ function SkillManagerCard({ scope, uiWorkspace }) {
       }
     ),
     open ? /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { style: { borderTop: `1px solid ${T.borderL2}`, margin: "0 16px", paddingBottom: 8 }, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { style: { display: "flex", flexDirection: "column", gap: 6, padding: "12px 0" }, children: [
+      FIELDS.map((field) => /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { style: { display: "flex", flexDirection: "column", gap: 6, padding: "12px 0" }, children: [
         /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { style: { display: "flex", alignItems: "center", gap: 8 }, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("label", { htmlFor: "skill-manager-skills-dir", style: { flex: 1, minWidth: 0, fontSize: 13, fontWeight: 500, lineHeight: 1.5, color: T.labelPrimary }, children: "\u672C\u5730 skills \u76EE\u5F55" }),
-          overridden ? /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("span", { style: { display: "inline-flex", alignItems: "center", gap: 8 }, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("label", { htmlFor: `skill-manager-${field.key}`, style: { flex: 1, minWidth: 0, fontSize: 13, fontWeight: 500, lineHeight: 1.5, color: T.labelPrimary }, children: field.label }),
+          field.key in user ? /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("span", { style: { display: "inline-flex", alignItems: "center", gap: 8 }, children: [
             /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { style: { borderRadius: 999, padding: "1px 8px", fontSize: 11, lineHeight: "17px", whiteSpace: "nowrap", fontWeight: 500, background: T.bgModulePlatform, color: T.labelSecondary }, children: "\u5DF2\u8986\u76D6" }),
-            /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("button", { type: "button", disabled: busy || !ready, onClick: reset, style: { border: "none", background: "none", padding: 0, font: "inherit", fontSize: 12, lineHeight: 1.5, color: T.labelSecondary, cursor: "pointer" }, children: "\u91CD\u7F6E" })
+            /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("button", { type: "button", disabled: busy || !ready, onClick: () => reset(field.key), style: { border: "none", background: "none", padding: 0, font: "inherit", fontSize: 12, lineHeight: 1.5, color: T.labelSecondary, cursor: "pointer" }, children: "\u91CD\u7F6E" })
           ] }) : null
         ] }),
         /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { style: { display: "flex", gap: 8, alignItems: "center" }, children: [
           /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
             "input",
             {
-              id: "skill-manager-skills-dir",
+              id: `skill-manager-${field.key}`,
               type: "text",
-              value: draft,
-              placeholder: "\u4F8B\u5982 E:\\Project\\Skills\uFF08\u9ED8\u8BA4\u4E3A\u7A7A = \u672A\u914D\u7F6E\uFF09",
+              value: drafts[field.key] ?? "",
+              placeholder: field.placeholder,
               onChange: (e) => {
-                setDraft(e.target.value);
-                setTouched(true);
+                setDrafts((prev) => ({ ...prev, [field.key]: e.target.value }));
+                setTouched((prev) => ({ ...prev, [field.key]: true }));
                 setFailed(null);
               },
-              onFocus: () => setFocused(true),
-              onBlur: () => setFocused(false),
-              style: { flex: 1, minWidth: 0, height: 34, padding: "0 12px", border: `1px solid ${focused ? T.brand : T.borderL2}`, borderRadius: 8, background: T.bgLayer3, font: "inherit", fontSize: 13, lineHeight: 1.5, color: T.labelPrimary, outline: "none", boxSizing: "border-box" }
+              onFocus: () => setFocused(field.key),
+              onBlur: () => setFocused(null),
+              style: { flex: 1, minWidth: 0, height: 34, padding: "0 12px", border: `1px solid ${focused === field.key ? T.brand : T.borderL2}`, borderRadius: 8, background: T.bgLayer3, font: "inherit", fontSize: 13, lineHeight: 1.5, color: T.labelPrimary, outline: "none", boxSizing: "border-box" }
             }
           ),
-          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(GhostBtn, { disabled: busy || !ready, onClick: pickDirectory, children: "\u9009\u62E9\u2026" })
+          field.picker ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(GhostBtn, { disabled: busy || !ready, onClick: () => pickDirectory(field.key), children: "\u9009\u62E9\u2026" }) : null
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { style: { margin: 0, fontSize: 12, lineHeight: 1.5, color: T.labelTertiary }, children: "\u7EDD\u5BF9\u8DEF\u5F84\uFF1B\u4FDD\u5B58\u540E\u7ACB\u5373\u751F\u6548\uFF0C\u65E0\u9700\u91CD\u542F\u3002" })
-      ] }),
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { style: { margin: 0, fontSize: 12, lineHeight: 1.5, color: T.labelTertiary }, children: field.hint })
+      ] }, field.key)),
       /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { style: { display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, padding: "12px 0 4px", borderTop: `1px solid ${T.borderL2}` }, children: [
         failed ? /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)(import_jsx_runtime6.Fragment, { children: [
           /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { style: { flex: 1, minWidth: 0, margin: 0, fontSize: 12, lineHeight: 1.5, color: T.error }, children: failed.message }),

@@ -90,8 +90,22 @@ export function SkillsSection({ call, workspaces, scope, subscribeSkillSettings 
     const exists = mounts.some((m) => `${m.scope}|${m.project ?? ''}` === key)
     if (exists === checked) return
     const next = checked
-      ? [...mounts.filter((m) => `${m.scope}|${m.project ?? ''}` !== key), { scope: scopeKind, project: scopeKind === 'project' ? workspaceId : null }]
+      // 新挂载默认仅 DSH 宿主（用户可在行内宿主 chip 增勾 pi）
+      ? [...mounts.filter((m) => `${m.scope}|${m.project ?? ''}` !== key), { scope: scopeKind, project: scopeKind === 'project' ? workspaceId : null, hosts: ['dsh'] }]
       : mounts.filter((m) => `${m.scope}|${m.project ?? ''}` !== key)
+    editConfig('groups', { ...groups, [group]: { ...groups[group], mounts: next } })
+  }
+  // 宿主开关：在挂载规则上增删单个宿主；关掉最后一个宿主 = 死规则，
+  // UI 层会把该路径改道取消挂载确认（pendingUnmount），本函数双保险不落空 hosts。
+  const toggleHost = (group, scopeKind, workspaceId, host, on) => {
+    const mounts = (groups[group] && groups[group].mounts) || []
+    const key = `${scopeKind}|${workspaceId ?? ''}`
+    const next = mounts.map((m) => {
+      if (`${m.scope}|${m.project ?? ''}` !== key) return m
+      const hosts = Array.isArray(m.hosts) && m.hosts.length > 0 ? m.hosts : ['dsh']
+      const nextHosts = on ? [...new Set([...hosts, host])] : hosts.filter((h) => h !== host)
+      return nextHosts.length === 0 ? m : { ...m, hosts: nextHosts }
+    })
     editConfig('groups', { ...groups, [group]: { ...groups[group], mounts: next } })
   }
   const createGroup = (name) => {
@@ -131,7 +145,7 @@ export function SkillsSection({ call, workspaces, scope, subscribeSkillSettings 
     editConfig('groups', nextGroups)
     editConfig('skills', nextSkills)
   }
-  const config = { groups, skillsIntent, intentOf, editConfig, setSkillDisabled, moveSkill, toggleMount, createGroup, renameGroup, deleteGroup }
+  const config = { groups, skillsIntent, intentOf, editConfig, setSkillDisabled, moveSkill, toggleMount, toggleHost, createGroup, renameGroup, deleteGroup }
 
   // 单请求聚合读（低延迟路径）：overview 一次出库列表/行状态/警告/工作区投影。
   // 序号守卫：reloadTick/settings 总线/首刷三源并发时，只有最新一次加载落地，

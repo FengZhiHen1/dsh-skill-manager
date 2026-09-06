@@ -5,8 +5,9 @@
 // 出站载荷经 contract.js 校验（Host 侧回归闸），Client 侧同模块复验。
 // 参考：插件运行时.md「RPC 传输」「请求调度与缓存」；DSR-013/014/017。
 
+import { join } from 'node:path'
 import { SkillManagerError, buildRepair } from './base/errors.js'
-import { requireDir, DEFAULT_GROUP } from './model/intent.js'
+import { requireDir, DEFAULT_GROUP, PI_AGENT_DIR_FIELD, resolvePiAgentDir } from './model/intent.js'
 import { createSharedCache, hashOf } from './base/cache.js'
 import { ContractError, parseEndpointPayload } from './model/contract.js'
 import { dirHash } from './model/library.js'
@@ -73,11 +74,16 @@ async function readWorkspaceProjection(listWorkspaces) {
 export function createSession(scopeGetter, listWorkspaces, getStore, backupsRoot, globalRootPath, shared) {
   const root = requireDir(scopeGetter())
   const store = getStore()
+  // pi 接管：每会话现算（配置改指即下次请求生效）。piSkillsRoot = null 即 pi 不可用，
+  // 下游 derive/扫描/物化全部按单宿主（dsh）回落，零行为变化。
+  const piAgentDir = resolvePiAgentDir(scopeGetter().get()?.[PI_AGENT_DIR_FIELD])
+  const piSkillsRoot = piAgentDir === null ? null : join(piAgentDir, 'skills')
   return {
     root,
     store,
     backupsRoot,
     globalRootPath,
+    piSkillsRoot,
     async bundle() {
       const config = scopeGetter().get()
       const configGroups = config?.groups && typeof config.groups === 'object' ? config.groups : {}
@@ -98,6 +104,7 @@ export function createSession(scopeGetter, listWorkspaces, getStore, backupsRoot
       // 参与推导的 skill 集 = 未禁用且未缺失。
       const skills = viewItems.filter((it) => !it.disabled && !it.missing).map((it) => it.dir)
       // 配置挂载展平（global 的 project 归一为 null；形状非法项跳过，对账容忍）。
+      // hosts 原样透传，缺省/非法回落在 derive 内单源处理。
       const mounts = []
       for (const [group, g] of Object.entries(configGroups)) {
         for (const m of Array.isArray(g?.mounts) ? g.mounts : []) {
@@ -107,6 +114,7 @@ export function createSession(scopeGetter, listWorkspaces, getStore, backupsRoot
             group,
             scope: m.scope,
             project: m.scope === 'project' && typeof m.project === 'string' && m.project !== '' ? m.project : null,
+            hosts: Array.isArray(m.hosts) ? m.hosts : undefined,
           })
         }
       }
@@ -115,11 +123,11 @@ export function createSession(scopeGetter, listWorkspaces, getStore, backupsRoot
         const g = intentSkills?.[dir]?.group
         return [dir, typeof g === 'string' && g !== '' && (g in configGroups || g === DEFAULT_GROUP) ? g : DEFAULT_GROUP]
       }))
-      const { desired, warnings } = deriveDesired({ memberships, mounts, workspacesById, globalRootPath })
+      const { desired, warnings } = deriveDesired({ memberships, mounts, workspacesById, globalRootPath, piSkillsRoot })
       // 行状态走查与孤儿集共用同一次扫描，结果随 bundle 快照一起失效。
-      const links = await scanMountLinks({ root, globalRootPath, workspacesById })
-      const mountRows = await walkMountState({ root, desired, links, globalRootPath, workspacesById })
-      const orphans = await findOrphanLinks({ root, desired, globalRootPath, workspacesById, links })
+      const links = await scanMountLinks({ root, globalRootPath, workspacesById, piSkillsRoot })
+      const mountRows = await walkMountState({ root, desired, links, globalRootPath, workspacesById, piSkillsRoot })
+      const orphans = await findOrphanLinks({ root, desired, globalRootPath, workspacesById, piSkillsRoot, links })
       const mountCount = new Map([...workspacesById.keys()].map((id) => [id, 0]))
       const counted = new Set()
       for (const m of mounts) {
@@ -145,6 +153,7 @@ export function createSession(scopeGetter, listWorkspaces, getStore, backupsRoot
         links,
         mountRows,
         orphans,
+        piSkillsRoot,
       }
     },
     /** 全量对账：现算期望并收敛挂载，junction-only。 */
@@ -156,6 +165,7 @@ export function createSession(scopeGetter, listWorkspaces, getStore, backupsRoot
         mounts: b.mounts,
         workspacesById: b.workspacesById,
         globalRootPath,
+        piSkillsRoot,
       })
     },
   }
@@ -243,6 +253,7 @@ export function buildApi(scopeGetter, { listWorkspaces = () => [], getStore, bac
       lib: { skills, warnings: [...b.warnings], checkedAt: checkCache.checkedAt },
       health: { issues: mountIssuesOf(b) },
       workspaces: b.workspacesView,
+      agents: { pi: { available: b.piSkillsRoot !== null, skillsRoot: b.piSkillsRoot } },
     }
   }
 
@@ -342,6 +353,7 @@ export function buildApi(scopeGetter, { listWorkspaces = () => [], getStore, bac
         backupsRoot: s.backupsRoot,
         workspacesById,
         globalRootPath: globalRoot,
+        piSkillsRoot: s.piSkillsRoot,
       })
       await refreshCache()
       return result

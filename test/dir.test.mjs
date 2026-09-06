@@ -5,7 +5,7 @@ import assert from 'node:assert/strict'
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
-  CONFIG_NS, SKILLS_DIR_FIELD, DEFAULT_GROUP, configSchema, requireDir,
+  CONFIG_NS, SKILLS_DIR_FIELD, PI_AGENT_DIR_FIELD, DEFAULT_GROUP, configSchema, requireDir, resolvePiAgentDir,
 } from '../src/core/model/intent.js'
 import { registerConfig } from '../src/adapter/settings.js'
 import { atomicSwapDir, safePath, existsDir, writeJson } from '../src/core/base/fsys.js'
@@ -31,8 +31,11 @@ test('registerConfig：命名空间与 schema 正确（意图字段齐备）', (
   // 默认种子：默认组挂载全局（原 ensureSeedMounts 语义，配置化）
   const resolved = schema({})
   assert.equal(resolved[SKILLS_DIR_FIELD], '')
+  assert.equal(resolved[PI_AGENT_DIR_FIELD], '')
   assert.equal(resolved.groups[DEFAULT_GROUP].mounts.length, 1)
   assert.equal(resolved.groups[DEFAULT_GROUP].mounts[0].scope, 'global')
+  // hosts 缺省回落 ['dsh']：存量无 hosts 键的规则天然仅 DSH（向后兼容）
+  assert.deepEqual(resolved.groups[DEFAULT_GROUP].mounts[0].hosts, ['dsh'])
   assert.deepEqual(resolved.skills, {})
   assert.equal(resolved.intentMigrated, false)
 })
@@ -47,6 +50,11 @@ test('registerConfig.validate：形式校验（绝对路径/组名/意图形状�
   assert.throws(() => validate({ skillsDir: 'relative/path' }), /绝对路径/)
   assert.doesNotThrow(() => validate({ skillsDir: 'E:/Project/Skills' }))
   assert.doesNotThrow(() => validate({ skillsDir: 'E:/not/existing/yet' }))
+  // piAgentDir：空串放行（自动探测）；相对路径拒绝；hosts 空数组 = 死规则拒绝
+  assert.throws(() => validate({ piAgentDir: 'relative/pi' }), /绝对路径/)
+  assert.doesNotThrow(() => validate({ piAgentDir: '' }))
+  assert.doesNotThrow(() => validate({ piAgentDir: 'E:/pi/agent' }))
+  assert.throws(() => validate({ skillsDir: 'E:/s', groups: { 办公: { mounts: [{ scope: 'global', project: null, hosts: [] }] } } }), /宿主/)
   // 组名形式
   assert.doesNotThrow(() => validate({ skillsDir: 'E:/s', groups: { 办公: { mounts: [] } } }))
   // 「默认」键合法（schema 种子/挂载载体，docs L40/L47；P9 实测缺陷回归：曾误拒致 boot 崩）；
@@ -173,5 +181,19 @@ test('atomicSwapDir：换装成功则新版就位，移开的旧目录被清掉'
     assert.deepEqual(await readdir(root), ['skill'])
   } finally {
     await cleanup(root)
+  }
+})
+
+test('resolvePiAgentDir：显式配置直通；空串按注入 home 探测，无 ~/.pi/agent → null', async () => {
+  // 显式配置：不存在也直通（物化按需创建，探测只服务自动路径）
+  assert.equal(resolvePiAgentDir('E:/pi/agent'), join('E:/pi/agent'))
+  const home = await mkTmp()
+  try {
+    // 自动探测：无 .pi/agent → null（pi 不可用三态之一）
+    assert.equal(resolvePiAgentDir('', home), null)
+    await mkdir(join(home, '.pi', 'agent'), { recursive: true })
+    assert.equal(resolvePiAgentDir('', home), join(home, '.pi', 'agent'))
+  } finally {
+    await cleanup(home)
   }
 })

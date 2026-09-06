@@ -30,7 +30,7 @@ export async function removeLink(path) {
  * 返回 { action: 'ok' | 'mounted' }；失败抛 SkillManagerError
  * （no-skill-md / target-occupied / wrong-target / junction 创建失败的原始错误）。
  */
-export async function materializeOne({ root, skill, t, workspacesById, globalRootPath }) {
+export async function materializeOne({ root, skill, t, workspacesById, globalRootPath, piSkillsRoot = null }) {
   const src = safePath(root, skill)
   try {
     const info = await stat(join(src, 'SKILL.md'))
@@ -40,10 +40,10 @@ export async function materializeOne({ root, skill, t, workspacesById, globalRoo
     if (error && error.code === 'ENOENT') throw new SkillManagerError('no-skill-md', `${skill} 缺少 SKILL.md，拒绝同步`, false, [{ label: '库内条目', value: src }])
     throw error
   }
-  const parent = targetDir(t, { workspacesById, globalRootPath })
+  const parent = targetDir(t, { workspacesById, globalRootPath, piSkillsRoot })
   if (parent === undefined) {
-    throw new SkillManagerError('workspace-unavailable', `目标根不可用: ${t.project ?? 'global'}`, true, [
-      { label: '挂载规则引用的工作区', value: t.project ?? 'global' },
+    throw new SkillManagerError('workspace-unavailable', `目标根不可用: ${t.host ?? 'dsh'}:${t.project ?? 'global'}`, true, [
+      { label: '挂载规则引用的目标', value: `${t.host ?? 'dsh'}:${t.project ?? 'global'}` },
       { label: 'skill', value: skill },
     ])
   }
@@ -88,8 +88,8 @@ export async function materializeOne({ root, skill, t, workspacesById, globalRoo
  * （realpath/readlink 目标落在配置目录内）属于本插件时删除；真实目录与
  * 库外链接一律不动。返回 'removed' | 'absent' | 'kept'。
  */
-export async function detachLink({ root, skill, t, workspacesById, globalRootPath }) {
-  const parent = targetDir(t, { workspacesById, globalRootPath })
+export async function detachLink({ root, skill, t, workspacesById, globalRootPath, piSkillsRoot = null }) {
+  const parent = targetDir(t, { workspacesById, globalRootPath, piSkillsRoot })
   if (parent === undefined) return 'kept' // 目标根不可用：不扫描不触碰
   const dst = join(parent, skill)
   const probe = await probePath(dst)

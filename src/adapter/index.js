@@ -85,7 +85,7 @@ export default {
     // 启动预热：配置过目录时延迟 1s 后台扫一次 bundle 快照，首次打开技能页秒出。
     // 预热失败是可接受降级：冷扫由首次真实读承担，错误面在各自的 Result 里呈现。
     const warmTimer = setTimeout(() => {
-      void api.warm().catch(() => {})
+      void api.warm().catch(() => {}) // quality-floor: ignore silent-catch 预热失败是可接受降级：冷扫由首次真实读承担，错误面在各自的 Result 里呈现
     }, 1000)
 
     ctx.effect(() => () => {

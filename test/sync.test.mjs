@@ -32,11 +32,29 @@ test('deriveDesired：组归属展平、重复规则去重、非法挂载项容�
     workspacesById: workspaces([{ id: 'w1', title: '', path: 'P' }]),
     globalRootPath: 'G',
   })
-  assert.deepEqual([...desired.get('pdf')], [{ scope: 'global', project: null }])
-  assert.deepEqual([...desired.get('mine')], [{ scope: 'project', project: 'w1' }])
+  assert.deepEqual([...desired.get('pdf')], [{ host: 'dsh', scope: 'global', project: null }])
+  assert.deepEqual([...desired.get('mine')], [{ host: 'dsh', scope: 'project', project: 'w1' }])
   assert.deepEqual([...warnings], [])
-  assert.equal(targetKey({ scope: 'global', project: null }), 'global|global')
-  assert.equal(targetKey({ scope: 'project', project: 'w1' }), 'project|w1')
+  assert.equal(targetKey({ scope: 'global', project: null }), 'dsh:global|global')
+  assert.equal(targetKey({ scope: 'project', project: 'w1' }), 'dsh:project|w1')
+  assert.equal(targetKey({ host: 'pi', scope: 'project', project: 'w1' }), 'pi:project|w1')
+})
+
+test('deriveDesired：hosts 展开双侧目标；pi 不可用时 pi 侧跳过并按组告警一次', () => {
+  const byId = workspaces([{ id: 'w1', title: '', path: 'P' }])
+  const memberships = new Map([['pdf', 'g1']])
+  const mounts = [{ group: 'g1', scope: 'project', project: 'w1', hosts: ['dsh', 'pi'] }]
+  const both = deriveDesired({ memberships, mounts, workspacesById: byId, globalRootPath: 'G', piSkillsRoot: 'PS' })
+  assert.deepEqual([...both.desired.get('pdf')], [
+    { host: 'dsh', scope: 'project', project: 'w1' },
+    { host: 'pi', scope: 'project', project: 'w1' },
+  ])
+  assert.deepEqual([...both.warnings], [])
+  // pi 不可用：pi 目标不产期望，dsh 侧不受影响；告警按组去重
+  const off = deriveDesired({ memberships, mounts, workspacesById: byId, globalRootPath: 'G' })
+  assert.deepEqual([...off.desired.get('pdf')], [{ host: 'dsh', scope: 'project', project: 'w1' }])
+  assert.deepEqual(off.warnings.length, 1)
+  assert.match(off.warnings[0], /pi 不可用/)
 })
 
 test('deriveDesired：引用不存在的工作区 → 无目标 + 「未匹配工作区」warning（R-12）', () => {
@@ -57,12 +75,16 @@ test('projectWorkspaces：缺 id/path 或重复 id → workspace-unavailable', (
   assert.throws(() => workspaces([{ id: 'a', path: 'P1' }, { id: 'a', path: 'P2' }]), (e) => e.code === 'workspace-unavailable')
 })
 
-test('targetDir：global 用注入根；project 用工作区 .dsh/skills；未知工作区/空根 → undefined', () => {
+test('targetDir：dsh 用注入根与 .dsh/skills；pi 用 piSkillsRoot 与 .pi/skills；未知工作区/空根 → undefined', () => {
   const byId = workspaces()
   assert.equal(targetDir({ scope: 'global', project: null }, { workspacesById: byId, globalRootPath: 'G' }), 'G')
   assert.equal(targetDir({ scope: 'project', project: 'w1' }, { workspacesById: byId, globalRootPath: 'G' }), join('P', '.dsh', 'skills'))
   assert.equal(targetDir({ scope: 'project', project: 'nope' }, { workspacesById: byId, globalRootPath: 'G' }), undefined)
   assert.equal(targetDir({ scope: 'global', project: null }, { workspacesById: byId, globalRootPath: '' }), undefined)
+  // pi 宿主：global → piSkillsRoot；project → 工作区 .pi/skills；piSkillsRoot=null 时 pi 全局无目录
+  assert.equal(targetDir({ host: 'pi', scope: 'global', project: null }, { workspacesById: byId, globalRootPath: 'G', piSkillsRoot: 'PS' }), 'PS')
+  assert.equal(targetDir({ host: 'pi', scope: 'project', project: 'w1' }, { workspacesById: byId, globalRootPath: 'G', piSkillsRoot: 'PS' }), join('P', '.pi', 'skills'))
+  assert.equal(targetDir({ host: 'pi', scope: 'global', project: null }, { workspacesById: byId, globalRootPath: 'G', piSkillsRoot: null }), undefined)
 })
 
 // ---- 夹具 ----
@@ -323,8 +345,7 @@ test('reconcile：孤儿链接在对账第一步被摘除（与清扫同一判�
   }
 })
 
-test('reconcile：失效工作区根不在扫描范围，其既有链接不动且仅 warning（R-12）', async () => {
-  const f = await fixture()
+test('reconcile：失效工作区根不在扫描范围，其既有链接不动且仅 warning（R-12）', async () => {  const f = await fixture()
   try {
     await writeSkill(f.root, 'pdf')
     const gone = join(f.tmp, 'gone-ws')
@@ -342,6 +363,73 @@ test('reconcile：失效工作区根不在扫描范围，其既有链接不动�
     assert.match(r.warnings[0], /未匹配工作区/)
     assert.ok(await isLink(goneLink))
     assert.equal(r.results.find((x) => x.name === 'pdf'), undefined)
+  } finally {
+    await cleanup(f.tmp)
+  }
+})
+
+test('reconcile：pi 宿主接管——.pi/skills 双侧物化与摘除、exclude 托管块双行', async () => {
+  const f = await fixture()
+  try {
+    await writeSkill(f.root, 'pdf')
+    const piSkillsRoot = join(f.tmp, 'pi-agent', 'skills')
+    const wsPath = f.workspacesById.get('w1').path
+    await mkdir(join(wsPath, '.git', 'info'), { recursive: true })
+    const excludeFile = join(wsPath, '.git', 'info', 'exclude')
+    await writeFile(excludeFile, '# 既有内容\n', 'utf8')
+    const opts = () => ({
+      root: f.root,
+      mounts: [
+        { group: 'g1', scope: 'global', project: null, hosts: ['dsh', 'pi'] },
+        { group: 'g1', scope: 'project', project: 'w1', hosts: ['dsh', 'pi'] },
+      ],
+      workspacesById: f.workspacesById,
+      globalRootPath: f.globalRootPath,
+      piSkillsRoot,
+    })
+    const r = await reconcile({ ...opts(), memberships: new Map([['pdf', 'g1']]) })
+    assert.equal(r.errors.length, 0)
+    // 双侧物化：dsh 全局 + dsh 项目 + pi 用户级 + pi 项目
+    assert.ok(await isLink(join(f.globalRootPath, 'pdf')))
+    assert.ok(await isLink(join(wsPath, '.dsh', 'skills', 'pdf')))
+    assert.ok(await isLink(join(piSkillsRoot, 'pdf')))
+    assert.ok(await isLink(join(wsPath, '.pi', 'skills', 'pdf')))
+    const text = await readFile(excludeFile, 'utf8')
+    assert.match(text, /\/\.dsh\/skills\//)
+    assert.match(text, /\/\.pi\/skills\//)
+    // 期望退场：双侧摘除、托管块清除
+    await reconcile({ ...opts(), memberships: new Map() })
+    assert.equal(await isLink(join(piSkillsRoot, 'pdf')), false)
+    assert.equal(await isLink(join(wsPath, '.pi', 'skills', 'pdf')), false)
+    assert.doesNotMatch(await readFile(excludeFile, 'utf8'), /dsh-skill-manager/)
+  } finally {
+    await cleanup(f.tmp)
+  }
+})
+
+test('reconcile：pi 不可用（piSkillsRoot 缺省）零副作用——pi 侧不扫不建，dsh 侧照常', async () => {
+  const f = await fixture()
+  try {
+    await writeSkill(f.root, 'pdf')
+    const wsPath = f.workspacesById.get('w1').path
+    const r = await reconcile({
+      root: f.root,
+      memberships: new Map([['pdf', 'g1']]),
+      mounts: [{ group: 'g1', scope: 'project', project: 'w1', hosts: ['dsh', 'pi'] }],
+      workspacesById: f.workspacesById,
+      globalRootPath: f.globalRootPath,
+    })
+    assert.equal(r.warnings.length, 1)
+    assert.match(r.warnings[0], /pi 不可用/)
+    assert.ok(await isLink(join(wsPath, '.dsh', 'skills', 'pdf')))
+    // pi 侧完全未建（.pi 目录不存在）
+    let piExists = true
+    try {
+      await readdir(join(wsPath, '.pi'))
+    } catch {
+      piExists = false
+    }
+    assert.equal(piExists, false)
   } finally {
     await cleanup(f.tmp)
   }

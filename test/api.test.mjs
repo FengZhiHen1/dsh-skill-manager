@@ -179,7 +179,7 @@ test('overview：配置意图驱动 — 禁用/分组/挂载目标/工作区/健
     const off = o.lib.skills.find((s) => s.dir === 'off')
     assert.equal(pdf.disabled, false)
     assert.equal(pdf.group, '办公')
-    assert.deepEqual(pdf.targets.sort(), ['global|global', 'project|w1'])
+    assert.deepEqual(pdf.targets.sort(), ['dsh:global|global', 'dsh:project|w1'])
     // 未物化现场：行状态逐 target 报 link-missing（DSR-017 行状态经 overview 下发）
     assert.deepEqual(pdf.mount.map((m) => m.issue).sort(), ['link-missing', 'link-missing'])
     assert.equal(off.disabled, true)

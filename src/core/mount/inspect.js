@@ -13,11 +13,20 @@ import { isLink } from './materialize.js'
 /** 安装名文法（C-01；不满足者 DSH 不可见，行级提示）。 */
 export const SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 
-/** 对账/走查/摘除的扫描根：全局根 + 当前活动工作区根（仅此二者，失效工作区不在列）。 */
-export function scanRoots({ workspacesById, globalRootPath }) {
+/**
+ * 对账/走查/摘除的扫描根：DSH 全局根 + 活动工作区的 .dsh/skills（失效工作区不在列）。
+ * pi 接管激活（piSkillsRoot 非空）时追加 pi 用户级根与各工作区 .pi/skills；
+ * 未激活时 pi 侧零扫描，行为与单宿主一致。
+ */
+export function scanRoots({ workspacesById, globalRootPath, piSkillsRoot = null }) {
   const roots = []
   if (typeof globalRootPath === 'string' && globalRootPath !== '') roots.push(globalRootPath)
-  for (const ws of workspacesById.values()) roots.push(join(ws.path, '.dsh', 'skills'))
+  const piActive = typeof piSkillsRoot === 'string' && piSkillsRoot !== ''
+  if (piActive) roots.push(piSkillsRoot)
+  for (const ws of workspacesById.values()) {
+    roots.push(join(ws.path, '.dsh', 'skills'))
+    if (piActive) roots.push(join(ws.path, '.pi', 'skills'))
+  }
   return roots
 }
 
@@ -27,10 +36,10 @@ export function scanRoots({ workspacesById, globalRootPath }) {
  * 当前配置目录内（带路径分隔符边界，`skills-sibling` 不算）。“改配另一目录
  * 后旧链接不在新前缀内” → owned=false → 保留为孤儿，永不清理（AC-10）。
  */
-export async function scanMountLinks({ root, globalRootPath, workspacesById }) {
+export async function scanMountLinks({ root, globalRootPath, workspacesById, piSkillsRoot = null }) {
   const repoRoot = await canonicalPath(root)
   const links = []
-  for (const dir of scanRoots({ globalRootPath, workspacesById })) {
+  for (const dir of scanRoots({ globalRootPath, workspacesById, piSkillsRoot })) {
     let entries = []
     try {
       entries = await readdir(dir, { withFileTypes: true })
@@ -54,11 +63,11 @@ export async function scanMountLinks({ root, globalRootPath, workspacesById }) {
 }
 
 /** 期望目标的路径全集（小写键，Windows 不区分大小写）。 */
-function desiredPathSet(desired, { workspacesById, globalRootPath }) {
+function desiredPathSet(desired, { workspacesById, globalRootPath, piSkillsRoot }) {
   const set = new Set()
   for (const [skill, targets] of desired) {
     for (const t of targets) {
-      const parent = targetDir(t, { workspacesById, globalRootPath })
+      const parent = targetDir(t, { workspacesById, globalRootPath, piSkillsRoot })
       if (parent !== undefined) set.add(resolve(join(parent, skill)).toLowerCase())
     }
   }
@@ -73,9 +82,9 @@ function desiredPathSet(desired, { workspacesById, globalRootPath }) {
  * - remove 摘除：调用方按 `target === <root>/<name>` 过滤后摘除；
  * - 行状态走查：walkMountState 借同一现场集判定。
  */
-export async function findOrphanLinks({ root, desired, globalRootPath, workspacesById, links }) {
-  const all = links ?? (await scanMountLinks({ root, globalRootPath, workspacesById }))
-  const expected = desiredPathSet(desired, { workspacesById, globalRootPath })
+export async function findOrphanLinks({ root, desired, globalRootPath, workspacesById, piSkillsRoot = null, links }) {
+  const all = links ?? (await scanMountLinks({ root, globalRootPath, workspacesById, piSkillsRoot }))
+  const expected = desiredPathSet(desired, { workspacesById, globalRootPath, piSkillsRoot })
   return all.filter((l) => l.owned && !expected.has(resolve(l.path).toLowerCase()))
 }
 
@@ -87,14 +96,14 @@ export async function findOrphanLinks({ root, desired, globalRootPath, workspace
  * 无异常的 skill 不入结果（即全部 ok）。
  * @returns {Map<string, Array<{ target: string, path: string, issue: string }>>}
  */
-export async function walkMountState({ root, desired, links, globalRootPath, workspacesById }) {
+export async function walkMountState({ root, desired, links, globalRootPath, workspacesById, piSkillsRoot = null }) {
   const linksByPath = new Map(links.map((l) => [resolve(l.path).toLowerCase(), l]))
   const rows = new Map()
   for (const [skill, targets] of desired) {
     const issues = []
     const expectedSrc = await canonicalPath(join(root, skill))
     for (const t of targets) {
-      const parent = targetDir(t, { workspacesById, globalRootPath })
+      const parent = targetDir(t, { workspacesById, globalRootPath, piSkillsRoot })
       const key = targetKey(t)
       if (parent === undefined) {
         issues.push({ target: key, path: '', issue: 'link-missing' })

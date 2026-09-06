@@ -16,14 +16,15 @@ function minimalOverview() {
       skills: [{
         name: 'pdf', dir: 'pdf', description: '', origin: 'self', hasSkillMd: true,
         commit: null, missing: false, disabled: false, group: '默认', nameVisible: true,
-        targets: ['global|global'], mount: [{ target: 'global|global', path: 'G/pdf', issue: 'link-missing' }],
+        targets: ['dsh:global|global'], mount: [{ target: 'dsh:global|global', path: 'G/pdf', issue: 'link-missing' }],
         upstream: null,
       }],
       warnings: [],
       checkedAt: null,
     },
-    health: { issues: [{ name: 'pdf', target: 'global|global', issue: 'link-missing' }] },
+    health: { issues: [{ name: 'pdf', target: 'dsh:global|global', issue: 'link-missing' }] },
     workspaces: [{ workspaceId: 'w1', title: '项目', path: 'P', mountCount: 0 }],
+    agents: { pi: { available: false, skillsRoot: null } },
   }
 }
 

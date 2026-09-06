@@ -11,7 +11,8 @@ import { materializeOne, removeLink } from './materialize.js'
 
 const EXCLUDE_BEGIN = '# >>> dsh-skill-manager'
 const EXCLUDE_END = '# <<< dsh-skill-manager'
-const EXCLUDE_LINE = '/.dsh/skills/'
+/** 宿主 → git exclude 行（托管块按期望集涉及的宿主集合写一或两行）。 */
+const EXCLUDE_LINES = { dsh: '/.dsh/skills/', pi: '/.pi/skills/' }
 
 /**
  * 全量对账：推导期望集 → 摘除孤儿链接（归属本插件且不在期望集）→
@@ -19,14 +20,14 @@ const EXCLUDE_LINE = '/.dsh/skills/'
  * 幂等：任意子项失败不影响其他子项，失败进 results。
  * @returns {Promise<{results: Array, warnings: Array, errors: Array}>}
  */
-export async function reconcile({ root, memberships, mounts, workspacesById, globalRootPath }) {
-  const { desired, warnings } = deriveDesired({ memberships, mounts, workspacesById, globalRootPath })
+export async function reconcile({ root, memberships, mounts, workspacesById, globalRootPath, piSkillsRoot = null }) {
+  const { desired, warnings } = deriveDesired({ memberships, mounts, workspacesById, globalRootPath, piSkillsRoot })
   const results = []
 
   // 1. 摘除 = 孤儿清扫（同一归属判据，无第二张台账）：owned 且不在期望集 → 删链接。
   //    逐条隔离（与物化同构）：单条摘除失败进 results，不中断其余子项。
-  const links = await scanMountLinks({ root, globalRootPath, workspacesById })
-  const orphans = await findOrphanLinks({ root, desired, globalRootPath, workspacesById, links })
+  const links = await scanMountLinks({ root, globalRootPath, workspacesById, piSkillsRoot })
+  const orphans = await findOrphanLinks({ root, desired, globalRootPath, workspacesById, piSkillsRoot, links })
   for (const link of orphans) {
     try {
       await removeLink(link.path)
@@ -41,7 +42,7 @@ export async function reconcile({ root, memberships, mounts, workspacesById, glo
     for (const t of targets) {
       const key = targetKey(t)
       try {
-        const r = await materializeOne({ root, skill, t, workspacesById, globalRootPath })
+        const r = await materializeOne({ root, skill, t, workspacesById, globalRootPath, piSkillsRoot })
         results.push({ name: skill, target: key, action: r.action, method: 'junction' })
       } catch (error) {
         results.push({ name: skill, target: key, action: 'error', error: error.message, code: error.code })
@@ -56,20 +57,23 @@ export async function reconcile({ root, memberships, mounts, workspacesById, glo
   return { results, warnings, errors }
 }
 
-/** 需要写 exclude 托管块的工作区集合（desired 中 project 作用域目标的 workspaceId）。 */
-function projectIdsWithDesired(desired) {
-  const ids = new Set()
+/** 各工作区期望集涉及的宿主集合（workspaceId → Set<'dsh'|'pi'>）。 */
+function projectHostSets(desired) {
+  const map = new Map()
   for (const targets of desired.values()) {
     for (const t of targets) {
-      if (t.scope === 'project' && typeof t.project === 'string' && t.project !== '') ids.add(t.project)
+      if (t.scope === 'project' && typeof t.project === 'string' && t.project !== '') {
+        if (!map.has(t.project)) map.set(t.project, new Set())
+        map.get(t.project).add(t.host ?? 'dsh')
+      }
     }
   }
-  return ids
+  return map
 }
 
 /** 为活动工作区根写或清 .git/info/exclude 托管块；写失败进 results 单条错误，不中断整单。 */
 async function updateGitExcludes({ desired, workspacesById, results }) {
-  const wanted = projectIdsWithDesired(desired)
+  const wanted = projectHostSets(desired)
   for (const [workspaceId, ws] of workspacesById) {
     const excludeFile = join(ws.path, '.git', 'info', 'exclude')
     let text = ''
@@ -79,7 +83,7 @@ async function updateGitExcludes({ desired, workspacesById, results }) {
       continue // 非 Git 项目或不可读：跳过
     }
     const stripped = stripExcludeBlock(text)
-    const next = wanted.has(workspaceId) ? withExcludeBlock(stripped) : stripped
+    const next = wanted.has(workspaceId) ? withExcludeBlock(stripped, wanted.get(workspaceId)) : stripped
     if (next === text) continue
     try {
       await writeFile(excludeFile, next, 'utf8')
@@ -100,8 +104,9 @@ function stripExcludeBlock(text) {
   return out.replace(/\n+$/, '')
 }
 
-function withExcludeBlock(text) {
-  const block = `${EXCLUDE_BEGIN}\n${EXCLUDE_LINE}\n${EXCLUDE_END}`
+function withExcludeBlock(text, hosts) {
+  const lines = ['dsh', 'pi'].filter((h) => hosts.has(h)).map((h) => EXCLUDE_LINES[h])
+  const block = `${EXCLUDE_BEGIN}\n${lines.join('\n')}\n${EXCLUDE_END}`
   const base = text.replace(/\n+$/, '')
   return base === '' ? `${block}\n` : `${base}\n\n${block}\n`
 }

@@ -7,6 +7,7 @@ import { Input, Menu } from '@deepseek-ai/dsh-client-ui-primitives'
 import { T, S, badgeStyle, cardStyle, cardTitle, noteText, dotStyle, sectionHead, statusPillStyle, dividerStyle, navItemStyle, navItemActiveStyle, pillBase } from './theme.js'
 import { GhostBtn, OutlineBtn, PrimaryBtn, ErrorLine, NoticeBar, RowMenu, MenuItem, menuCardStyle, ChevronIcon, UpdateConfirmationDialog, ConfirmDialog, ModalShell } from './ui.jsx'
 import { buildRepairPrompt, RepairCopy, mountIssueRepair } from './repair.jsx'
+import { parseTargetKey } from '../core/model/contract.js'
 
 const ORIGIN_LABEL = { github: 'GitHub', local: '本地', self: '自研' }
 /** 来源筛选项（工具条下拉）：'' = 全部。 */
@@ -16,13 +17,14 @@ const ORIGIN_OPTIONS = [
   { id: 'self', label: '自研/本地' },
 ]
 
-/** targetKey（`scope|project` 格式）转成人话显示名。 */
+/** targetKey（`host:scope|project` 格式）转成人话显示名；pi 宿主带「pi」标记。 */
 function targetLabel(target, workspaces) {
-  if (typeof target !== 'string') return String(target ?? '—')
-  if (target.startsWith('global|')) return 'DSH 全局'
-  const id = target.slice('project|'.length)
-  const ws = workspaces.find((w) => w.workspaceId === id)
-  return ws ? ws.title : `工作区 ${id.slice(0, 8)}…`
+  const p = typeof target === 'string' ? parseTargetKey(target) : null
+  if (!p) return String(target ?? '—')
+  if (p.scope === 'global') return p.host === 'pi' ? 'pi 用户级' : 'DSH 全局'
+  const ws = workspaces.find((w) => w.workspaceId === p.project)
+  const base = ws ? ws.title : `工作区 ${p.project.slice(0, 8)}…`
+  return p.host === 'pi' ? `${base} · pi` : base
 }
 
 /**
@@ -255,7 +257,7 @@ export function ManageView({ call, data, config, reload }) {
                   <div style={{ ...noteText, marginTop: 4 }}>选择左侧分组，可配置它在 DSH 全局与各工作区的可用范围。</div>
                 </div>
               )
-            : <GroupScopePanel config={config} group={groupFilter} workspaces={data.workspaces} skills={data.lib.skills} onGroupOp={groupOp} />}
+            : <GroupScopePanel config={config} group={groupFilter} workspaces={data.workspaces} skills={data.lib.skills} onGroupOp={groupOp} piAvailable={data.agents?.pi?.available === true} />}
 
           {/* 非行级警告条（琥珀晕卡逐条，附修复复制入口） */}
           {warningLines.map((w) => (
@@ -468,9 +470,9 @@ function GroupNav({ groups, selected, total, countForGroup, onSelect, onCreate }
 
 /**
  * 范围勾选行（DSH 全局与工作区共用）：hover 浅底反馈，勾选态品牌色晕 + 品牌色复选框。
- * hint（路径等辅助文本）截断并 title 悬浮全文；count >0 时尾部出 pill。
+ * hint（路径等辅助文本）截断并 title 悬浮全文；count >0 时尾部出 pill；trailing 为行尾扩展位（宿主 chips）。
  */
-function ScopeRow({ checked, title, hint, count, onToggle }) {
+function ScopeRow({ checked, title, hint, count, onToggle, trailing }) {
   const [hover, setHover] = useState(false)
   return (
     <label
@@ -484,7 +486,28 @@ function ScopeRow({ checked, title, hint, count, onToggle }) {
         ? <span style={{ ...noteText, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={hint}>{hint}</span>
         : <span style={{ flex: 1 }} />}
       {count > 0 ? <span style={{ ...pillBase, flex: 'none' }}>{`${count} 个组使用`}</span> : null}
+      {trailing || null}
     </label>
+  )
+}
+
+/** 宿主 chip：行内切换该挂载目标在哪个宿主生效（DSH / pi）；active 用品牌色晕，未选灰底。 */
+function HostChip({ label, active, onToggle, title }) {
+  return (
+    <button
+      type="button"
+      title={title}
+      // 嵌在 label 行内：拦住默认激活与冒泡，点 chip 不触发行复选框
+      onClick={(e) => { e.preventDefault(); e.stopPropagation(); onToggle(!active) }}
+      style={{
+        ...pillBase, border: 'none', font: 'inherit', fontSize: 10, padding: '0 7px', cursor: 'pointer',
+        ...(active
+          ? { background: `color-mix(in srgb, ${T.brand} 16%, transparent)`, color: T.labelPrimary, fontWeight: 500 }
+          : { background: T.bgModulePlatform, color: T.labelTertiary }),
+      }}
+    >
+      {label}
+    </button>
   )
 }
 
@@ -528,40 +551,71 @@ function CreateGroupDialog({ onCancel, onCreate }) {
  * 当前分组的使用范围：直写 settings 配置，本地即时生效，后台对账收敛。
  * 工作区两区收纳：已勾选常显，未勾选收进折叠区；超阈值出过滤框，过滤时平铺全部匹配项。
  * 列表区为内嵌滚动面板，7 行封顶内滚，不随工作区数撑高卡片。
+ * 宿主维度：行勾选默认仅 DSH；pi 可用时行尾出 [DSH][pi] chips，勾 pi 即同步物化两侧。
  * 防御：取消勾选会经对账移除该组在此目标下的全部链接。
  * 波及半径与「点一下复选框」的心智不对称，移除数 >0 时必须走遮罩确认。
  */
-function GroupScopePanel({ config, group, workspaces, skills, onGroupOp }) {
+function GroupScopePanel({ config, group, workspaces, skills, onGroupOp, piAvailable = false }) {
   const [renaming, setRenaming] = useState(false)
   const [newName, setNewName] = useState('')
   const [opsOpen, setOpsOpen] = useState(false)
   const [showAllWs, setShowAllWs] = useState(false)
   const [wsFilter, setWsFilter] = useState('')
-  const [pendingUnmount, setPendingUnmount] = useState(null) // {scopeKind, workspaceId, count, targetName}
-  const { groups, toggleMount } = config
+  const [pendingUnmount, setPendingUnmount] = useState(null) // {scopeKind, workspaceId, count, targetName, hosts}
+  const { groups, toggleMount, toggleHost } = config
   const mounts = (groups[group] && groups[group].mounts) || []
-  const enabled = (scopeKind, workspaceId) => mounts.some((mount) => (
+  const findMount = (scopeKind, workspaceId) => mounts.find((mount) => (
     mount.scope === scopeKind && (scopeKind === 'global' || mount.project === workspaceId)
   ))
+  const enabled = (scopeKind, workspaceId) => Boolean(findMount(scopeKind, workspaceId))
+  // 宿主集：存量规则无 hosts 键按 ['dsh'] 回落（与 schema default 同源语义）
+  const hostsOf = (scopeKind, workspaceId) => {
+    const m = findMount(scopeKind, workspaceId)
+    if (!m) return []
+    return Array.isArray(m.hosts) && m.hosts.length > 0 ? m.hosts : ['dsh']
+  }
   // 失效组回落，与 Host 端同源：组引用不存在 → 成员按「默认」推导。
   const effectiveGroup = (skill) => {
     const g = skill.group || '默认'
     return Object.prototype.hasOwnProperty.call(groups, g) ? g : '默认'
   }
   const linksOnTarget = (scopeKind, workspaceId) => {
-    const key = scopeKind === 'global' ? 'global|global' : `project|${workspaceId}`
-    return skills.filter((s) => effectiveGroup(s) === group && s.targets.includes(key)).length
+    const base = scopeKind === 'global' ? 'global|global' : `project|${workspaceId}`
+    return skills.filter((s) => effectiveGroup(s) === group && (s.targets.includes(`dsh:${base}`) || s.targets.includes(`pi:${base}`))).length
   }
   const toggle = (scopeKind, workspaceId, checked) => {
     if (!checked) {
       const count = linksOnTarget(scopeKind, workspaceId)
       if (count > 0) {
         const ws = scopeKind === 'project' ? workspaces.find((w) => w.workspaceId === workspaceId) : null
-        setPendingUnmount({ scopeKind, workspaceId, count, targetName: ws ? ws.title : 'DSH 全局' })
+        setPendingUnmount({ scopeKind, workspaceId, count, targetName: ws ? ws.title : '全局', hosts: hostsOf(scopeKind, workspaceId) })
         return
       }
     }
     toggleMount(group, scopeKind, workspaceId, checked)
+  }
+  // 宿主 chip 开关：关最后一个宿主 = 取消整行挂载（走同一确认路径）
+  const toggleHostChip = (scopeKind, workspaceId, host, on) => {
+    if (on) {
+      toggleHost(group, scopeKind, workspaceId, host, true)
+      return
+    }
+    if (hostsOf(scopeKind, workspaceId).length <= 1) {
+      toggle(scopeKind, workspaceId, false)
+      return
+    }
+    toggleHost(group, scopeKind, workspaceId, host, false)
+  }
+  // 行尾宿主 chips：仅行已勾选且 pi 可用时出现；勾选 = 该宿主侧物化
+  const hostChipsFor = (scopeKind, workspaceId) => {
+    if (!piAvailable || !enabled(scopeKind, workspaceId)) return null
+    const hosts = hostsOf(scopeKind, workspaceId)
+    return (
+      <span style={{ display: 'inline-flex', gap: 4, flex: 'none' }}>
+        <HostChip label="DSH" title="DSH 侧生效（全局根 / 工作区 .dsh/skills）" active={hosts.includes('dsh')} onToggle={(on) => toggleHostChip(scopeKind, workspaceId, 'dsh', on)} />
+        <HostChip label="pi" title="pi 侧生效（pi 用户级 / 工作区 .pi/skills）" active={hosts.includes('pi')} onToggle={(on) => toggleHostChip(scopeKind, workspaceId, 'pi', on)} />
+      </span>
+    )
   }
   const confirmUnmount = () => {
     toggleMount(group, pendingUnmount.scopeKind, pendingUnmount.workspaceId, false)
@@ -633,7 +687,14 @@ function GroupScopePanel({ config, group, workspaces, skills, onGroupOp }) {
       {renaming && <div style={{ ...noteText, marginBottom: 8 }}>改名立即生效：分组成员与挂载规则同步改名，Skill 本体不受影响。</div>}
       <div style={dividerStyle} />
       <div style={{ padding: '4px 0' }}>
-        <ScopeRow checked={enabled('global')} title="DSH 全局" hint="对所有 DSH 项目生效" count={0} onToggle={(checked) => toggle('global', null, checked)} />
+        <ScopeRow
+          checked={enabled('global')}
+          title={piAvailable ? '全局' : 'DSH 全局'}
+          hint={piAvailable ? 'DSH 全局与 pi 用户级，按右侧宿主选择生效面' : '对所有 DSH 项目生效'}
+          count={0}
+          onToggle={(checked) => toggle('global', null, checked)}
+          trailing={hostChipsFor('global', null)}
+        />
       </div>
       <div style={dividerStyle} />
       {workspaces.length === 0
@@ -663,6 +724,7 @@ function GroupScopePanel({ config, group, workspaces, skills, onGroupOp }) {
                       hint={workspace.path}
                       count={workspace.mountCount}
                       onToggle={(checked) => toggle('project', workspace.workspaceId, checked)}
+                      trailing={hostChipsFor('project', workspace.workspaceId)}
                     />
                   ))}
                   {filtering && visibleWs.length === 0 && <div style={{ ...S.muted, padding: '8px 10px' }}>无匹配工作区</div>}
@@ -686,7 +748,7 @@ function GroupScopePanel({ config, group, workspaces, skills, onGroupOp }) {
             {`该分组有 ${pendingUnmount.count} 个 Skill 挂载在此目标下，取消后对账会移除这些链接。`}
           </div>
           <div style={{ borderRadius: 10, padding: '10px 12px', marginBottom: 14, ...badgeStyle(T.warn), fontSize: 12, lineHeight: 1.55 }}>
-            只移除链接指针，不删除技能库文件；重新勾选即可恢复挂载。
+            {`只移除链接指针，不删除技能库文件${pendingUnmount.hosts.includes('pi') ? '；本目标含 pi 宿主，.pi/skills 与 pi 用户级链接一并摘除' : ''}；重新勾选即可恢复挂载。`}
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
             <OutlineBtn onClick={() => setPendingUnmount(null)}>取消</OutlineBtn>

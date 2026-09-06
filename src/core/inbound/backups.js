@@ -25,7 +25,7 @@ import { copyTree, nowIso, validateInstallName } from './zipball.js'
  * 任一步失败不回滚已完成步骤，错误消息携带已完成动作供展示。
  * @throws {SkillManagerError} not-removable — 非 github 登记（本地/自研无删除入口）
  */
-export async function remove({ root, store, name, backupsRoot, workspacesById, globalRootPath }) { // quality-floor: ignore docstring-promise 函数体确有 throw SkillManagerError（not-removable 等）；扫描器将参数解构花括号配误作函数体起点致漏看
+export async function remove({ root, store, name, backupsRoot, workspacesById, globalRootPath, piSkillsRoot = null }) { // quality-floor: ignore docstring-promise 函数体确有 throw SkillManagerError（not-removable 等）；扫描器将参数解构花括号配误作函数体起点致漏看
   const record = store.getSkill(name) ?? null
   if (!record || record.origin !== 'github') {
     throw new SkillManagerError('not-removable', `「${name}」不是外部 skill（本地与自研目录无删除入口，请在文件系统自管）`, false, [
@@ -59,7 +59,7 @@ export async function remove({ root, store, name, backupsRoot, workspacesById, g
   //    指向 <root>/<name> 者删除，真实目录与其他链接一律不动。
   const detached = []
   const srcCanonical = await canonicalPath(src)
-  for (const link of await scanMountLinks({ root, globalRootPath, workspacesById })) {
+  for (const link of await scanMountLinks({ root, globalRootPath, workspacesById, piSkillsRoot })) {
     if (link.owned && pathsEqual(link.target, srcCanonical)) {
       await removeLink(link.path)
       detached.push(link.path)

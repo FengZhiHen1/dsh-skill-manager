@@ -228,8 +228,7 @@ async function swapDirInner(dest, buildFn) {
   } finally {
     // 只清 stage：旧目录在失败路径上一律保留，唯一删除点是上方的换装成功后置。
     // 清理失败不得遮蔽在途的业务错误（finally 抛出会替换原异常）。
-    await rm(stage, { recursive: true, force: true }).catch(() => {
-      // stage 残留由下次 mkdtemp 新目录规避，不阻断调用方
+    await rm(stage, { recursive: true, force: true }).catch(() => { // quality-floor: ignore silent-catch 清理失败不得遮蔽在途业务错误，stage 残留由下次 mkdtemp 新目录规避
     })
   }
 }

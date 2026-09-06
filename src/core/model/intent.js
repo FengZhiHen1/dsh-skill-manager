@@ -4,7 +4,8 @@
 // 参考：插件运行时.md「配置即意图」；DSR-015。
 
 import { statSync } from 'node:fs'
-import { isAbsolute, resolve } from 'node:path'
+import { homedir } from 'node:os'
+import { isAbsolute, join, resolve } from 'node:path'
 import z from 'schemastery'
 import { SkillManagerError } from '../base/errors.js'
 
@@ -12,8 +13,28 @@ import { SkillManagerError } from '../base/errors.js'
 export const CONFIG_NS = 'skill-manager'
 /** 本地 skills 目录的配置键名；空串 = 未配置。 */
 export const SKILLS_DIR_FIELD = 'skillsDir'
+/** pi agent 目录的配置键名；空串 = 自动探测 <home>/.pi/agent。 */
+export const PI_AGENT_DIR_FIELD = 'piAgentDir'
 /** 虚拟默认组（不落 settings.groups 也始终存在）。 */
 export const DEFAULT_GROUP = '默认'
+/** 合法挂载宿主与默认宿主集（存量规则无 hosts 键时按默认回落 = 仅 DSH）。 */
+export const HOSTS = ['dsh', 'pi']
+export const DEFAULT_HOSTS = ['dsh']
+
+/**
+ * 解析 pi agent 目录：显式配置（须绝对路径，写路径已拦）优先，不存在也按可用计（物化时按需创建）。
+ * 空串自动探测 <home>/.pi/agent；探测不到返回 null：pi 目标不产期望、UI 不出入口，行为与未接管逐字节一致。
+ * home 参数为测试注入点（生产缺省取进程 home）。
+ */
+export function resolvePiAgentDir(configured, home = homedir()) {
+  if (typeof configured === 'string' && configured !== '') return resolve(configured)
+  try {
+    const candidate = join(home, '.pi', 'agent')
+    return statSync(candidate).isDirectory() ? candidate : null
+  } catch {
+    return null // 探测失败 = pi 未安装/不可读，按不可用回落（显式三态之一）
+  }
+}
 
 const RESERVED_GROUPS = new Set(['默认', '全部'])
 const BAD_GROUP_CHARS = /[/\\:*?"<>|\x00-\x1f]/
@@ -33,6 +54,7 @@ export function validateGroupName(name) {
 const mountSchema = () => z.object({
   scope: z.union([z.const('global'), z.const('project')]),
   project: z.union([z.string(), z.const(null)]).default(null),
+  hosts: z.array(z.union([z.const('dsh'), z.const('pi')])).default(DEFAULT_HOSTS),
 })
 
 const groupSchema = () => z.object({
@@ -47,13 +69,15 @@ const skillIntentSchema = () => z.object({
 /**
  * 配置 schema：全部用户意图字段，落在 settings.yaml 的 skill-manager 段。
  * skillsDir      本地 skills 目录绝对路径；空串 = 未配置。
- * groups         组集合 { 组名: { mounts: [{ scope, project }] } }。
+ * piAgentDir     pi agent 目录；空串 = 自动探测 <home>/.pi/agent，探测不到即未接管。
+ * groups         组集合 { 组名: { mounts: [{ scope, project, hosts }] } }；hosts 缺省 = ['dsh']。
  * skills         技能意图 { 目录名: { disabled, group } }。
  * intentMigrated 存量 storage 意图一次性导入标记；导入后 UI 不展示。
- * 默认种子 = 「默认」组挂载全局。
+ * 默认种子 = 「默认」组挂载全局（仅 DSH 宿主）。
  */
 export const configSchema = () => z.object({
   [SKILLS_DIR_FIELD]: z.string().default(''),
+  [PI_AGENT_DIR_FIELD]: z.string().default(''),
   intentMigrated: z.boolean().default(false),
   groups: z.dict(groupSchema()).default({ [DEFAULT_GROUP]: { mounts: [{ scope: 'global', project: null }] } }),
   skills: z.dict(skillIntentSchema()).default({}),
@@ -69,12 +93,19 @@ export const configSchema = () => z.object({
  */
 export function validateConfigIntent(value) {
   const dir = value?.[SKILLS_DIR_FIELD]
-  if (typeof dir !== 'string' || dir === '') return
-  if (!isAbsolute(dir)) throw new Error('本地 skill 目录必须是绝对路径')
+  if (typeof dir === 'string' && dir !== '' && !isAbsolute(dir)) throw new Error('本地 skill 目录必须是绝对路径')
+  const piDir = value?.[PI_AGENT_DIR_FIELD]
+  if (typeof piDir === 'string' && piDir !== '' && !isAbsolute(piDir)) throw new Error('pi agent 目录必须是绝对路径')
   // 「默认」是虚拟组的合法 groups 键，仅作挂载配置载体。
   // 保留字规则约束命名组创建/改名路径；客户端预检仍走 validateGroupName 全量。
-  for (const name of Object.keys(value?.groups ?? {})) {
+  for (const [name, g] of Object.entries(value?.groups ?? {})) {
     if (name !== DEFAULT_GROUP) validateGroupName(name)
+    for (const m of Array.isArray(g?.mounts) ? g.mounts : []) {
+      // 空 hosts = 死规则（勾选了却不挂任何宿主），写路径拦截；hosts 缺省由 schema 回落 ['dsh']
+      if (Array.isArray(m?.hosts) && m.hosts.length === 0) {
+        throw new Error(`组「${name}」存在不含任何宿主的挂载规则`)
+      }
+    }
   }
   for (const [skillDir, intent] of Object.entries(value?.skills ?? {})) {
     if (!intent || typeof intent !== 'object' || Array.isArray(intent)) {

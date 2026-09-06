@@ -63,6 +63,15 @@ function opt(v, path, check) {
   if (v !== undefined) check(v, path)
 }
 
+/**
+ * 挂载目标键解析：`host:scope|project` → { host, scope, project }；非法形状返回 null。
+ * 键格式的事实源在 derive.js targetKey（Host 侧拼接）；本解析器是 client 可复用的只读镜像。
+ */
+export function parseTargetKey(key) {
+  const m = /^(dsh|pi):(global|project)\|(.+)$/.exec(String(key))
+  return m === null ? null : { host: m[1], scope: m[2], project: m[3] }
+}
+
 /** 上游检查记录（check_cache 行 / overview 的 upstream 字段）。 */
 function checkRecordShape(r, path) {
   needObj(r, path)
@@ -168,6 +177,11 @@ const PARSERS = {
       needStr(issue.issue, `${path}.health.issues[${i}].issue`)
     })
     needArr(v.workspaces, `${path}.workspaces`).forEach((ws, i) => workspaceShape(ws, `${path}.workspaces[${i}]`))
+    // 接管宿主可用性：pi.available=false 时 UI 不出 pi 入口，skillsRoot 为 null
+    needObj(v.agents, `${path}.agents`)
+    needObj(v.agents.pi, `${path}.agents.pi`)
+    needBool(v.agents.pi.available, `${path}.agents.pi.available`)
+    needStrOrNull(v.agents.pi.skillsRoot, `${path}.agents.pi.skillsRoot`)
   },
   warm(v, path) {
     needObj(v, path)
