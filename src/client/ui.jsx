@@ -68,10 +68,15 @@ export const OutlineBtn = (props) => <Button variant="outline" size="sm" {...pro
  */
 export const PrimaryBtn = (props) => <Button variant="primary" size="sm" {...props} />
 
-/** 页级/行级错误单行呈现（无修复入口的轻量面；带复制入口的用 section 的 ErrorLineWrap）。 */
+/** 页级/行级错误卡（与警告条同一视觉语言，红色相；带复制入口的页级错误用 section 的 ErrorLineWrap）。 */
 export function ErrorLine({ error }) {
   if (!error) return null
-  return <div style={{ color: T.error, fontSize: 12, padding: '6px 8px' }}>{String(error.message || error)}</div>
+  return (
+    <div style={{ ...badgeStyle(T.error), borderRadius: 10, padding: '9px 12px', marginBottom: 8, fontSize: 12, display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+      <span style={{ ...dotStyle(T.error), marginTop: 5, flex: 'none' }} />
+      <span style={{ flex: 1, minWidth: 0, wordBreak: 'break-word', lineHeight: 1.55 }}>{String(error.message || error)}</span>
+    </div>
+  )
 }
 
 /**

@@ -65,7 +65,6 @@ export const S = {
   filterTrigger: { display: 'inline-flex', alignItems: 'center', gap: 4, border: 'none', background: T.bgModulePlatform, borderRadius: 8, padding: '5px 10px', font: 'inherit', fontSize: 12, color: T.labelPrimary, cursor: 'pointer' },
   muted: { color: T.labelSecondary, fontSize: 12 },
   guide: { padding: '24px 16px', textAlign: 'center', color: T.labelSecondary, fontSize: 13 },
-  dangerText: { color: T.error },
   toolbar: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 },
 }
 

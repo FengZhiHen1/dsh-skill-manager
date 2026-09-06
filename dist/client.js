@@ -370,7 +370,6 @@ var S = {
   filterTrigger: { display: "inline-flex", alignItems: "center", gap: 4, border: "none", background: T.bgModulePlatform, borderRadius: 8, padding: "5px 10px", font: "inherit", fontSize: 12, color: T.labelPrimary, cursor: "pointer" },
   muted: { color: T.labelSecondary, fontSize: 12 },
   guide: { padding: "24px 16px", textAlign: "center", color: T.labelSecondary, fontSize: 13 },
-  dangerText: { color: T.error },
   toolbar: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 6 }
 };
 var cardStyle = { border: `1px solid ${T.borderL1}`, borderRadius: 12, background: T.bgLayer3 };
@@ -439,7 +438,10 @@ var OutlineBtn = (props) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_d
 var PrimaryBtn = (props) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "primary", size: "sm", ...props });
 function ErrorLine({ error }) {
   if (!error) return null;
-  return /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: { color: T.error, fontSize: 12, padding: "6px 8px" }, children: String(error.message || error) });
+  return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: { ...badgeStyle(T.error), borderRadius: 10, padding: "9px 12px", marginBottom: 8, fontSize: 12, display: "flex", alignItems: "flex-start", gap: 8 }, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { ...dotStyle(T.error), marginTop: 5, flex: "none" } }),
+    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { flex: 1, minWidth: 0, wordBreak: "break-word", lineHeight: 1.55 }, children: String(error.message || error) })
+  ] });
 }
 function NoticeBar({ notice }) {
   if (!notice) return null;
@@ -1499,9 +1501,17 @@ function SearchView({ call, reload, showToast }) {
   const [candidates, setCandidates] = (0, import_react4.useState)(null);
   const [selected, setSelected] = (0, import_react4.useState)(/* @__PURE__ */ new Set());
   const [candFilter, setCandFilter] = (0, import_react4.useState)("");
-  const showCandidates = (value) => {
+  const showCandidates = (value, intentDir) => {
     setCandidates(value);
-    setSelected(/* @__PURE__ */ new Set());
+    const intentName = typeof intentDir === "string" && intentDir !== "" ? intentDir.split("/").pop() : null;
+    const pre = /* @__PURE__ */ new Set();
+    if (intentName) {
+      for (const c of value.list) {
+        const base = c.path ? c.path.split("/").pop() : "";
+        if (base === intentName) pre.add(c.path || "");
+      }
+    }
+    setSelected(pre);
     setCandFilter("");
     setNotice(null);
     setError(null);
@@ -1533,6 +1543,17 @@ function SearchView({ call, reload, showToast }) {
       showToast(`\u5DF2\u5165\u5E93 ${r.name}`);
       reload();
     } catch (e) {
+      if (e?.code === "needs-selection") {
+        try {
+          const r = await call("repo-skills", { repo, ref: "main" });
+          showCandidates({ repo, branch: r.branch, list: r.candidates }, directory);
+          setNotice({ tone: "warn", text: "\u8BE5 skill \u5728\u4ED3\u5E93\u4E2D\u7684\u4F4D\u7F6E\u5DF2\u53D8\u5316\uFF08\u6CE8\u518C\u8868\u76EE\u5F55\u4FE1\u606F\u8FC7\u671F\uFF09\uFF0C\u8BF7\u5728\u4E0B\u65B9\u5019\u9009\u4E2D\u786E\u8BA4\u2014\u2014\u5DF2\u6309\u540D\u79F0\u4E3A\u4F60\u9884\u9009\u3002" });
+          return;
+        } catch (probeError) {
+          setError(probeError);
+          return;
+        }
+      }
       setError(e);
     } finally {
       inFlight.current = false;

@@ -24,10 +24,19 @@ export function SearchView({ call, reload, showToast }) {
   const [selected, setSelected] = useState(new Set())
   const [candFilter, setCandFilter] = useState('')
 
-  // 多候选统一入口：仅 DirectAdd（只知道仓库）进入候选列表
-  const showCandidates = (value) => {
+  // 多候选统一入口：仅 DirectAdd（只知道仓库）进入候选列表。
+  // intentDir = 入库动作自带的目录意图（搜索行直达失败的回退）：按建议名预选，帮用户守住原意图。
+  const showCandidates = (value, intentDir) => {
     setCandidates(value)
-    setSelected(new Set())
+    const intentName = typeof intentDir === 'string' && intentDir !== '' ? intentDir.split('/').pop() : null
+    const pre = new Set()
+    if (intentName) {
+      for (const c of value.list) {
+        const base = c.path ? c.path.split('/').pop() : ''
+        if (base === intentName) pre.add(c.path || '')
+      }
+    }
+    setSelected(pre)
     setCandFilter('')
     setNotice(null)
     setError(null)
@@ -57,6 +66,7 @@ export function SearchView({ call, reload, showToast }) {
 
   // 搜索结果行入库：skills.sh 结果自带精确目录，意图不降级——直接 add 不经仓库探测
   // （分支回退 main→master 与目录定位兜底在 Host add 内部，探测对此路径是多余的）。
+  // 目录意图失效（上游搬家 → needs-selection）时回退探测进候选列表，并按意图名预选。
   const addFromResult = async (repo, directory) => {
     if (inFlight.current) return
     inFlight.current = true
@@ -67,6 +77,17 @@ export function SearchView({ call, reload, showToast }) {
       showToast(`已入库 ${r.name}`)
       reload()
     } catch (e) {
+      if (e?.code === 'needs-selection') {
+        try {
+          const r = await call('repo-skills', { repo, ref: 'main' })
+          showCandidates({ repo, branch: r.branch, list: r.candidates }, directory)
+          setNotice({ tone: 'warn', text: '该 skill 在仓库中的位置已变化（注册表目录信息过期），请在下方候选中确认——已按名称为你预选。' })
+          return
+        } catch (probeError) {
+          setError(probeError)
+          return
+        }
+      }
       setError(e)
     } finally {
       inFlight.current = false
