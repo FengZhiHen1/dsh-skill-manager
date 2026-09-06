@@ -15,17 +15,18 @@ import { removeLink } from '../mount/materialize.js'
 import { copyTree, nowIso, validateInstallName } from './zipball.js'
 
 /**
- * 出库：仅限 origin:"github" 的外部 skill。执行顺序不可交换：
+ * 出库：仅限 origin:"github" 的外部 skill（双根制下落插件库根，DSR-020）。执行顺序不可交换：
  * 1. 备份整目录（missing 条目无物可备，backup=null）；
  * 2. 摘除该 name 的全部物化链接：归属判据单源扫描全局根与活动工作区根；
  *    指向 <root>/<name> 者删除，真实目录与其他链接一律不动；
+ *    归属判据为双根并集（userRoot ∪ 插件库根），扫描范围与对账同口径；
  * 3. 删除库内目录；
  * 4. 删除 skills 登记与 check_cache 条目。
  * 不触碰 settings 意图（disabled/group 残留，日后入库自然落回原组）。
  * 任一步失败不回滚已完成步骤，错误消息携带已完成动作供展示。
  * @throws {SkillManagerError} not-removable — 非 github 登记（本地/自研无删除入口）
  */
-export async function remove({ root, store, name, backupsRoot, workspacesById, globalRootPath, piSkillsRoot = null }) { // quality-floor: ignore docstring-promise 函数体确有 throw SkillManagerError（not-removable 等）；扫描器将参数解构花括号配误作函数体起点致漏看
+export async function remove({ root, userRoot = null, store, name, backupsRoot, workspacesById, globalRootPath, piSkillsRoot = null }) { // quality-floor: ignore docstring-promise 函数体确有 throw SkillManagerError（not-removable 等）；扫描器将参数解构花括号配误作函数体起点致漏看
   const record = store.getSkill(name) ?? null
   if (!record || record.origin !== 'github') {
     throw new SkillManagerError('not-removable', `「${name}」不是外部 skill（本地与自研目录无删除入口，请在文件系统自管）`, false, [
@@ -59,7 +60,7 @@ export async function remove({ root, store, name, backupsRoot, workspacesById, g
   //    指向 <root>/<name> 者删除，真实目录与其他链接一律不动。
   const detached = []
   const srcCanonical = await canonicalPath(src)
-  for (const link of await scanMountLinks({ root, globalRootPath, workspacesById, piSkillsRoot })) {
+  for (const link of await scanMountLinks({ root: userRoot ?? root, globalRootPath, workspacesById, piSkillsRoot, libraryRoot: root })) {
     if (link.owned && pathsEqual(link.target, srcCanonical)) {
       await removeLink(link.path)
       detached.push(link.path)

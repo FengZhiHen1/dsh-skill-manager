@@ -209,7 +209,7 @@ export function SkillManagerCard({ scope, uiWorkspace }) {
               />
               <GhostBtn disabled={busy || !ready} onClick={pickDirectory}>选择…</GhostBtn>
             </div>
-            <p style={{ margin: 0, fontSize: 12, lineHeight: 1.5, color: T.labelTertiary }}>绝对路径；保存后立即生效，无需重启。</p>
+            <p style={{ margin: 0, fontSize: 12, lineHeight: 1.5, color: T.labelTertiary }}>自研/本地 skill 的平铺目录，绝对路径，保存后立即生效。GitHub 入库安装到插件专属目录，不受本地编辑影响。</p>
           </div>
           {/* 接管宿主：DSH 是本插件基本盘（固定勾选不可关）；pi 可选，目录固定按默认路径探测 */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '2px 0 12px' }}>

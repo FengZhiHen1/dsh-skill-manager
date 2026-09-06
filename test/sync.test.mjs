@@ -408,6 +408,38 @@ test('reconcile：pi 宿主接管——.pi/skills 双侧物化与摘除、exclud
   }
 })
 
+test('reconcile：双根制——github 条目从插件库根物化；归属判据覆盖用户根与插件库根（DSR-020）', async () => {
+  const f = await fixture()
+  const lib = await mkTmp()
+  try {
+    await writeSkill(f.root, 'mine') // 自研：用户根
+    await writeSkill(lib, 'pdf') // github：插件库根
+    const opts = () => ({
+      root: f.root,
+      mounts: [{ group: 'g1', scope: 'global', project: null }],
+      workspacesById: f.workspacesById,
+      globalRootPath: f.globalRootPath,
+      libraryRoot: lib,
+      srcRootOf: (dir) => (dir === 'pdf' ? lib : f.root),
+    })
+    const memberships = new Map([['mine', 'g1'], ['pdf', 'g1']])
+    const r = await reconcile({ ...opts(), memberships })
+    assert.equal(r.errors.length, 0)
+    // 双侧物化，链接各回各源根
+    assert.ok(await isLink(join(f.globalRootPath, 'mine')))
+    assert.ok(await isLink(join(f.globalRootPath, 'pdf')))
+    assert.equal((await readdir(join(f.globalRootPath, 'pdf')))[0], 'SKILL.md')
+    // pdf 退场：指向插件库根的链接同属管辖（owned 并集），按孤儿摘除；mine 不动
+    const r2 = await reconcile({ ...opts(), memberships: new Map([['mine', 'g1']]) })
+    assert.equal(r2.results.find((x) => x.name === 'pdf')?.action, 'removed')
+    assert.equal(await isLink(join(f.globalRootPath, 'pdf')), false)
+    assert.ok(await isLink(join(f.globalRootPath, 'mine')))
+  } finally {
+    await cleanup(f.tmp)
+    await cleanup(lib)
+  }
+})
+
 test('piState：扫描根 = 开关开或规则引用 pi；开关关且无引用 = pi 全不存在（不扫不报）', () => {
   const offNoRef = piState({ pi: false, groups: { 默认: { mounts: [] } } }, 'PS')
   assert.deepEqual(offNoRef, { piSkillsRoot: null, piScanRoot: null })

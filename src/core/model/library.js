@@ -1,6 +1,7 @@
-// library — 库扫描与内容基线：目录遍历、SKILL.md 解析、目录哈希。
+// library — 库扫描与内容基线：双根目录遍历、SKILL.md 解析、目录哈希。
 //
-// 边界：纯读视图，不写 storage；库成员 = 配置目录直接子目录中含 SKILL.md 者。
+// 边界：纯读视图，不写 storage；库成员 = 用户根直接子目录（自研/本地）+ 插件库根内的 github 条目。
+// 双根制（DSR-020）：GitHub 外部 skill 装在插件专属库根，与用户的本地目录物理隔离。
 // 参考：入站操作.md「库扫描」；目录配置与状态存储.md「storage 域形状」。
 
 import { createHash } from 'node:crypto'
@@ -110,21 +111,24 @@ async function readSkillMeta(mdPath, meta, key) {
 }
 
 /**
- * 库扫描：产出库内每个技能的总览列表，含目录缺失条目。
- * 成员 = 配置目录直接子目录，纯平铺、无 skills/ 子层。
- * 表中 github 记录但目录缺失 → 补为 missing 条目，作恢复入口。
+ * 库扫描（双根制，DSR-020）：产出库内每个技能的总览列表，含目录缺失条目。
+ * 用户根（配置目录）= 自研/本地自管：直接子目录纯平铺、无 skills/ 子层，不登记。
+ * 插件库根（libraryRoot）= GitHub 外部专属：条目由登记表驱动，目录缺失 → missing 恢复入口。
+ * 同名冲突：用户根目录与 github 登记撞名 → 登记优先，本地目录遮蔽并入 conflicts（调用方出警告）。
  * 列表项字段：name、dir、description、hasSkillMd、commit、disabled、
  * missing、group；origin 取 self/github/local，group 为所属组（虚拟组 =「默认」）。
- * 纯读视图（与测试契约同断言）：不写 storage，本地目录无版本管理不登记。
+ * 纯读视图：不写 storage，本地目录无版本管理不登记。
  * github 记录缺 content_hash 不回填，基线只由入站路径 add/update 维护。
  * disabled、group 为占位默认值，意图字段由 API 层叠加 settings.skills。
- * @param {object} opts 传 opts.meta（createSharedCache 产出的共享缓存）
- *        → 签名一致即复用解析结果，重扫退化为 N 次 stat。
+ * @param {string} root 用户根（配置目录）
+ * @param {object} store 存取门面
+ * @param {object} opts 传 opts.meta（共享缓存）→ 签名一致即复用解析结果；opts.libraryRoot = 插件库根
+ * @returns {{ items: Array, conflicts: string[] }} items 按 dir 排序；conflicts 为被遮蔽的同名目录名
  */
 export async function scanLibrary(root, store, opts = {}) {
   const records = new Map(store.skillEntries())
   const items = []
-  const seen = new Set()
+  const conflicts = []
   let dirs = []
   try {
     dirs = await readdir(root, { withFileTypes: true })
@@ -134,11 +138,15 @@ export async function scanLibrary(root, store, opts = {}) {
   for (const entry of dirs.filter((d) => d.isDirectory())) {
     const dir = entry.name
     if (dir.startsWith('.')) continue
-    seen.add(dir)
+    const record = records.get(dir) ?? null
+    // 同名冲突：GitHub 登记的源根是插件库，用户根里的同名目录遮蔽（登记优先）
+    if (record && record.origin === 'github') {
+      conflicts.push(dir)
+      continue
+    }
     const absDir = join(root, dir)
     const mdPath = join(absDir, 'SKILL.md')
     const { hasSkillMd, meta } = await readSkillMeta(mdPath, opts.meta, `${root}\0${dir}`)
-    const record = records.get(dir) ?? null
     items.push({
       name: meta.name || dir,
       dir,
@@ -153,23 +161,40 @@ export async function scanLibrary(root, store, opts = {}) {
       group: '默认',
     })
   }
-  // 表中 github 记录但目录缺失 → 补为 missing 恢复入口；仅 github 有上游可恢复。
-  // 本地 skill 无版本管理，目录删除即消失。
+  // github 条目由登记表驱动、落插件库根：目录在 → 读元数据；缺失 → missing 恢复入口。
   for (const [name, record] of records) {
-    if (!seen.has(name) && record && record.origin === 'github') {
+    if (!record || record.origin !== 'github') continue
+    const libDir = typeof opts.libraryRoot === 'string' && opts.libraryRoot !== '' ? join(opts.libraryRoot, name) : null
+    const present = libDir !== null && await existsDir(libDir)
+    if (!present) {
       items.push({
-        name,
-        dir: name,
-        description: '',
-        origin: record.origin,
-        hasSkillMd: false,
-        commit: record.commit,
-        missing: true,
-        disabled: false,
-        group: '默认',
+        name, dir: name, description: '', origin: 'github', hasSkillMd: false,
+        commit: record.commit, missing: true, disabled: false, group: '默认',
       })
+      continue
     }
+    const { hasSkillMd, meta } = await readSkillMeta(join(libDir, 'SKILL.md'), opts.meta, `${libDir}\0${name}`)
+    items.push({
+      name: meta.name || name,
+      dir: name,
+      description: meta.description || '',
+      origin: 'github',
+      hasSkillMd,
+      commit: record.commit ?? null,
+      missing: false,
+      disabled: false,
+      group: '默认',
+    })
   }
   items.sort((a, b) => a.dir.localeCompare(b.dir))
-  return items
+  return { items, conflicts }
+}
+
+/** 目录存在性探针（库扫描内部用；不存在/非目录/不可读 → false）。 */
+async function existsDir(p) {
+  try {
+    return (await stat(p)).isDirectory()
+  } catch {
+    return false // 探针语义：任何失败都按不存在报（missing 是显式状态）
+  }
 }

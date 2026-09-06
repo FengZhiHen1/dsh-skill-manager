@@ -33,11 +33,12 @@ export function scanRoots({ workspacesById, globalRootPath, piSkillsRoot = null 
 /**
  * 扫描全部链接现场（只读）：返回 [{ path, name, parent, target, owned }]。
  * owned = 归属判据成立：realpath（悬挂链接以 readlink 原始目标兜底）落在
- * 当前配置目录内（带路径分隔符边界，`skills-sibling` 不算）。“改配另一目录
- * 后旧链接不在新前缀内” → owned=false → 保留为孤儿，永不清理（AC-10）。
+ * 库内并集（用户根 ∪ libraryRoot，双根制 DSR-020；带路径分隔符边界，`skills-sibling` 不算）。
+ * “改配另一目录后旧链接不在新前缀内” → owned=false → 保留为孤儿，永不清理（AC-10）。
  */
-export async function scanMountLinks({ root, globalRootPath, workspacesById, piSkillsRoot = null }) {
-  const repoRoot = await canonicalPath(root)
+export async function scanMountLinks({ root, globalRootPath, workspacesById, piSkillsRoot = null, libraryRoot = null }) {
+  const canonicalGuards = [await canonicalPath(root)]
+  if (typeof libraryRoot === 'string' && libraryRoot !== '') canonicalGuards.push(await canonicalPath(libraryRoot))
   const links = []
   for (const dir of scanRoots({ globalRootPath, workspacesById, piSkillsRoot })) {
     let entries = []
@@ -55,7 +56,7 @@ export async function scanMountLinks({ root, globalRootPath, workspacesById, piS
         name: entry.name,
         parent: dir,
         target,
-        owned: target !== '' && withinRoot(repoRoot, target),
+        owned: target !== '' && canonicalGuards.some((guard) => withinRoot(guard, target)),
       })
     }
   }
@@ -82,8 +83,8 @@ function desiredPathSet(desired, { workspacesById, globalRootPath, piSkillsRoot 
  * - remove 摘除：调用方按 `target === <root>/<name>` 过滤后摘除；
  * - 行状态走查：walkMountState 借同一现场集判定。
  */
-export async function findOrphanLinks({ root, desired, globalRootPath, workspacesById, piSkillsRoot = null, links }) {
-  const all = links ?? (await scanMountLinks({ root, globalRootPath, workspacesById, piSkillsRoot }))
+export async function findOrphanLinks({ root, desired, globalRootPath, workspacesById, piSkillsRoot = null, libraryRoot = null, links }) {
+  const all = links ?? (await scanMountLinks({ root, globalRootPath, workspacesById, piSkillsRoot, libraryRoot }))
   const expected = desiredPathSet(desired, { workspacesById, globalRootPath, piSkillsRoot })
   return all.filter((l) => l.owned && !expected.has(resolve(l.path).toLowerCase()))
 }
@@ -96,12 +97,14 @@ export async function findOrphanLinks({ root, desired, globalRootPath, workspace
  * 无异常的 skill 不入结果（即全部 ok）。
  * @returns {Map<string, Array<{ target: string, path: string, issue: string }>>}
  */
-export async function walkMountState({ root, desired, links, globalRootPath, workspacesById, piSkillsRoot = null }) {
+export async function walkMountState({ root, desired, links, globalRootPath, workspacesById, piSkillsRoot = null, srcRootOf = null }) {
   const linksByPath = new Map(links.map((l) => [resolve(l.path).toLowerCase(), l]))
   const rows = new Map()
   for (const [skill, targets] of desired) {
     const issues = []
-    const expectedSrc = await canonicalPath(join(root, skill))
+    // 源根按来源分流（github→插件库根，其余→用户根）；srcRootOf 缺省 = 全量用户根（单根兼容）
+    const srcRoot = srcRootOf ? srcRootOf(skill) : root
+    const expectedSrc = await canonicalPath(join(srcRoot, skill))
     for (const t of targets) {
       const parent = targetDir(t, { workspacesById, globalRootPath, piSkillsRoot })
       const key = targetKey(t)

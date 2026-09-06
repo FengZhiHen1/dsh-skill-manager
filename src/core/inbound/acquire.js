@@ -61,15 +61,16 @@ export async function repoSkills(repoSlugInput, branch = 'main') {
 }
 
 /**
- * 入库：下载 zipball，落到库目录并登记，随后触发对账。
+ * 入库：下载 zipball，落到插件库根（root，DSR-020 双根制）并登记，随后触发对账。
  * 定位子目录走非 strict：指定路径未命中时回退自动探测，不报 path-stale。
+ * 撞名检查双根：插件库根占位（登记/目录）与用户根同名自研目录都拦。
  * Side Effects: 原子换装写入 root 下新目录 → 登记 skills 表 → 触发对账。
  * @throws {SkillManagerError} 解析与网络：bad-repo / remote-unreachable / bad-zipball
  * @throws {SkillManagerError} 目录定位：no-skill-md / needs-selection
  * @throws {SkillManagerError} 落库：bad-name / already-installed / name-conflict / write-failed / registration-failed
  * @throws {GhError} 下载失败按 kind 归类，由 dispatch 直通为稳定错误码
  */
-export async function add({ root, store, repo: repoInput, dir, ref = 'main', as, ctx }) { // quality-floor: ignore docstring-promise 函数体确有 throw SkillManagerError（already-installed/name-conflict）；扫描器将参数解构花括号配误作函数体起点致漏看
+export async function add({ root, userRoot = null, store, repo: repoInput, dir, ref = 'main', as, ctx }) { // quality-floor: ignore docstring-promise 函数体确有 throw SkillManagerError（already-installed/name-conflict）；扫描器将参数解构花括号配误作函数体起点致漏看
   const repoSlug = normalizeRepoSlug(repoInput)
   const resolved = await resolveRemote(repoSlug, ref)
   const payload = await fetchZipball(repoSlug, resolved.branch)
@@ -107,6 +108,13 @@ export async function add({ root, store, repo: repoInput, dir, ref = 'main', as,
           { label: '欲导入仓库', value: repoSlug },
         ],
       )
+    }
+    // 双根制撞名：用户根（自研/本地目录）存在同名目录也拒绝——否则入库即遮蔽用户内容
+    if (userRoot !== null && (await pathExists(join(userRoot, installName)))) {
+      throw new SkillManagerError('name-conflict', `${installName} 与本地目录中的自研/本地 skill 同名，请先改名或移开本地目录`, false, [
+        { label: '本地目录', value: join(userRoot, installName) },
+        { label: '欲导入仓库', value: repoSlug },
+      ])
     }
     // 入库走原子换装：同卷临时目录构建后 rename 就位，杜绝半写目录暴露给 DSH。
     // add 目标此处必不存在（上方 name-conflict 已拦截），换装退化为直达 rename。

@@ -2002,7 +2002,7 @@ function SkillManagerCard({ scope, uiWorkspace }) {
           ),
           /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(GhostBtn, { disabled: busy || !ready, onClick: pickDirectory, children: "\u9009\u62E9\u2026" })
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { style: { margin: 0, fontSize: 12, lineHeight: 1.5, color: T.labelTertiary }, children: "\u7EDD\u5BF9\u8DEF\u5F84\uFF1B\u4FDD\u5B58\u540E\u7ACB\u5373\u751F\u6548\uFF0C\u65E0\u9700\u91CD\u542F\u3002" })
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { style: { margin: 0, fontSize: 12, lineHeight: 1.5, color: T.labelTertiary }, children: "\u81EA\u7814/\u672C\u5730 skill \u7684\u5E73\u94FA\u76EE\u5F55\uFF0C\u7EDD\u5BF9\u8DEF\u5F84\uFF0C\u4FDD\u5B58\u540E\u7ACB\u5373\u751F\u6548\u3002GitHub \u5165\u5E93\u5B89\u88C5\u5230\u63D2\u4EF6\u4E13\u5C5E\u76EE\u5F55\uFF0C\u4E0D\u53D7\u672C\u5730\u7F16\u8F91\u5F71\u54CD\u3002" })
       ] }),
       /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { style: { display: "flex", alignItems: "center", gap: 14, padding: "2px 0 12px" }, children: [
         /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { style: { fontSize: 13, fontWeight: 500, color: T.labelPrimary }, children: "\u63A5\u7BA1\u5BBF\u4E3B" }),

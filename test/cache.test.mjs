@@ -17,14 +17,14 @@ test('scanLibrary：meta 缓存按 stat 签名复用；内容变化后重扫生�
     const meta = new Map()
     const store = fakeStore()
     const first = await scanLibrary(root, store, { meta })
-    assert.equal(first[0].description, '第一版')
+    assert.equal(first.items[0].description, '第一版')
     assert.equal(meta.size, 1)
     const again = await scanLibrary(root, store, { meta })
-    assert.equal(again[0].description, '第一版')
+    assert.equal(again.items[0].description, '第一版')
     assert.equal(meta.size, 1)
     await writeFile(join(root, 'demo', 'SKILL.md'), '---\ndescription: 第二版\n---\n# demo\n', 'utf8')
     const second = await scanLibrary(root, store, { meta })
-    assert.equal(second[0].description, '第二版')
+    assert.equal(second.items[0].description, '第二版')
   } finally {
     await cleanup(root)
   }

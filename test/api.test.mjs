@@ -20,13 +20,14 @@ function mutableScope(skillsDir, initial = {}) {
   }
 }
 
-function makeApi({ root = '', workspaces = [], store = fakeStore(), backupsRoot = '', globalRoot, scope } = {}) {
+function makeApi({ root = '', workspaces = [], store = fakeStore(), backupsRoot = '', globalRoot, libraryRoot = null, scope } = {}) {
   return {
     api: buildApi(typeof scope === 'function' ? scope : () => scope ?? fakeScope(root), {
       listWorkspaces: () => workspaces,
       getStore: () => store,
       backupsRoot,
       globalRoot,
+      libraryRoot,
     }),
     store,
   }
@@ -153,14 +154,17 @@ test('overview：配置意图驱动 — 禁用/分组/挂载目标/工作区/健
   const root = await mkTmp()
   const proj = await mkTmp()
   const groot = await mkTmp()
+  const lib = await mkTmp()
   try {
-    await writeSkill(root, 'pdf')
+    // 双根制（DSR-020）：github 条目的内容在插件库根，自研条目在用户根
+    await writeSkill(lib, 'pdf')
     await writeSkill(root, 'off')
     const workspaces = [{ id: 'w1', path: proj, title: '项目' }]
     const { api, store } = makeApi({
       root,
       workspaces,
       globalRoot: groot,
+      libraryRoot: lib,
       scope: () => fakeScope(root, {
         groups: {
           办公: { mounts: [{ scope: 'global' }, { scope: 'project', project: 'w1' }] },
@@ -193,6 +197,7 @@ test('overview：配置意图驱动 — 禁用/分组/挂载目标/工作区/健
     await cleanup(root)
     await cleanup(proj)
     await cleanup(groot)
+    await cleanup(lib)
   }
 })
 

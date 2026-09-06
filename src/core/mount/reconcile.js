@@ -18,17 +18,19 @@ const EXCLUDE_LINES = { dsh: '/.dsh/skills/', pi: '/.pi/skills/' }
  * 全量对账：推导期望集 → 摘除孤儿链接（归属本插件且不在期望集）→
  * 物化期望（junction-only）→ 维护活动工作区的 git exclude 托管块。
  * 幂等：任意子项失败不影响其他子项，失败进 results。
+ * piSkillsRoot 非空时 pi 宿主目标参与同一流程（.pi/skills 物化与 exclude 行）。
+ * 双根制（DSR-020）：libraryRoot/srcRootOf 分流 github 条目的源根；缺省 = 单根（用户根）兼容。
  * @returns {Promise<{results: Array, warnings: Array, errors: Array}>}
  */
-export async function reconcile({ root, memberships, mounts, workspacesById, globalRootPath, piSkillsRoot = null, piScanRoot = piSkillsRoot }) {
+export async function reconcile({ root, memberships, mounts, workspacesById, globalRootPath, piSkillsRoot = null, piScanRoot = piSkillsRoot, libraryRoot = null, srcRootOf = null }) {
   const { desired, warnings } = deriveDesired({ memberships, mounts, workspacesById, globalRootPath, piSkillsRoot })
   const results = []
 
   // 1. 摘除 = 孤儿清扫（同一归属判据，无第二张台账）：owned 且不在期望集 → 删链接。
-  //    扫描语义用 piScanRoot（探测到就扫，与开关无关）：关开关后 pi 残留链接在此步摘除。
+  //    扫描语义用 piScanRoot（开关开或规则引用 pi 才扫）：关开关后 pi 残留链接在此步摘除。
   //    逐条隔离（与物化同构）：单条摘除失败进 results，不中断其余子项。
-  const links = await scanMountLinks({ root, globalRootPath, workspacesById, piSkillsRoot: piScanRoot })
-  const orphans = await findOrphanLinks({ root, desired, globalRootPath, workspacesById, piSkillsRoot, links })
+  const links = await scanMountLinks({ root, globalRootPath, workspacesById, piSkillsRoot: piScanRoot, libraryRoot })
+  const orphans = await findOrphanLinks({ root, desired, globalRootPath, workspacesById, piSkillsRoot, libraryRoot, links })
   for (const link of orphans) {
     try {
       await removeLink(link.path)
@@ -38,12 +40,13 @@ export async function reconcile({ root, memberships, mounts, workspacesById, glo
     }
   }
 
-  // 2. 物化活动期望（junction-only）。
+  // 2. 物化活动期望（junction-only）；源根按条目来源分流（github→插件库根，其余→用户根）。
   for (const [skill, targets] of desired) {
+    const srcRoot = srcRootOf ? srcRootOf(skill) : root
     for (const t of targets) {
       const key = targetKey(t)
       try {
-        const r = await materializeOne({ root, skill, t, workspacesById, globalRootPath, piSkillsRoot })
+        const r = await materializeOne({ root: srcRoot, skill, t, workspacesById, globalRootPath, piSkillsRoot, libraryRoot })
         results.push({ name: skill, target: key, action: r.action, method: 'junction' })
       } catch (error) {
         results.push({ name: skill, target: key, action: 'error', error: error.message, code: error.code })

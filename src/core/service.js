@@ -87,7 +87,7 @@ export function piState(config, probedRoot) {const enabled = config?.[PI_FIELD] 
  * globalRootPath 由 Host 注入，本层不自行推导 DSH 根。
  * @param {() => SettingsScope} scopeGetter - settings 句柄取器，命名空间注册见 adapter/settings.js
  */
-export function createSession(scopeGetter, listWorkspaces, getStore, backupsRoot, globalRootPath, shared) {
+export function createSession(scopeGetter, listWorkspaces, getStore, backupsRoot, globalRootPath, shared, libraryRoot = null) {
   const root = requireDir(scopeGetter())
   const store = getStore()
   // pi 探测每会话一次（statSync 便宜）：piScanRoot 是扫描语义——探测到即非空，与开关无关；
@@ -102,6 +102,7 @@ export function createSession(scopeGetter, listWorkspaces, getStore, backupsRoot
     backupsRoot,
     globalRootPath,
     piScanRoot, // pi 探测根（probe 事实）；是否生效由 piState 按配置判定
+    libraryRoot, // 插件库根（github 外部 skill 专属，DSR-020）
     async bundle() {
       const config = scopeGetter().get()
       // pi 两语义现算：期望根要求开关开；扫描根要求开关开或规则引用 pi。
@@ -110,8 +111,8 @@ export function createSession(scopeGetter, listWorkspaces, getStore, backupsRoot
       const configGroups = config?.groups && typeof config.groups === 'object' ? config.groups : {}
       const intentSkills = config?.skills && typeof config.skills === 'object' ? config.skills : {}
       const workspacesById = await readWorkspaceProjection(listWorkspaces)
-      // 库扫描（目录 + 入库元数据）；意图字段由 settings 叠加（本地 skill 无登记）。
-      const items = await library.scanLibrary(root, store, { meta: shared?.meta })
+      // 库扫描（双根：用户根自研/本地 + 插件库根 github）；意图字段由 settings 叠加（本地 skill 无登记）。
+      const { items, conflicts } = await library.scanLibrary(root, store, { meta: shared?.meta, libraryRoot })
       const viewItems = items.map((it) => {
         const intent = intentSkills[it.dir]
         return intent
@@ -122,6 +123,9 @@ export function createSession(scopeGetter, listWorkspaces, getStore, backupsRoot
             }
           : it
       })
+      // 源根分流（双根制）：github → 插件库根，其余 → 用户根；未知条目回落用户根。
+      const srcRootBySkill = new Map(viewItems.map((it) => [it.dir, it.origin === 'github' && libraryRoot !== null ? libraryRoot : root]))
+      const srcRootOf = (dir) => srcRootBySkill.get(dir) ?? root
       // 参与推导的 skill 集 = 未禁用且未缺失。
       const skills = viewItems.filter((it) => !it.disabled && !it.missing).map((it) => it.dir)
       // 配置挂载展平（global 的 project 归一为 null；形状非法项跳过，对账容忍）。
@@ -145,11 +149,15 @@ export function createSession(scopeGetter, listWorkspaces, getStore, backupsRoot
         return [dir, typeof g === 'string' && g !== '' && (g in configGroups || g === DEFAULT_GROUP) ? g : DEFAULT_GROUP]
       }))
       const { desired, warnings } = deriveDesired({ memberships, mounts, workspacesById, globalRootPath, piSkillsRoot })
+      // 同名冲突（用户根与 github 登记撞名，本地目录被遮蔽）入警告条
+      for (const c of conflicts) {
+        warnings.push(`同名冲突：「${c}」在本地目录与插件库（GitHub 登记）中同时存在，以 GitHub 登记为准，本地目录中的同名目录已被遮蔽`)
+      }
       // 行状态走查与孤儿集共用同一次扫描（扫描语义：开关开或规则引用 pi 才扫 pi 根），
-      // 结果随 bundle 快照一起失效。
-      const links = await scanMountLinks({ root, globalRootPath, workspacesById, piSkillsRoot: piScanActive })
-      const mountRows = await walkMountState({ root, desired, links, globalRootPath, workspacesById, piSkillsRoot })
-      const orphans = await findOrphanLinks({ root, desired, globalRootPath, workspacesById, piSkillsRoot, links })
+      // 结果随 bundle 快照一起失效。归属判据为双根并集（用户根 ∪ 插件库根）。
+      const links = await scanMountLinks({ root, globalRootPath, workspacesById, piSkillsRoot: piScanActive, libraryRoot })
+      const mountRows = await walkMountState({ root, desired, links, globalRootPath, workspacesById, piSkillsRoot, srcRootOf })
+      const orphans = await findOrphanLinks({ root, desired, globalRootPath, workspacesById, piSkillsRoot, libraryRoot, links })
       const mountCount = new Map([...workspacesById.keys()].map((id) => [id, 0]))
       const counted = new Set()
       for (const m of mounts) {
@@ -177,6 +185,7 @@ export function createSession(scopeGetter, listWorkspaces, getStore, backupsRoot
         orphans,
         piSkillsRoot,
         piScanRoot: piScanActive,
+        srcRootOf,
       }
     },
     /** 全量对账：现算期望并收敛挂载，junction-only。 */
@@ -190,15 +199,17 @@ export function createSession(scopeGetter, listWorkspaces, getStore, backupsRoot
         globalRootPath,
         piSkillsRoot: b.piSkillsRoot,
         piScanRoot: b.piScanRoot,
+        libraryRoot,
+        srcRootOf: b.srcRootOf,
       })
     },
   }
 }
 
 /** 方法表：所有方法在未配置门禁之后执行。getStore 在请求时解析，域未就绪抛错 → internal。 */
-export function buildApi(scopeGetter, { listWorkspaces = () => [], getStore, backupsRoot, globalRoot, cache, logger } = {}) {
+export function buildApi(scopeGetter, { listWorkspaces = () => [], getStore, backupsRoot, globalRoot, libraryRoot = null, cache, logger } = {}) {
   const shared = cache ?? createSharedCache()
-  const session = () => createSession(scopeGetter, listWorkspaces, getStore, backupsRoot, globalRoot, shared)
+  const session = () => createSession(scopeGetter, listWorkspaces, getStore, backupsRoot, globalRoot, shared, libraryRoot)
   const hashOfDir = hashOf(shared, dirHash)
 
   /**
@@ -310,11 +321,12 @@ export function buildApi(scopeGetter, { listWorkspaces = () => [], getStore, bac
       return acquire.repoSkills(String(payload.repo ?? ''), payload.ref ? String(payload.ref) : 'main')
     },
 
-    /** 入库：zipball 落地为原子换装，随后登记并触发对账。 */
+    /** 入库：zipball 落地为原子换装（插件库根，DSR-020），随后登记并触发对账。 */
     async 'add'(payload) {
       const s = session()
       const result = await acquire.add({
-        root: s.root,
+        root: s.libraryRoot,
+        userRoot: s.root,
         store: s.store,
         repo: String(payload.repo ?? ''),
         dir: payload.dir ? String(payload.dir) : undefined,
@@ -326,22 +338,22 @@ export function buildApi(scopeGetter, { listWorkspaces = () => [], getStore, bac
       return result
     },
 
-    /** 上游检查：三态结果逐条回填 check_cache。 */
+    /** 上游检查：三态结果逐条回填 check_cache。GitHub 条目基线在插件库根（DSR-020）。 */
     async 'check'(payload) {
       const s = session()
       return upstream.check({
-        root: s.root,
+        root: s.libraryRoot,
         store: s.store,
         names: Array.isArray(payload.names) ? payload.names.map(String) : undefined,
         hash: hashOfDir,
       })
     },
 
-    /** 覆盖更新：检出本地修改时必须带显式确认。 */
+    /** 覆盖更新：检出本地修改时必须带显式确认。GitHub 条目在插件库根（DSR-020）。 */
     async 'update'(payload) {
       const s = session()
       const result = await upstream.update({
-        root: s.root,
+        root: s.libraryRoot,
         store: s.store,
         names: Array.isArray(payload.names) ? payload.names.map(String) : undefined,
         confirmLocalChanges: payload.confirmLocalChanges === true,
@@ -358,10 +370,10 @@ export function buildApi(scopeGetter, { listWorkspaces = () => [], getStore, bac
       return backupsMod.backups({ backupsRoot: s.backupsRoot })
     },
 
-    /** 从备份恢复：目标占位则拒绝，就位走原子换装。 */
+    /** 从备份恢复：目标占位则拒绝，就位走原子换装（插件库根，DSR-020）。 */
     async 'restore'(payload) {
       const s = session()
-      const result = await backupsMod.restore({ root: s.root, store: s.store, id: String(payload.id ?? ''), backupsRoot: s.backupsRoot, ctx: s })
+      const result = await backupsMod.restore({ root: s.libraryRoot, store: s.store, id: String(payload.id ?? ''), backupsRoot: s.backupsRoot, ctx: s })
       await refreshCache()
       return result
     },
@@ -373,7 +385,8 @@ export function buildApi(scopeGetter, { listWorkspaces = () => [], getStore, bac
       // 摘除范围与对账同一扫描语义：pi 开关关且无 pi 规则时 pi 侧不扫不动
       const { piScanRoot: removeScanRoot } = piState(scopeGetter().get(), s.piScanRoot)
       const result = await backupsMod.remove({
-        root: s.root,
+        root: s.libraryRoot,
+        userRoot: s.root,
         store: s.store,
         name: String(payload.name ?? ''),
         backupsRoot: s.backupsRoot,

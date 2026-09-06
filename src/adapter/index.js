@@ -55,6 +55,9 @@ export default {
     const backupsRoot = ctx.dshHomePath('skill-manager', 'backups')
     // DSH 全局 skill 根 = $DSH_HOME/skills，与 dsh-skill-filesystem 同源。
     const globalRootPath = ctx.dshHomePath('skills')
+    // 插件库根 = $DSH_HOME/skill-manager/library：GitHub 外部 skill 专属（DSR-020 双根制），
+    // 与用户配置的 skillsDir 物理隔离，本地编辑/整理动作不波及外部条目。
+    const libraryRoot = ctx.dshHomePath('skill-manager', 'library')
 
     // 三路排队在 createDispatch 内建：READ 快照 / NET 网络 / WRITE FIFO。
     // bundle 缓存跨分发共享，读路径与写后预热都落在这里。
@@ -65,6 +68,7 @@ export default {
       getStore,
       backupsRoot,
       globalRoot: globalRootPath,
+      libraryRoot,
       cache: sharedCache,
       logger: ctx.logger,
     })

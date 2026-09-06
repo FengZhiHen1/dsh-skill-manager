@@ -1,5 +1,7 @@
 # DSR-010：去车间化——纯 skill 目录 + DSH 惯例状态存储
 
+> 状态：部分被修订（2026-09-06，DSR-020）。「配置目录 = 纯 skill 平铺目录」保留但范围收窄为**自研/本地自管区**；GitHub 外部条目自 DSR-020 起装插件专属库根（`$DSH_HOME/skill-manager/library`），与本目录物理隔离。其余决定（状态域、禁用标记、出库备份、零迁移）不变。
+
 ## 上下文
 
 插件脱胎于 distributor CLI 的车间布局契约：配置目录（车间根）内含 `skills/` 子层、`skills.lock.json`、`distributor/{groups,apps,state,check-cache}.json`、`.disabled/`、git 提交历史与 `backups/`。这套结构让用户的 skill 目录背负了插件的存储实现，且状态文件与用户内容混居一处。2026-08-19 用户裁定：彻底修正，不再依赖原车间；「本地 skills 目录」语义改为单纯的 skill 保存目录，读取时直接读此目录下的 skill；状态按 DSH 插件惯例另放。

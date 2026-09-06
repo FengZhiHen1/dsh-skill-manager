@@ -46,8 +46,9 @@ test('scanLibrary：本地目录仅展示不登记（无版本管理）；github
   try {
     await writeSkill(root, 'mine', { description: '自研技能' })
     const store = fakeStore()
-    const items = await scanLibrary(root, store)
+    const { items, conflicts } = await scanLibrary(root, store)
     assert.equal(items.length, 1)
+    assert.deepEqual(conflicts, [])
     assert.equal(items[0].dir, 'mine')
     assert.equal(items[0].origin, 'self') // 无记录按自研展示
     assert.equal(items[0].description, '自研技能')
@@ -59,39 +60,63 @@ test('scanLibrary：本地目录仅展示不登记（无版本管理）；github
   }
 })
 
-test('scanLibrary：github 记录带 commit；记录缺 content_hash 不回填（基线由入库路径维护）', async () => {
+test('scanLibrary：双根制——github 条目从插件库根读取（记录带 commit；缺 content_hash 不回填）', async () => {
   const root = await mkTmp()
+  const lib = await mkTmp()
   try {
-    await writeSkill(root, 'pdf')
+    await writeSkill(lib, 'pdf')
     const store = fakeStore()
     await store.putSkill('pdf', skillRecord({
       origin: 'github', repo: 'anthropics/skills', branch: 'main', commit: 'a'.repeat(40),
     }))
-    const items = await scanLibrary(root, store)
+    const { items } = await scanLibrary(root, store, { libraryRoot: lib })
     assert.equal(items[0].origin, 'github')
     assert.equal(items[0].commit, 'a'.repeat(40))
+    assert.equal(items[0].missing, false)
     // 不回填 content_hash
     assert.equal(store.getSkill('pdf').content_hash, null)
   } finally {
     await cleanup(root)
+    await cleanup(lib)
   }
 })
 
-test('scanLibrary：表中 github 记录但目录缺失 → missing 恢复入口；self 记录不展示', async () => {
+test('scanLibrary：同名冲突——用户根目录撞 github 登记 → 登记优先遮蔽 + conflicts 报告', async () => {
   const root = await mkTmp()
+  const lib = await mkTmp()
+  try {
+    await writeSkill(root, 'pdf', { description: '本地版' })
+    await writeSkill(lib, 'pdf', { description: '插件库版' })
+    const store = fakeStore()
+    await store.putSkill('pdf', skillRecord({ origin: 'github', repo: 'a/b', commit: 'c'.repeat(40) }))
+    const { items, conflicts } = await scanLibrary(root, store, { libraryRoot: lib })
+    assert.deepEqual(conflicts, ['pdf'])
+    assert.equal(items.length, 1)
+    assert.equal(items[0].origin, 'github')
+    assert.equal(items[0].description, '插件库版') // 登记优先：读插件库根的元数据
+  } finally {
+    await cleanup(root)
+    await cleanup(lib)
+  }
+})
+
+test('scanLibrary：表中 github 记录但插件库根目录缺失 → missing 恢复入口；self 记录不展示', async () => {
+  const root = await mkTmp()
+  const lib = await mkTmp()
   try {
     const store = fakeStore()
     await store.putSkill('gone', skillRecord({ origin: 'github', repo: 'a/b', commit: 'b'.repeat(40) }))
-    const items = await scanLibrary(root, store)
+    const { items } = await scanLibrary(root, store, { libraryRoot: lib })
     assert.equal(items.length, 1)
     assert.equal(items[0].missing, true)
     assert.equal(items[0].origin, 'github')
     // 旧 self 记录目录缺失不展示（本地 skill 无恢复语义）
     await store.putSkill('gone-self', skillRecord())
-    const again = await scanLibrary(root, store)
-    assert.equal(again.length, 1)
+    const again = await scanLibrary(root, store, { libraryRoot: lib })
+    assert.equal(again.items.length, 1)
   } finally {
     await cleanup(root)
+    await cleanup(lib)
   }
 })
 
@@ -100,7 +125,7 @@ test('scanLibrary：无 SKILL.md 的目录仍列出但 hasSkillMd=false；点开
   try {
     await mkdir(join(root, 'empty-one'), { recursive: true })
     await mkdir(join(root, '.hidden'), { recursive: true })
-    const items = await scanLibrary(root, fakeStore())
+    const { items } = await scanLibrary(root, fakeStore())
     assert.equal(items.length, 1)
     assert.equal(items[0].dir, 'empty-one')
     assert.equal(items[0].hasSkillMd, false)
