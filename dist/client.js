@@ -357,6 +357,8 @@ var S = {
   row: { display: "flex", alignItems: "center", gap: "8px", padding: "9px 12px", border: `1px solid ${T.borderL1}`, borderRadius: 12, marginBottom: 8, fontSize: 13 },
   select: { padding: "4px 8px", borderRadius: 6, border: `1px solid ${T.borderL1}`, background: T.bgBase, color: T.labelPrimary, fontSize: 12 },
   panel: { padding: "10px 12px" },
+  /** 高密度列表行（容器卡 + 分隔线用法）：比 S.row 描边卡轻，行内不再带边框。 */
+  listRow: { display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", fontSize: 13 },
   muted: { color: T.labelSecondary, fontSize: 12 },
   guide: { padding: "24px 16px", textAlign: "center", color: T.labelSecondary, fontSize: 13 },
   dangerText: { color: T.error },
@@ -369,6 +371,8 @@ var sectionHead = { fontSize: 14, fontWeight: 600, color: T.labelPrimary };
 var cardTitle = { fontSize: 13, fontWeight: 600, color: T.labelPrimary };
 var noteText = { fontSize: 11, color: T.labelSecondary };
 var dividerStyle = { height: 1, background: T.borderL1, flex: "none" };
+var navItemStyle = { display: "flex", alignItems: "center", gap: 6, width: "100%", padding: "6px 10px", border: "none", borderRadius: 8, background: "transparent", font: "inherit", fontSize: 13, cursor: "pointer", color: T.labelSecondary };
+var navItemActiveStyle = { background: T.bgModulePlatform, color: T.labelPrimary, fontWeight: 500 };
 
 // src/client/ui.jsx
 var import_react = require("react");
@@ -439,7 +443,7 @@ var menuCardStyle = {
   padding: 6
 };
 var menuDivider = /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: { height: 1, margin: "5px 6px", background: T.borderL2 } });
-function RowMenu({ it, groupNames, busy, onAction, onMove, onClose, triggerRect }) {
+function RowMenu({ it, groupNames, flags = [], busy, onAction, onMove, onClose, triggerRect }) {
   const menuRef = (0, import_react.useRef)(null);
   const [sub, setSub] = (0, import_react.useState)(null);
   (0, import_react.useEffect)(() => {
@@ -494,6 +498,10 @@ function RowMenu({ it, groupNames, busy, onAction, onMove, onClose, triggerRect 
   return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
     /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: { position: "fixed", inset: 0, zIndex: 40 }, onClick: onClose }),
     /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { ref: menuRef, style: menuStyle, children: [
+      flags.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: { padding: "5px 12px", fontSize: 11, color: T.labelSecondary, whiteSpace: "nowrap" }, children: flags.join(" \xB7 ") }),
+        menuDivider
+      ] }),
       it.missing ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(MenuItem, { label: "\u6062\u590D", disabled: busy, onClick: () => {
         onClose();
         onAction("update");
@@ -766,6 +774,22 @@ function targetLabel(target, workspaces) {
   const ws = workspaces.find((w) => w.workspaceId === id);
   return ws ? ws.title : `\u5DE5\u4F5C\u533A ${id.slice(0, 8)}\u2026`;
 }
+function primaryStatus(it) {
+  const mountIssues = it.mount.filter((row) => row.issue && row.issue !== "ok");
+  if (it.missing) return { kind: "error", label: "\u7F3A\u5931", issues: null };
+  if (mountIssues.length > 0) return { kind: "error", label: `\u6302\u8F7D\u5931\u8D25 ${mountIssues.length}`, issues: mountIssues };
+  if (it.disabled) return { kind: "warn", label: "\u5DF2\u7981\u7528", issues: null };
+  if (it.upstream && it.upstream.status === "updatable") return { kind: "updatable", label: "\u53EF\u66F4\u65B0", issues: null };
+  if (it.upstream && it.upstream.status === "check_failed") return { kind: "warn", label: "\u68C0\u67E5\u5931\u8D25", issues: null };
+  return null;
+}
+function secondaryFlags(it) {
+  const flags = [];
+  if (it.upstream && it.upstream.locally_modified) flags.push("\u672C\u5730\u6709\u4FEE\u6539");
+  if (!it.hasSkillMd && !it.missing) flags.push("\u65E0 SKILL.md");
+  if (it.nameVisible === false) flags.push("\u5B89\u88C5\u540D\u6587\u6CD5\u4E0D\u53EF\u89C1");
+  return flags;
+}
 function ManageView({ call, data, config, reload }) {
   const [origin, setOrigin] = (0, import_react3.useState)("");
   const [groupFilter, setGroupFilter] = (0, import_react3.useState)("\u9ED8\u8BA4");
@@ -919,113 +943,112 @@ function ManageView({ call, data, config, reload }) {
     setNotice({ tone: "ok", text: `\u5DF2\u521B\u5EFA\u5206\u7EC4\u300C${name}\u300D` });
   };
   return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: S.panel, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { marginBottom: 14 }, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { display: "flex", alignItems: "baseline", gap: 8, marginBottom: 8 }, children: [
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: sectionHead, children: "\u5206\u7EC4" }),
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: noteText, children: `${data.lib.skills.length} \u4E2A Skill` })
-      ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }, children: [
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_dsh_client_ui_primitives3.Pill, { active: groupFilter === "", onClick: () => setGroupFilter(""), children: `\u5168\u90E8 \xB7 ${data.lib.skills.length}` }),
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_dsh_client_ui_primitives3.Pill, { active: groupFilter === "\u9ED8\u8BA4", onClick: () => setGroupFilter("\u9ED8\u8BA4"), children: `\u9ED8\u8BA4 \xB7 ${countForGroup("\u9ED8\u8BA4")}` }),
-        groupNames.filter((group) => group !== "\u9ED8\u8BA4").map((group) => /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_dsh_client_ui_primitives3.Pill, { active: groupFilter === group, onClick: () => setGroupFilter(group), children: `${group} \xB7 ${countForGroup(group)}` }, group)),
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_dsh_client_ui_primitives3.Pill, { active: false, onClick: () => setDialog({ kind: "create" }), children: "\uFF0B \u65B0\u5EFA\u5206\u7EC4" })
-      ] }),
-      groupFilter === "" ? /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { ...cardStyle, padding: "12px 14px" }, children: [
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: cardTitle, children: "\u5F53\u524D\u67E5\u770B\uFF1A\u5168\u90E8\u6280\u80FD" }),
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { ...noteText, marginTop: 4 }, children: "\u9009\u62E9\u4E00\u4E2A\u5206\u7EC4\u540E\uFF0C\u53EF\u914D\u7F6E\u5B83\u5728 DSH \u5168\u5C40\u4E0E\u5404\u5DE5\u4F5C\u533A\u7684\u53EF\u7528\u8303\u56F4\u3002" })
-      ] }) : /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(GroupScopePanel, { config, group: groupFilter, workspaces: data.workspaces, skills: data.lib.skills, onGroupOp: groupOp })
-    ] }),
-    warningLines.map((w) => /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { ...badgeStyle(T.warn), borderRadius: 10, padding: "9px 12px", marginBottom: 8, fontSize: 12, display: "flex", alignItems: "center", gap: 8 }, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: dotStyle(T.warn) }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: { flex: 1 }, children: w.text }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(RepairCopy, { text: w.prompt })
-    ] }, w.key)),
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { display: "flex", alignItems: "baseline", gap: 8, marginBottom: 10 }, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: sectionHead, children: "\u6280\u80FD\u5E93" }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: noteText, children: `${groupFilter === "" ? "\u5168\u90E8" : groupFilter} \xB7 ${list.length} \u4E2A` }),
-      data.lib.checkedAt ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: noteText, children: `\u4E0A\u6E38\u72B6\u6001\u68C0\u67E5\u4E8E ${fmtCheckedAt(data.lib.checkedAt)}` }) : null
-    ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { ...S.toolbar, marginBottom: 12 }, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_dsh_client_ui_primitives3.Input, { style: { flex: 1, minWidth: 140 }, placeholder: "\u641C\u7D22\u540D\u79F0 / \u63CF\u8FF0\u2026", value: q, onChange: (e) => setQ(e.target.value) }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("select", { style: { ...S.select, border: "none", background: T.bgModulePlatform, borderRadius: 8, padding: "5px 10px" }, value: origin, onChange: (e) => setOrigin(e.target.value), children: [
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "", children: "\u5168\u90E8\u6765\u6E90" }),
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "github", children: "GitHub" }),
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "self", children: "\u81EA\u7814/\u672C\u5730" })
-      ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(GhostBtn, { onClick: refreshAll, disabled: busy, title: "\u91CD\u65B0\u68C0\u67E5\u5168\u90E8\u4E0A\u6E38\u3001\u6267\u884C\u4E00\u6B21\u5B89\u5168\u5BF9\u8D26\u5E76\u5237\u65B0\u5217\u8868", children: "\u21BB \u5237\u65B0" })
-    ] }),
-    notice ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(NoticeBar, { notice }) : null,
-    error ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(ErrorLine, { error }) : null,
-    list.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { ...S.muted, padding: 12 }, children: "\u5E93\u4E3A\u7A7A\uFF08\u65E0\u5339\u914D skill\uFF09" }) : list.map((it) => {
-      const mountIssues = it.mount.filter((row) => row.issue && row.issue !== "ok");
-      return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { position: "relative" }, children: [
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: S.row, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { flex: 1, minWidth: 0 }, title: it.description, children: [
-            /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { fontWeight: 600, color: T.labelPrimary }, children: it.name }),
-            /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: noteText, children: [
-              ORIGIN_LABEL[it.origin] || it.origin,
-              it.group,
-              it.targets.length > 0 ? it.targets.map((t) => targetLabel(t, data.workspaces)).join(" / ") : null,
-              it.commit ? it.commit.slice(0, 7) : null
-            ].filter(Boolean).join(" \xB7 ") })
-          ] }),
-          /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }, children: [
-            it.missing && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: statusPillStyle("error"), children: "\u7F3A\u5931" }),
-            it.disabled && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: statusPillStyle("warn"), children: "\u5DF2\u7981\u7528" }),
-            !it.hasSkillMd && !it.missing && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: statusPillStyle("warn"), children: "\u65E0 SKILL.md" }),
-            it.nameVisible === false && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: statusPillStyle("warn"), title: "\u5B89\u88C5\u540D\u4E0D\u7B26\u5408\u5C0F\u5199\u8FDE\u5B57\u7B26\u6587\u6CD5\uFF0CDSH \u4E0D\u53EF\u89C1", children: "\u540D\u6587\u6CD5" }),
-            mountIssues.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
-              "button",
-              {
-                type: "button",
-                title: "\u70B9\u51FB\u5C55\u5F00\u6302\u8F7D\u5931\u8D25\u660E\u7EC6\u4E0E\u4FEE\u590D\u63D0\u793A\u8BCD",
-                onClick: () => setExpandedMount(expandedMount === it.dir ? null : it.dir),
-                style: { ...statusPillStyle("error"), border: "none", font: "inherit", cursor: "pointer" },
-                children: `\u6302\u8F7D\u5931\u8D25 ${mountIssues.length} \xB7 ${expandedMount === it.dir ? "\u6536\u8D77" : "\u5C55\u5F00"}`
-              }
-            ),
-            it.upstream && it.upstream.status === "updatable" && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: statusPillStyle("updatable"), children: "\u53EF\u66F4\u65B0" }),
-            it.upstream && it.upstream.status === "up_to_date" && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: statusPillStyle("normal"), children: "\u5DF2\u662F\u6700\u65B0" }),
-            it.upstream && it.upstream.status === "check_failed" && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: statusPillStyle("warn"), children: "\u68C0\u67E5\u5931\u8D25" }),
-            it.upstream && it.upstream.locally_modified && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: statusPillStyle("warn"), children: "\u672C\u5730\u6709\u4FEE\u6539" }),
-            /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
-              "button",
-              {
-                type: "button",
-                title: "\u884C\u64CD\u4F5C",
-                disabled: busy,
-                onClick: (e) => setMenuFor(menuFor?.dir === it.dir ? null : { dir: it.dir, rect: e.currentTarget.getBoundingClientRect() }),
-                style: { border: "none", background: "transparent", cursor: busy ? "default" : "pointer", fontSize: 16, lineHeight: 1, padding: "3px 6px", borderRadius: 6, color: menuFor?.dir === it.dir ? T.labelPrimary : T.labelSecondary },
-                children: "\u22EF"
-              }
-            )
-          ] }),
-          menuFor?.dir === it.dir && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
-            RowMenu,
-            {
-              it,
-              groupNames,
-              busy,
-              triggerRect: menuFor.rect,
-              onAction: (action) => rowAction(it.dir, action),
-              onMove: (group) => moveSkill(it.dir, group),
-              onClose: () => setMenuFor(null)
-            }
-          )
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { display: "flex", gap: 14, alignItems: "flex-start" }, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+        GroupNav,
+        {
+          groups,
+          selected: groupFilter,
+          total: displaySkills.length,
+          countForGroup,
+          onSelect: setGroupFilter,
+          onCreate: () => setDialog({ kind: "create" })
+        }
+      ),
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { flex: 1, minWidth: 0 }, children: [
+        groupFilter === "" ? /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { ...cardStyle, padding: "12px 14px" }, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: cardTitle, children: "\u5F53\u524D\u67E5\u770B\uFF1A\u5168\u90E8\u6280\u80FD" }),
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { ...noteText, marginTop: 4 }, children: "\u9009\u62E9\u5DE6\u4FA7\u5206\u7EC4\uFF0C\u53EF\u914D\u7F6E\u5B83\u5728 DSH \u5168\u5C40\u4E0E\u5404\u5DE5\u4F5C\u533A\u7684\u53EF\u7528\u8303\u56F4\u3002" })
+        ] }) : /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(GroupScopePanel, { config, group: groupFilter, workspaces: data.workspaces, skills: data.lib.skills, onGroupOp: groupOp }),
+        warningLines.map((w) => /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { ...badgeStyle(T.warn), borderRadius: 10, padding: "9px 12px", margin: "8px 0", fontSize: 12, display: "flex", alignItems: "center", gap: 8 }, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: dotStyle(T.warn) }),
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: { flex: 1 }, children: w.text }),
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(RepairCopy, { text: w.prompt })
+        ] }, w.key)),
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { display: "flex", alignItems: "baseline", gap: 8, margin: "14px 0 10px" }, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: sectionHead, children: "\u6280\u80FD\u5E93" }),
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: noteText, children: `${groupFilter === "" ? "\u5168\u90E8" : groupFilter} \xB7 ${list.length} \u4E2A` }),
+          data.lib.checkedAt ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: noteText, children: `\u4E0A\u6E38\u72B6\u6001\u68C0\u67E5\u4E8E ${fmtCheckedAt(data.lib.checkedAt)}` }) : null
         ] }),
-        expandedMount === it.dir && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { ...subRowPanel }, children: mountIssues.map((row, idx) => {
-          const repair = mountIssueRepair(row.issue, { name: it.dir, targetLabel: targetLabel(row.target, data.workspaces), path: row.path, root: data.root });
-          return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { display: "flex", alignItems: "center", gap: 8, fontSize: 12, padding: "4px 0" }, children: [
-            /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: dotStyle(T.error) }),
-            /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("span", { style: { flex: 1, minWidth: 0 }, children: [
-              /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: { fontWeight: 500, color: T.labelPrimary }, children: `${targetLabel(row.target, data.workspaces)} \xB7 ${row.issue}` }),
-              row.path ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: { ...noteText, display: "block", wordBreak: "break-all" }, children: row.path }) : null
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { ...S.toolbar, marginBottom: 12 }, children: [
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_dsh_client_ui_primitives3.Input, { style: { flex: 1, minWidth: 140 }, placeholder: "\u641C\u7D22\u540D\u79F0 / \u63CF\u8FF0\u2026", value: q, onChange: (e) => setQ(e.target.value) }),
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("select", { style: { ...S.select, border: "none", background: T.bgModulePlatform, borderRadius: 8, padding: "5px 10px" }, value: origin, onChange: (e) => setOrigin(e.target.value), children: [
+            /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "", children: "\u5168\u90E8\u6765\u6E90" }),
+            /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "github", children: "GitHub" }),
+            /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "self", children: "\u81EA\u7814/\u672C\u5730" })
+          ] }),
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(GhostBtn, { onClick: refreshAll, disabled: busy, title: "\u91CD\u65B0\u68C0\u67E5\u5168\u90E8\u4E0A\u6E38\u3001\u6267\u884C\u4E00\u6B21\u5B89\u5168\u5BF9\u8D26\u5E76\u5237\u65B0\u5217\u8868", children: "\u21BB \u5237\u65B0" })
+        ] }),
+        notice ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(NoticeBar, { notice }) : null,
+        error ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(ErrorLine, { error }) : null,
+        list.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { ...S.muted, padding: 12 }, children: "\u5E93\u4E3A\u7A7A\uFF08\u65E0\u5339\u914D skill\uFF09" }) : /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { ...cardStyle, padding: 0 }, children: list.map((it, idx) => {
+          const status = primaryStatus(it);
+          const mountIssues = status?.issues || [];
+          return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { position: "relative" }, children: [
+            idx > 0 ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: dividerStyle }) : null,
+            /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: S.listRow, children: [
+              /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { flex: 1, minWidth: 0 }, title: it.description, children: [
+                /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { fontWeight: 600, color: T.labelPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, children: it.name }),
+                /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { ...noteText, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, children: [
+                  ORIGIN_LABEL[it.origin] || it.origin,
+                  // 右栏已按左栏分组收窄；仅「全部」视图补组名与挂载目标，避免逐行重复
+                  groupFilter === "" ? it.group : null,
+                  groupFilter === "" && it.targets.length > 0 ? it.targets.map((t) => targetLabel(t, data.workspaces)).join(" / ") : null,
+                  it.commit ? it.commit.slice(0, 7) : null
+                ].filter(Boolean).join(" \xB7 ") })
+              ] }),
+              /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }, children: [
+                status && (mountIssues.length > 0 ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+                  "button",
+                  {
+                    type: "button",
+                    title: "\u70B9\u51FB\u5C55\u5F00\u6302\u8F7D\u5931\u8D25\u660E\u7EC6\u4E0E\u4FEE\u590D\u63D0\u793A\u8BCD",
+                    onClick: () => setExpandedMount(expandedMount === it.dir ? null : it.dir),
+                    style: { ...statusPillStyle("error"), border: "none", font: "inherit", cursor: "pointer" },
+                    children: `${status.label} \xB7 ${expandedMount === it.dir ? "\u6536\u8D77" : "\u5C55\u5F00"}`
+                  }
+                ) : /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: statusPillStyle(status.kind), children: status.label })),
+                /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+                  "button",
+                  {
+                    type: "button",
+                    title: "\u884C\u64CD\u4F5C",
+                    disabled: busy,
+                    onClick: (e) => setMenuFor(menuFor?.dir === it.dir ? null : { dir: it.dir, rect: e.currentTarget.getBoundingClientRect() }),
+                    style: { border: "none", background: "transparent", cursor: busy ? "default" : "pointer", fontSize: 16, lineHeight: 1, padding: "3px 6px", borderRadius: 6, color: menuFor?.dir === it.dir ? T.labelPrimary : T.labelSecondary },
+                    children: "\u22EF"
+                  }
+                )
+              ] }),
+              menuFor?.dir === it.dir && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+                RowMenu,
+                {
+                  it,
+                  groupNames,
+                  flags: secondaryFlags(it),
+                  busy,
+                  triggerRect: menuFor.rect,
+                  onAction: (action) => rowAction(it.dir, action),
+                  onMove: (group) => moveSkill(it.dir, group),
+                  onClose: () => setMenuFor(null)
+                }
+              )
             ] }),
-            /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(RepairCopy, { text: buildRepairPrompt({ root: data.root, code: row.issue, message: `${it.dir} \u2192 ${row.path || targetLabel(row.target, data.workspaces)}`, repair }) })
-          ] }, `${row.target}-${idx}`);
+            expandedMount === it.dir && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { ...subRowPanel }, children: mountIssues.map((row, midx) => {
+              const repair = mountIssueRepair(row.issue, { name: it.dir, targetLabel: targetLabel(row.target, data.workspaces), path: row.path, root: data.root });
+              return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { display: "flex", alignItems: "center", gap: 8, fontSize: 12, padding: "4px 0" }, children: [
+                /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: dotStyle(T.error) }),
+                /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("span", { style: { flex: 1, minWidth: 0 }, children: [
+                  /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: { fontWeight: 500, color: T.labelPrimary }, children: `${targetLabel(row.target, data.workspaces)} \xB7 ${row.issue}` }),
+                  row.path ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: { ...noteText, display: "block", wordBreak: "break-all" }, children: row.path }) : null
+                ] }),
+                /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(RepairCopy, { text: buildRepairPrompt({ root: data.root, code: row.issue, message: `${it.dir} \u2192 ${row.path || targetLabel(row.target, data.workspaces)}`, repair }) })
+              ] }, `${row.target}-${midx}`);
+            }) })
+          ] }, it.dir);
         }) })
-      ] }, it.dir);
-    }),
+      ] })
+    ] }),
     dialog?.kind === "create" && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(CreateGroupDialog, { onCancel: () => setDialog(null), onCreate: doCreateGroup }),
     dialog?.kind === "update" && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
       UpdateConfirmationDialog,
@@ -1071,12 +1094,40 @@ function ManageView({ call, data, config, reload }) {
   ] });
 }
 var subRowPanel = {
-  margin: "-4px 0 10px",
+  margin: "0 12px 8px",
   padding: "8px 12px",
   borderRadius: 10,
   background: T.bgLayer3,
   border: `1px solid ${T.borderL1}`
 };
+function GroupNav({ groups, selected, total, countForGroup, onSelect, onCreate }) {
+  const renderItem = (key, label, count) => /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(
+    "button",
+    {
+      type: "button",
+      title: label,
+      onClick: () => onSelect(key),
+      style: { ...navItemStyle, ...selected === key ? navItemActiveStyle : null },
+      children: [
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: { flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", textAlign: "left" }, children: label }),
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: { ...noteText, flex: "none" }, children: count })
+      ]
+    },
+    key || "<all>"
+  );
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { flex: "none", width: 140 }, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { display: "flex", alignItems: "center", gap: 6, marginBottom: 6, padding: "0 4px" }, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: cardTitle, children: "\u5206\u7EC4" }),
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: { flex: 1 } }),
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("button", { type: "button", onClick: onCreate, style: { border: "none", background: "none", padding: 0, font: "inherit", fontSize: 11, color: T.labelSecondary, cursor: "pointer" }, children: "\uFF0B \u65B0\u5EFA" })
+    ] }),
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { maxHeight: 320, overflowY: "auto" }, children: [
+      renderItem("", "\u5168\u90E8", total),
+      renderItem("\u9ED8\u8BA4", "\u9ED8\u8BA4", countForGroup("\u9ED8\u8BA4")),
+      Object.keys(groups).filter((group) => group !== "\u9ED8\u8BA4").map((group) => renderItem(group, group, countForGroup(group)))
+    ] })
+  ] });
+}
 function CreateGroupDialog({ onCancel, onCreate }) {
   const [name, setName] = (0, import_react3.useState)("");
   const [error, setError] = (0, import_react3.useState)(null);
@@ -1124,6 +1175,9 @@ function CreateGroupDialog({ onCancel, onCreate }) {
 function GroupScopePanel({ config, group, workspaces, skills, onGroupOp }) {
   const [renaming, setRenaming] = (0, import_react3.useState)(false);
   const [newName, setNewName] = (0, import_react3.useState)("");
+  const [opsOpen, setOpsOpen] = (0, import_react3.useState)(false);
+  const [showAllWs, setShowAllWs] = (0, import_react3.useState)(false);
+  const [wsFilter, setWsFilter] = (0, import_react3.useState)("");
   const [pendingUnmount, setPendingUnmount] = (0, import_react3.useState)(null);
   const { groups, toggleMount } = config;
   const mounts = groups[group] && groups[group].mounts || [];
@@ -1157,7 +1211,18 @@ function GroupScopePanel({ config, group, workspaces, skills, onGroupOp }) {
     setRenaming(false);
     if (trimmed && trimmed !== group) onGroupOp("rename", group, trimmed);
   };
-  const entryStyle = (danger) => ({ border: "none", background: "none", padding: 0, font: "inherit", fontSize: 11, color: danger ? T.error : T.labelSecondary, cursor: "pointer" });
+  const wsChecked = (w) => enabled("project", w.workspaceId);
+  const enabledWs = workspaces.filter(wsChecked);
+  const restCount = workspaces.length - enabledWs.length;
+  const filtering = wsFilter.trim() !== "";
+  const visibleWs = filtering ? workspaces.filter((w) => `${w.title}
+${w.path}`.toLowerCase().includes(wsFilter.trim().toLowerCase())) : showAllWs ? workspaces : enabledWs;
+  const wsRow = (workspace) => /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("label", { style: { display: "flex", alignItems: "center", gap: 8, padding: "7px 0", fontSize: 12, cursor: "pointer" }, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("input", { type: "checkbox", checked: wsChecked(workspace), onChange: (event) => toggle("project", workspace.workspaceId, event.target.checked) }),
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: { fontWeight: 500, color: T.labelPrimary, flex: "none" }, children: workspace.title }),
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: { ...noteText, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: workspace.path, children: workspace.path }),
+    workspace.mountCount > 0 ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: { ...noteText, flex: "none" }, children: `${workspace.mountCount} \u4E2A\u7EC4\u4F7F\u7528` }) : null
+  ] }, workspace.workspaceId);
   return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { ...cardStyle, padding: "12px 14px" }, children: [
     renaming ? /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }, children: [
       /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
@@ -1178,31 +1243,60 @@ function GroupScopePanel({ config, group, workspaces, skills, onGroupOp }) {
     ] }) : /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }, children: [
       /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: cardTitle, children: `\u5F53\u524D\u5206\u7EC4\uFF1A${group}` }),
       manageable && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: { flex: 1 } }),
-      manageable && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("button", { type: "button", style: entryStyle(false), onClick: () => {
-        setNewName(group);
-        setRenaming(true);
-      }, children: "\u6539\u540D" }),
-      manageable && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("button", { type: "button", style: entryStyle(true), onClick: () => onGroupOp("delete", group), children: "\u5220\u9664" })
+      manageable && /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("span", { style: { position: "relative" }, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+          "button",
+          {
+            type: "button",
+            title: "\u5206\u7EC4\u64CD\u4F5C",
+            onClick: () => setOpsOpen((v) => !v),
+            style: { border: "none", background: "transparent", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "3px 6px", borderRadius: 6, color: opsOpen ? T.labelPrimary : T.labelSecondary },
+            children: "\u22EF"
+          }
+        ),
+        opsOpen && /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(import_jsx_runtime3.Fragment, { children: [
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { position: "fixed", inset: 0, zIndex: 40 }, onClick: () => setOpsOpen(false) }),
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { ...menuCardStyle, top: "100%", right: 0, marginTop: 4 }, children: [
+            /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(MenuItem, { label: "\u6539\u540D", onClick: () => {
+              setOpsOpen(false);
+              setNewName(group);
+              setRenaming(true);
+            } }),
+            /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(MenuItem, { label: "\u5220\u9664\u5206\u7EC4", danger: true, onClick: () => {
+              setOpsOpen(false);
+              onGroupOp("delete", group);
+            } })
+          ] })
+        ] })
+      ] })
     ] }),
     renaming && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { ...noteText, marginBottom: 8 }, children: "\u6539\u540D\u7ACB\u5373\u751F\u6548\uFF1A\u5206\u7EC4\u6210\u5458\u4E0E\u6302\u8F7D\u89C4\u5219\u540C\u6B65\u6539\u540D\uFF0CSkill \u672C\u4F53\u4E0D\u53D7\u5F71\u54CD\u3002" }),
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { height: 1, background: T.borderL1, flex: "none" } }),
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: dividerStyle }),
     /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("label", { style: { display: "flex", alignItems: "center", gap: 8, padding: "9px 0", fontSize: 12, cursor: "pointer" }, children: [
       /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("input", { type: "checkbox", checked: enabled("global"), onChange: (event) => toggle("global", null, event.target.checked) }),
       /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: { fontWeight: 500, color: T.labelPrimary }, children: "DSH \u5168\u5C40" }),
       /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: noteText, children: "\u5BF9\u6240\u6709 DSH \u9879\u76EE\u751F\u6548" })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { height: 1, background: T.borderL1, flex: "none" } }),
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: dividerStyle }),
     workspaces.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { ...S.muted, padding: "8px 0" }, children: "\u5F53\u524D\u6CA1\u6709 DSH \u5DE5\u4F5C\u533A\uFF1B\u8BF7\u5728 DSH \u539F\u751F\u5DE5\u4F5C\u533A\u754C\u9762\u521B\u5EFA\u6216\u6253\u5F00\u9879\u76EE\u3002" }) : /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(import_jsx_runtime3.Fragment, { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { fontSize: 10, color: T.labelTertiary, padding: "7px 0 1px" }, children: "\u5DE5\u4F5C\u533A\u9879\u76EE" }),
-      workspaces.map((workspace) => /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("label", { style: { display: "flex", alignItems: "center", gap: 8, padding: "7px 0", fontSize: 12, cursor: "pointer" }, children: [
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("input", { type: "checkbox", checked: enabled("project", workspace.workspaceId), onChange: (event) => toggle("project", workspace.workspaceId, event.target.checked) }),
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: { fontWeight: 500, color: T.labelPrimary }, children: workspace.title }),
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: noteText, children: `${workspace.path} \xB7 ${workspace.mountCount} \u4E2A\u7EC4\u4F7F\u7528` })
-      ] }, workspace.workspaceId))
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { display: "flex", alignItems: "baseline", gap: 8, padding: "7px 0 1px" }, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: { fontSize: 10, color: T.labelTertiary }, children: "\u5DE5\u4F5C\u533A\u9879\u76EE" }),
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: { flex: 1 } }),
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: { fontSize: 10, color: T.labelTertiary }, children: `\u5DF2\u542F\u7528 ${enabledWs.length} \xB7 \u5171 ${workspaces.length}` })
+      ] }),
+      workspaces.length > 8 && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_dsh_client_ui_primitives3.Input, { style: { margin: "6px 0 2px" }, placeholder: "\u8FC7\u6EE4\u5DE5\u4F5C\u533A\u2026", value: wsFilter, onChange: (e) => setWsFilter(e.target.value) }),
+      visibleWs.map(wsRow),
+      filtering && visibleWs.length === 0 && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { ...S.muted, padding: "6px 0" }, children: "\u65E0\u5339\u914D\u5DE5\u4F5C\u533A" }),
+      !filtering && restCount > 0 && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+        "button",
+        {
+          type: "button",
+          onClick: () => setShowAllWs((v) => !v),
+          style: { display: "block", width: "100%", border: "none", background: T.bgModulePlatform, borderRadius: 8, padding: "6px 10px", margin: "4px 0 2px", font: "inherit", fontSize: 12, color: T.labelSecondary, cursor: "pointer", textAlign: "left" },
+          children: showAllWs ? "\u25BE \u6536\u8D77\u5176\u4ED6\u5DE5\u4F5C\u533A" : `\u25B8 \u5C55\u5F00\u5176\u4ED6 ${restCount} \u4E2A\u5DE5\u4F5C\u533A\uFF08\u52FE\u9009\u5373\u542F\u7528\uFF09`
+        }
+      )
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { height: 1, background: T.borderL1, flex: "none" } }),
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { ...noteText, paddingTop: 8 }, children: "\u53D6\u6D88\u52FE\u9009\u4F1A\u79FB\u9664\u8BE5\u5206\u7EC4\u5728\u8BE5\u76EE\u6807\u4E0B\u7684\u5168\u90E8 Skill \u94FE\u63A5\uFF08\u79FB\u9664\u524D\u5C06\u786E\u8BA4\uFF09\u3002" }),
-    manageable && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { ...noteText, paddingTop: 4 }, children: "\u5220\u9664\u7EC4\uFF1A\u6210\u5458\u56DE\u843D\u300C\u9ED8\u8BA4\u300D\u7EC4\uFF0C\u6267\u884C\u524D\u9700\u786E\u8BA4\u3002" }),
     pendingUnmount && /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(ModalShell, { title: "\u786E\u8BA4\u53D6\u6D88\u6302\u8F7D", width: 420, onMaskClick: () => setPendingUnmount(null), children: [
       /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { fontSize: 16, fontWeight: 600, marginBottom: 8 }, children: [
         "\u53D6\u6D88\u300C",
@@ -1310,25 +1404,28 @@ function SearchView({ call, reload }) {
     }
   };
   return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { style: S.panel, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { style: { ...cardTitle, marginBottom: 8 }, children: "\u641C\u7D22 skills.sh" }),
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { style: { display: "flex", gap: 8, alignItems: "center", marginBottom: 14 }, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
-        import_dsh_client_ui_primitives4.Input,
-        {
-          style: { flex: 1 },
-          placeholder: "skills.sh \u5173\u952E\u8BCD",
-          value: query,
-          onChange: (e) => setQuery(e.target.value),
-          onKeyDown: (e) => {
-            if (e.key === "Enter") doSearch();
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { style: { ...cardStyle, padding: "12px 14px", marginBottom: 14 }, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { style: { ...cardTitle, marginBottom: 10 }, children: "\u641C\u7D22 skills.sh" }),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { style: { display: "flex", gap: 8, alignItems: "center" }, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
+          import_dsh_client_ui_primitives4.Input,
+          {
+            style: { flex: 1 },
+            placeholder: "skills.sh \u5173\u952E\u8BCD",
+            value: query,
+            onChange: (e) => setQuery(e.target.value),
+            onKeyDown: (e) => {
+              if (e.key === "Enter") doSearch();
+            }
           }
-        }
-      ),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(PrimaryBtn, { onClick: doSearch, disabled: busy || !query.trim(), children: busy ? "\u641C\u7D22\u4E2D\u2026" : "\u641C\u7D22" })
+        ),
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(PrimaryBtn, { onClick: doSearch, disabled: busy || !query.trim(), children: busy ? "\u641C\u7D22\u4E2D\u2026" : "\u641C\u7D22" })
+      ] })
     ] }),
     /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(DirectAdd, { busy, onProbeAdd: probeAndAdd }),
     error ? /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(ErrorLine, { error }) : null,
     notice ? /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(NoticeBar, { notice }) : null,
+    !results && !candidates && !error && /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { style: { ...S.muted, padding: "4px 2px" }, children: "\u8F93\u5165\u5173\u952E\u8BCD\u641C\u7D22 skills.sh \u6CE8\u518C\u8868\uFF0C\u6216\u76F4\u63A5\u63A2\u6D4B GitHub \u4ED3\u5E93\u5165\u5E93\u3002" }),
     candidates && /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { style: { marginBottom: 10 }, children: [
       /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(GhostBtn, { onClick: () => {
         setCandidates(null);

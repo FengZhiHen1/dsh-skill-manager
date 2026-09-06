@@ -113,23 +113,29 @@ export function SearchView({ call, reload }) {
 
   return (
     <div style={S.panel}>
-      {/* 搜索 skills.sh（搜索为主按钮，Enter 快捷） */}
-      <div style={{ ...cardTitle, marginBottom: 8 }}>搜索 skills.sh</div>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 14 }}>
-        <Input
-          style={{ flex: 1 }}
-          placeholder="skills.sh 关键词"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') doSearch() }}
-        />
-        <PrimaryBtn onClick={doSearch} disabled={busy || !query.trim()}>{busy ? '搜索中…' : '搜索'}</PrimaryBtn>
+      {/* 两个入库入口同一卡片语言：搜索 skills.sh（搜索为主按钮，Enter 快捷） */}
+      <div style={{ ...cardStyle, padding: '12px 14px', marginBottom: 14 }}>
+        <div style={{ ...cardTitle, marginBottom: 10 }}>搜索 skills.sh</div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <Input
+            style={{ flex: 1 }}
+            placeholder="skills.sh 关键词"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') doSearch() }}
+          />
+          <PrimaryBtn onClick={doSearch} disabled={busy || !query.trim()}>{busy ? '搜索中…' : '搜索'}</PrimaryBtn>
+        </div>
       </div>
       {/* 直接添加的语义是探测仓库；多候选交给候选列表选择。notice 必须是
           {tone,text} 形状——NoticeBar 按对象字段渲染，裸字符串会渲染成空反馈条。 */}
       <DirectAdd busy={busy} onProbeAdd={probeAndAdd} />
       {error ? <ErrorLine error={error} /> : null}
       {notice ? <NoticeBar notice={notice} /> : null}
+      {/* 空态引导：未搜索且无候选时给一句提示，避免半页空白 */}
+      {!results && !candidates && !error && (
+        <div style={{ ...S.muted, padding: '4px 2px' }}>输入关键词搜索 skills.sh 注册表，或直接探测 GitHub 仓库入库。</div>
+      )}
       {candidates && (
         <div style={{ marginBottom: 10 }}>
           <GhostBtn onClick={() => { setCandidates(null); setSelected(new Set()) }} disabled={busy}>← 返回搜索</GhostBtn>

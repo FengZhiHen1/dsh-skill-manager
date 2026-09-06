@@ -60,6 +60,8 @@ export const S = {
   row: { display: 'flex', alignItems: 'center', gap: '8px', padding: '9px 12px', border: `1px solid ${T.borderL1}`, borderRadius: 12, marginBottom: 8, fontSize: 13 },
   select: { padding: '4px 8px', borderRadius: 6, border: `1px solid ${T.borderL1}`, background: T.bgBase, color: T.labelPrimary, fontSize: 12 },
   panel: { padding: '10px 12px' },
+  /** 高密度列表行（容器卡 + 分隔线用法）：比 S.row 描边卡轻，行内不再带边框。 */
+  listRow: { display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', fontSize: 13 },
   muted: { color: T.labelSecondary, fontSize: 12 },
   guide: { padding: '24px 16px', textAlign: 'center', color: T.labelSecondary, fontSize: 13 },
   dangerText: { color: T.error },
@@ -81,3 +83,7 @@ export const cardTitle = { fontSize: 13, fontWeight: 600, color: T.labelPrimary 
 export const noteText = { fontSize: 11, color: T.labelSecondary }
 /** 分隔线（1px 描边色，flex 容器内不伸缩）。 */
 export const dividerStyle = { height: 1, background: T.borderL1, flex: 'none' }
+/** 纵向导航项基元（分组栏行）：通宽文字钮，激活态浅底深字。 */
+export const navItemStyle = { display: 'flex', alignItems: 'center', gap: 6, width: '100%', padding: '6px 10px', border: 'none', borderRadius: 8, background: 'transparent', font: 'inherit', fontSize: 13, cursor: 'pointer', color: T.labelSecondary }
+/** 导航项激活态（叠加在 navItemStyle 上）。 */
+export const navItemActiveStyle = { background: T.bgModulePlatform, color: T.labelPrimary, fontWeight: 500 }

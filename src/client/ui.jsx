@@ -99,12 +99,13 @@ export const menuDivider = <div style={{ height: 1, margin: '5px 6px', backgroun
  * - github 行：立即更新 / 禁用|启用 / 移动到分组 ▸ / 删除（红色）；
  * - github 缺失行：恢复 / 删除（红色）；
  * - self/local 行：禁用|启用 / 移动到分组 ▸，无更新（无上游）、无删除（只读红线）。
+ * flags 为行次要标记（本地有修改/无 SKILL.md 等），在菜单顶部状态区只读展示，不抢行内主徽章。
  * 浮层几何：主/子菜单一律 position:fixed，锚定触发按钮的 rect。
  * 宿主设置面板是定高 overflow:hidden 容器，absolute 会被面板底边裁掉且滚不到。
  * fixed 逃逸裁剪与滚动流：近底自动向上翻、近左自动向右翻、max-height 按可用空间封顶并内部滚动。
  * 任何外层滚动/缩放即关闭菜单：trigger rect 失效，浮层不跟随文档流。
  */
-export function RowMenu({ it, groupNames, busy, onAction, onMove, onClose, triggerRect }) {
+export function RowMenu({ it, groupNames, flags = [], busy, onAction, onMove, onClose, triggerRect }) {
   const menuRef = useRef(null)
   const [sub, setSub] = useState(null) // {rect}：「移动到分组」项 rect，悬停/点击展开；null 收起
   useEffect(() => {
@@ -163,6 +164,12 @@ export function RowMenu({ it, groupNames, busy, onAction, onMove, onClose, trigg
     <>
       <div style={{ position: 'fixed', inset: 0, zIndex: 40 }} onClick={onClose} />
       <div ref={menuRef} style={menuStyle}>
+        {flags.length > 0 && (
+          <>
+            <div style={{ padding: '5px 12px', fontSize: 11, color: T.labelSecondary, whiteSpace: 'nowrap' }}>{flags.join(' · ')}</div>
+            {menuDivider}
+          </>
+        )}
         {it.missing ? (
           <MenuItem label="恢复" disabled={busy} onClick={() => { onClose(); onAction('update') }} />
         ) : (

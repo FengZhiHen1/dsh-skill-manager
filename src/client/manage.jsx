@@ -1,11 +1,11 @@
-// manage — 管理视图（与搜索视图并列）：分组范围配置与技能库行列表，破坏性动作一律遮罩确认。
+// manage — 管理视图（与搜索视图并列）：主从两段式——左栏分组导航，右栏当前组范围配置与技能库行列表。
 //
 // 边界：列表纯前端过滤零请求，写入只经 settings 意图与 call 门面；targetKey 推导单源在 derive.js，失效组回落在 service.js。
 // 参考：插件运行时.md「管理视图」、挂载与同步.md「行状态走查」；DSR-008/009/017/018。
 import { useState, useMemo } from 'react'
-import { Input, Pill } from '@deepseek-ai/dsh-client-ui-primitives'
-import { T, S, badgeStyle, cardStyle, cardTitle, noteText, dotStyle, sectionHead, statusPillStyle } from './theme.js'
-import { GhostBtn, OutlineBtn, PrimaryBtn, ErrorLine, NoticeBar, RowMenu, UpdateConfirmationDialog, ConfirmDialog, ModalShell } from './ui.jsx'
+import { Input } from '@deepseek-ai/dsh-client-ui-primitives'
+import { T, S, badgeStyle, cardStyle, cardTitle, noteText, dotStyle, sectionHead, statusPillStyle, dividerStyle, navItemStyle, navItemActiveStyle } from './theme.js'
+import { GhostBtn, OutlineBtn, PrimaryBtn, ErrorLine, NoticeBar, RowMenu, MenuItem, menuCardStyle, UpdateConfirmationDialog, ConfirmDialog, ModalShell } from './ui.jsx'
 import { buildRepairPrompt, RepairCopy, mountIssueRepair } from './repair.jsx'
 
 const ORIGIN_LABEL = { github: 'GitHub', local: '本地', self: '自研' }
@@ -20,9 +20,33 @@ function targetLabel(target, workspaces) {
 }
 
 /**
- * 管理视图：分组优先两段式，上段组胶囊选择与当前组使用范围，下段技能库行。
+ * 行主状态判别（CORE-01）：每行至多一个主徽章，优先级 缺失 > 挂载失败 > 已禁用 > 可更新 > 检查失败。
+ * 常态（已是最新 / 正常挂载）不占位——正常行零徽章，需关注的行才醒目。
+ * 返回 null 即无徽章；issues 非空表示徽章可点击展开挂载明细。
+ */
+function primaryStatus(it) {
+  const mountIssues = it.mount.filter((row) => row.issue && row.issue !== 'ok')
+  if (it.missing) return { kind: 'error', label: '缺失', issues: null }
+  if (mountIssues.length > 0) return { kind: 'error', label: `挂载失败 ${mountIssues.length}`, issues: mountIssues }
+  if (it.disabled) return { kind: 'warn', label: '已禁用', issues: null }
+  if (it.upstream && it.upstream.status === 'updatable') return { kind: 'updatable', label: '可更新', issues: null }
+  if (it.upstream && it.upstream.status === 'check_failed') return { kind: 'warn', label: '检查失败', issues: null }
+  return null
+}
+
+/** 行次要标记：不抢主徽章，收进 ⋯ 菜单顶部状态区。 */
+function secondaryFlags(it) {
+  const flags = []
+  if (it.upstream && it.upstream.locally_modified) flags.push('本地有修改')
+  if (!it.hasSkillMd && !it.missing) flags.push('无 SKILL.md')
+  if (it.nameVisible === false) flags.push('安装名文法不可见')
+  return flags
+}
+
+/**
+ * 管理视图：主从布局，左栏分组导航选择当前组，右栏上段为当前组使用范围，下段为技能库行。
  * 使用范围 settings 直写即时生效；过滤纯前端零请求。
- * 行状态徽章来自 overview 快照随附的走查；⋯ 菜单按来源分化。
+ * 行主徽章来自 overview 快照随附的走查，次要标记在 ⋯ 菜单顶部；⋯ 菜单按来源分化。
  * 出库/删组/取消挂载/覆盖更新等破坏性动作一律遮罩确认；失败带复制入口。
  * @param {object} props
  * @param {Function} props.call RPC 门面
@@ -206,138 +230,135 @@ export function ManageView({ call, data, config, reload }) {
 
   return (
     <div style={S.panel}>
-      {/* 分组优先：先选择当前组并配置它的全局/工作区使用范围，再浏览技能库；胶囊行是纯选择器 */}
-      <div style={{ marginBottom: 14 }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
-          <span style={sectionHead}>分组</span>
-          <span style={noteText}>{`${data.lib.skills.length} 个 Skill`}</span>
-        </div>
-        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
-          <Pill active={groupFilter === ''} onClick={() => setGroupFilter('')}>{`全部 · ${data.lib.skills.length}`}</Pill>
-          <Pill active={groupFilter === '默认'} onClick={() => setGroupFilter('默认')}>{`默认 · ${countForGroup('默认')}`}</Pill>
-          {/* 「默认」上一行已固定渲染，map 中排除防重复；groups 表合法含「默认」键，它是真实组非回落伪组 */}
-          {groupNames.filter((group) => group !== '默认').map((group) => (
-            <Pill key={group} active={groupFilter === group} onClick={() => setGroupFilter(group)}>{`${group} · ${countForGroup(group)}`}</Pill>
-          ))}
-          <Pill active={false} onClick={() => setDialog({ kind: 'create' })}>＋ 新建分组</Pill>
-        </div>
-        {groupFilter === ''
-          ? (
-              <div style={{ ...cardStyle, padding: '12px 14px' }}>
-                <div style={cardTitle}>当前查看：全部技能</div>
-                <div style={{ ...noteText, marginTop: 4 }}>选择一个分组后，可配置它在 DSH 全局与各工作区的可用范围。</div>
-              </div>
-            )
-          : <GroupScopePanel config={config} group={groupFilter} workspaces={data.workspaces} skills={data.lib.skills} onGroupOp={groupOp} />}
-      </div>
-
-      {/* 非行级警告条（琥珀晕卡逐条，附修复复制入口） */}
-      {warningLines.map((w) => (
-        <div key={w.key} style={{ ...badgeStyle(T.warn), borderRadius: 10, padding: '9px 12px', marginBottom: 8, fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={dotStyle(T.warn)} />
-          <span style={{ flex: 1 }}>{w.text}</span>
-          <RepairCopy text={w.prompt} />
-        </div>
-      ))}
-
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 10 }}>
-        <span style={sectionHead}>技能库</span>
-        <span style={noteText}>{`${groupFilter === '' ? '全部' : groupFilter} · ${list.length} 个`}</span>
-        {data.lib.checkedAt ? <span style={noteText}>{`上游状态检查于 ${fmtCheckedAt(data.lib.checkedAt)}`}</span> : null}
-      </div>
-      {/* 库工具条：搜索过滤 / 来源筛选 / ↻ 刷新；无本地导入入口 */}
-      <div style={{ ...S.toolbar, marginBottom: 12 }}>
-        <Input style={{ flex: 1, minWidth: 140 }} placeholder="搜索名称 / 描述…" value={q} onChange={(e) => setQ(e.target.value)} />
-        <select style={{ ...S.select, border: 'none', background: T.bgModulePlatform, borderRadius: 8, padding: '5px 10px' }} value={origin} onChange={(e) => setOrigin(e.target.value)}>
-          <option value="">全部来源</option>
-          <option value="github">GitHub</option>
-          <option value="self">自研/本地</option>
-        </select>
-        <GhostBtn onClick={refreshAll} disabled={busy} title="重新检查全部上游、执行一次安全对账并刷新列表">↻ 刷新</GhostBtn>
-      </div>
-      {notice ? <NoticeBar notice={notice} /> : null}
-      {error ? <ErrorLine error={error} /> : null}
-
-      {/* 行：描边卡片 + 状态徽章 + ⋯ 菜单（按 origin 分化）；挂载失败徽章点击展开明细 */}
-      {list.length === 0
-        ? <div style={{ ...S.muted, padding: 12 }}>库为空（无匹配 skill）</div>
-        : list.map((it) => {
-            const mountIssues = it.mount.filter((row) => row.issue && row.issue !== 'ok')
-            return (
-              <div key={it.dir} style={{ position: 'relative' }}>
-                <div style={S.row}>
-                  <div style={{ flex: 1, minWidth: 0 }} title={it.description}>
-                    <div style={{ fontWeight: 600, color: T.labelPrimary }}>{it.name}</div>
-                    <div style={noteText}>
-                      {[
-                        ORIGIN_LABEL[it.origin] || it.origin,
-                        it.group,
-                        it.targets.length > 0 ? it.targets.map((t) => targetLabel(t, data.workspaces)).join(' / ') : null,
-                        it.commit ? it.commit.slice(0, 7) : null,
-                      ].filter(Boolean).join(' · ')}
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-                    {it.missing && <span style={statusPillStyle('error')}>缺失</span>}
-                    {it.disabled && <span style={statusPillStyle('warn')}>已禁用</span>}
-                    {!it.hasSkillMd && !it.missing && <span style={statusPillStyle('warn')}>无 SKILL.md</span>}
-                    {it.nameVisible === false && <span style={statusPillStyle('warn')} title="安装名不符合小写连字符文法，DSH 不可见">名文法</span>}
-                    {mountIssues.length > 0 && (
-                      <button
-                        type="button"
-                        title="点击展开挂载失败明细与修复提示词"
-                        onClick={() => setExpandedMount(expandedMount === it.dir ? null : it.dir)}
-                        style={{ ...statusPillStyle('error'), border: 'none', font: 'inherit', cursor: 'pointer' }}
-                      >
-                        {`挂载失败 ${mountIssues.length} · ${expandedMount === it.dir ? '收起' : '展开'}`}
-                      </button>
-                    )}
-                    {it.upstream && it.upstream.status === 'updatable' && <span style={statusPillStyle('updatable')}>可更新</span>}
-                    {it.upstream && it.upstream.status === 'up_to_date' && <span style={statusPillStyle('normal')}>已是最新</span>}
-                    {it.upstream && it.upstream.status === 'check_failed' && <span style={statusPillStyle('warn')}>检查失败</span>}
-                    {it.upstream && it.upstream.locally_modified && <span style={statusPillStyle('warn')}>本地有修改</span>}
-                    <button
-                      type="button"
-                      title="行操作"
-                      disabled={busy}
-                      onClick={(e) => setMenuFor(menuFor?.dir === it.dir ? null : { dir: it.dir, rect: e.currentTarget.getBoundingClientRect() })}
-                      style={{ border: 'none', background: 'transparent', cursor: busy ? 'default' : 'pointer', fontSize: 16, lineHeight: 1, padding: '3px 6px', borderRadius: 6, color: menuFor?.dir === it.dir ? T.labelPrimary : T.labelSecondary }}
-                    >
-                      ⋯
-                    </button>
-                  </div>
-                  {menuFor?.dir === it.dir && (
-                    <RowMenu
-                      it={it}
-                      groupNames={groupNames}
-                      busy={busy}
-                      triggerRect={menuFor.rect}
-                      onAction={(action) => rowAction(it.dir, action)}
-                      onMove={(group) => moveSkill(it.dir, group)}
-                      onClose={() => setMenuFor(null)}
-                    />
-                  )}
+      {/* 主从布局：左栏分组导航（纵列可滚动，容纳无上限分组），右栏为当前组详情 */}
+      <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+        <GroupNav
+          groups={groups}
+          selected={groupFilter}
+          total={displaySkills.length}
+          countForGroup={countForGroup}
+          onSelect={setGroupFilter}
+          onCreate={() => setDialog({ kind: 'create' })}
+        />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {groupFilter === ''
+            ? (
+                <div style={{ ...cardStyle, padding: '12px 14px' }}>
+                  <div style={cardTitle}>当前查看：全部技能</div>
+                  <div style={{ ...noteText, marginTop: 4 }}>选择左侧分组，可配置它在 DSH 全局与各工作区的可用范围。</div>
                 </div>
-                {expandedMount === it.dir && (
-                  <div style={{ ...subRowPanel }}>
-                    {mountIssues.map((row, idx) => {
-                      const repair = mountIssueRepair(row.issue, { name: it.dir, targetLabel: targetLabel(row.target, data.workspaces), path: row.path, root: data.root })
-                      return (
-                        <div key={`${row.target}-${idx}`} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, padding: '4px 0' }}>
-                          <span style={dotStyle(T.error)} />
-                          <span style={{ flex: 1, minWidth: 0 }}>
-                            <span style={{ fontWeight: 500, color: T.labelPrimary }}>{`${targetLabel(row.target, data.workspaces)} · ${row.issue}`}</span>
-                            {row.path ? <span style={{ ...noteText, display: 'block', wordBreak: 'break-all' }}>{row.path}</span> : null}
-                          </span>
-                          <RepairCopy text={buildRepairPrompt({ root: data.root, code: row.issue, message: `${it.dir} → ${row.path || targetLabel(row.target, data.workspaces)}`, repair })} />
+              )
+            : <GroupScopePanel config={config} group={groupFilter} workspaces={data.workspaces} skills={data.lib.skills} onGroupOp={groupOp} />}
+
+          {/* 非行级警告条（琥珀晕卡逐条，附修复复制入口） */}
+          {warningLines.map((w) => (
+            <div key={w.key} style={{ ...badgeStyle(T.warn), borderRadius: 10, padding: '9px 12px', margin: '8px 0', fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={dotStyle(T.warn)} />
+              <span style={{ flex: 1 }}>{w.text}</span>
+              <RepairCopy text={w.prompt} />
+            </div>
+          ))}
+
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, margin: '14px 0 10px' }}>
+            <span style={sectionHead}>技能库</span>
+            <span style={noteText}>{`${groupFilter === '' ? '全部' : groupFilter} · ${list.length} 个`}</span>
+            {data.lib.checkedAt ? <span style={noteText}>{`上游状态检查于 ${fmtCheckedAt(data.lib.checkedAt)}`}</span> : null}
+          </div>
+          {/* 库工具条：搜索过滤 / 来源筛选 / ↻ 刷新；无本地导入入口 */}
+          <div style={{ ...S.toolbar, marginBottom: 12 }}>
+            <Input style={{ flex: 1, minWidth: 140 }} placeholder="搜索名称 / 描述…" value={q} onChange={(e) => setQ(e.target.value)} />
+            <select style={{ ...S.select, border: 'none', background: T.bgModulePlatform, borderRadius: 8, padding: '5px 10px' }} value={origin} onChange={(e) => setOrigin(e.target.value)}>
+              <option value="">全部来源</option>
+              <option value="github">GitHub</option>
+              <option value="self">自研/本地</option>
+            </select>
+            <GhostBtn onClick={refreshAll} disabled={busy} title="重新检查全部上游、执行一次安全对账并刷新列表">↻ 刷新</GhostBtn>
+          </div>
+          {notice ? <NoticeBar notice={notice} /> : null}
+          {error ? <ErrorLine error={error} /> : null}
+
+          {/* 行：单容器卡 + 分隔线高密度列表；主徽章互斥，次要标记在 ⋯ 菜单顶部 */}
+          {list.length === 0
+            ? <div style={{ ...S.muted, padding: 12 }}>库为空（无匹配 skill）</div>
+            : (
+                <div style={{ ...cardStyle, padding: 0 }}>
+                  {list.map((it, idx) => {
+                    const status = primaryStatus(it)
+                    const mountIssues = status?.issues || []
+                    return (
+                      <div key={it.dir} style={{ position: 'relative' }}>
+                        {idx > 0 ? <div style={dividerStyle} /> : null}
+                        <div style={S.listRow}>
+                          <div style={{ flex: 1, minWidth: 0 }} title={it.description}>
+                            <div style={{ fontWeight: 600, color: T.labelPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.name}</div>
+                            <div style={{ ...noteText, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {[
+                                ORIGIN_LABEL[it.origin] || it.origin,
+                                // 右栏已按左栏分组收窄；仅「全部」视图补组名与挂载目标，避免逐行重复
+                                groupFilter === '' ? it.group : null,
+                                groupFilter === '' && it.targets.length > 0 ? it.targets.map((t) => targetLabel(t, data.workspaces)).join(' / ') : null,
+                                it.commit ? it.commit.slice(0, 7) : null,
+                              ].filter(Boolean).join(' · ')}
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                            {status && (mountIssues.length > 0 ? (
+                              <button
+                                type="button"
+                                title="点击展开挂载失败明细与修复提示词"
+                                onClick={() => setExpandedMount(expandedMount === it.dir ? null : it.dir)}
+                                style={{ ...statusPillStyle('error'), border: 'none', font: 'inherit', cursor: 'pointer' }}
+                              >
+                                {`${status.label} · ${expandedMount === it.dir ? '收起' : '展开'}`}
+                              </button>
+                            ) : <span style={statusPillStyle(status.kind)}>{status.label}</span>)}
+                            <button
+                              type="button"
+                              title="行操作"
+                              disabled={busy}
+                              onClick={(e) => setMenuFor(menuFor?.dir === it.dir ? null : { dir: it.dir, rect: e.currentTarget.getBoundingClientRect() })}
+                              style={{ border: 'none', background: 'transparent', cursor: busy ? 'default' : 'pointer', fontSize: 16, lineHeight: 1, padding: '3px 6px', borderRadius: 6, color: menuFor?.dir === it.dir ? T.labelPrimary : T.labelSecondary }}
+                            >
+                              ⋯
+                            </button>
+                          </div>
+                          {menuFor?.dir === it.dir && (
+                            <RowMenu
+                              it={it}
+                              groupNames={groupNames}
+                              flags={secondaryFlags(it)}
+                              busy={busy}
+                              triggerRect={menuFor.rect}
+                              onAction={(action) => rowAction(it.dir, action)}
+                              onMove={(group) => moveSkill(it.dir, group)}
+                              onClose={() => setMenuFor(null)}
+                            />
+                          )}
                         </div>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
-            )
-          })}
+                        {expandedMount === it.dir && (
+                          <div style={{ ...subRowPanel }}>
+                            {mountIssues.map((row, midx) => {
+                              const repair = mountIssueRepair(row.issue, { name: it.dir, targetLabel: targetLabel(row.target, data.workspaces), path: row.path, root: data.root })
+                              return (
+                                <div key={`${row.target}-${midx}`} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, padding: '4px 0' }}>
+                                  <span style={dotStyle(T.error)} />
+                                  <span style={{ flex: 1, minWidth: 0 }}>
+                                    <span style={{ fontWeight: 500, color: T.labelPrimary }}>{`${targetLabel(row.target, data.workspaces)} · ${row.issue}`}</span>
+                                    {row.path ? <span style={{ ...noteText, display: 'block', wordBreak: 'break-all' }}>{row.path}</span> : null}
+                                  </span>
+                                  <RepairCopy text={buildRepairPrompt({ root: data.root, code: row.issue, message: `${it.dir} → ${row.path || targetLabel(row.target, data.workspaces)}`, repair })} />
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+        </div>
+      </div>
 
       {dialog?.kind === 'create' && <CreateGroupDialog onCancel={() => setDialog(null)} onCreate={doCreateGroup} />}
       {dialog?.kind === 'update' && (
@@ -384,11 +405,45 @@ export function ManageView({ call, data, config, reload }) {
 
 /** 挂载失败明细展开面板（白底描边，贴行下方）。 */
 const subRowPanel = {
-  margin: '-4px 0 10px',
+  margin: '0 12px 8px',
   padding: '8px 12px',
   borderRadius: 10,
   background: T.bgLayer3,
   border: `1px solid ${T.borderL1}`,
+}
+
+/**
+ * 左栏分组导航：全部/默认/自定义组纵列，计数随行。
+ * 分组数无上限：列高封顶内滚，组名超长截断并 title 悬浮。
+ */
+function GroupNav({ groups, selected, total, countForGroup, onSelect, onCreate }) {
+  const renderItem = (key, label, count) => (
+    <button
+      key={key || '<all>'}
+      type="button"
+      title={label}
+      onClick={() => onSelect(key)}
+      style={{ ...navItemStyle, ...(selected === key ? navItemActiveStyle : null) }}
+    >
+      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'left' }}>{label}</span>
+      <span style={{ ...noteText, flex: 'none' }}>{count}</span>
+    </button>
+  )
+  return (
+    <div style={{ flex: 'none', width: 140 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6, padding: '0 4px' }}>
+        <span style={cardTitle}>分组</span>
+        <span style={{ flex: 1 }} />
+        <button type="button" onClick={onCreate} style={{ border: 'none', background: 'none', padding: 0, font: 'inherit', fontSize: 11, color: T.labelSecondary, cursor: 'pointer' }}>＋ 新建</button>
+      </div>
+      <div style={{ maxHeight: 320, overflowY: 'auto' }}>
+        {renderItem('', '全部', total)}
+        {renderItem('默认', '默认', countForGroup('默认'))}
+        {/* 「默认」上一行已固定渲染，map 中排除防重复；groups 表合法含「默认」键，它是真实组非回落伪组 */}
+        {Object.keys(groups).filter((group) => group !== '默认').map((group) => renderItem(group, group, countForGroup(group)))}
+      </div>
+    </div>
+  )
 }
 
 /** 新建分组模态（与更新确认同一遮罩语言）；客户端预检长度与保留字，完整规则 Host validate 兜底。 */
@@ -429,13 +484,16 @@ function CreateGroupDialog({ onCancel, onCreate }) {
 
 /**
  * 当前分组的使用范围：直写 settings 配置，本地即时生效，后台对账收敛。
+ * 工作区两区收纳：已勾选常显，未勾选收进折叠区；工作区数超阈值出过滤框，过滤时平铺全部匹配项。
  * 防御：取消勾选会经对账移除该组在此目标下的全部链接。
  * 波及半径与「点一下复选框」的心智不对称，移除数 >0 时必须走遮罩确认。
- * 复用更新确认的同一对话框语言，明示目标与链接数，强调只删指针不删文件。
  */
 function GroupScopePanel({ config, group, workspaces, skills, onGroupOp }) {
   const [renaming, setRenaming] = useState(false)
   const [newName, setNewName] = useState('')
+  const [opsOpen, setOpsOpen] = useState(false)
+  const [showAllWs, setShowAllWs] = useState(false)
+  const [wsFilter, setWsFilter] = useState('')
   const [pendingUnmount, setPendingUnmount] = useState(null) // {scopeKind, workspaceId, count, targetName}
   const { groups, toggleMount } = config
   const mounts = (groups[group] && groups[group].mounts) || []
@@ -466,14 +524,34 @@ function GroupScopePanel({ config, group, workspaces, skills, onGroupOp }) {
     toggleMount(group, pendingUnmount.scopeKind, pendingUnmount.workspaceId, false)
     setPendingUnmount(null)
   }
-  // 「默认」是虚拟组，不可改名/删除；分组操作入口收进本卡
+  // 「默认」是虚拟组，不可改名/删除；分组操作入口收进标题 ⋯ 菜单
   const manageable = group !== '默认'
   const submitRename = () => {
     const trimmed = newName.trim()
     setRenaming(false)
     if (trimmed && trimmed !== group) onGroupOp('rename', group, trimmed)
   }
-  const entryStyle = (danger) => ({ border: 'none', background: 'none', padding: 0, font: 'inherit', fontSize: 11, color: danger ? T.error : T.labelSecondary, cursor: 'pointer' })
+
+  // 工作区两区推导：过滤中平铺全部匹配项；否则已启用区常显，其余进折叠区。
+  const wsChecked = (w) => enabled('project', w.workspaceId)
+  const enabledWs = workspaces.filter(wsChecked)
+  const restCount = workspaces.length - enabledWs.length
+  const filtering = wsFilter.trim() !== ''
+  const visibleWs = filtering
+    ? workspaces.filter((w) => `${w.title}\n${w.path}`.toLowerCase().includes(wsFilter.trim().toLowerCase()))
+    : (showAllWs ? workspaces : enabledWs)
+
+  const wsRow = (workspace) => (
+    <label key={workspace.workspaceId} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0', fontSize: 12, cursor: 'pointer' }}>
+      <input type="checkbox" checked={wsChecked(workspace)} onChange={(event) => toggle('project', workspace.workspaceId, event.target.checked)} />
+      <span style={{ fontWeight: 500, color: T.labelPrimary, flex: 'none' }}>{workspace.title}</span>
+      <span style={{ ...noteText, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={workspace.path}>
+        {workspace.path}
+      </span>
+      {workspace.mountCount > 0 ? <span style={{ ...noteText, flex: 'none' }}>{`${workspace.mountCount} 个组使用`}</span> : null}
+    </label>
+  )
+
   return (
     <div style={{ ...cardStyle, padding: '12px 14px' }}>
       {renaming
@@ -497,35 +575,63 @@ function GroupScopePanel({ config, group, workspaces, skills, onGroupOp }) {
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
               <span style={cardTitle}>{`当前分组：${group}`}</span>
               {manageable && <span style={{ flex: 1 }} />}
-              {manageable && <button type="button" style={entryStyle(false)} onClick={() => { setNewName(group); setRenaming(true) }}>改名</button>}
-              {manageable && <button type="button" style={entryStyle(true)} onClick={() => onGroupOp('delete', group)}>删除</button>}
+              {manageable && (
+                <span style={{ position: 'relative' }}>
+                  <button
+                    type="button"
+                    title="分组操作"
+                    onClick={() => setOpsOpen((v) => !v)}
+                    style={{ border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: '3px 6px', borderRadius: 6, color: opsOpen ? T.labelPrimary : T.labelSecondary }}
+                  >
+                    ⋯
+                  </button>
+                  {opsOpen && (
+                    <>
+                      <div style={{ position: 'fixed', inset: 0, zIndex: 40 }} onClick={() => setOpsOpen(false)} />
+                      <div style={{ ...menuCardStyle, top: '100%', right: 0, marginTop: 4 }}>
+                        <MenuItem label="改名" onClick={() => { setOpsOpen(false); setNewName(group); setRenaming(true) }} />
+                        <MenuItem label="删除分组" danger onClick={() => { setOpsOpen(false); onGroupOp('delete', group) }} />
+                      </div>
+                    </>
+                  )}
+                </span>
+              )}
             </div>
           )}
       {renaming && <div style={{ ...noteText, marginBottom: 8 }}>改名立即生效：分组成员与挂载规则同步改名，Skill 本体不受影响。</div>}
-      <div style={{ height: 1, background: T.borderL1, flex: 'none' }} />
+      <div style={dividerStyle} />
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 0', fontSize: 12, cursor: 'pointer' }}>
         <input type="checkbox" checked={enabled('global')} onChange={(event) => toggle('global', null, event.target.checked)} />
         <span style={{ fontWeight: 500, color: T.labelPrimary }}>DSH 全局</span>
         <span style={noteText}>对所有 DSH 项目生效</span>
       </label>
-      <div style={{ height: 1, background: T.borderL1, flex: 'none' }} />
+      <div style={dividerStyle} />
       {workspaces.length === 0
         ? <div style={{ ...S.muted, padding: '8px 0' }}>当前没有 DSH 工作区；请在 DSH 原生工作区界面创建或打开项目。</div>
         : (
             <>
-              <div style={{ fontSize: 10, color: T.labelTertiary, padding: '7px 0 1px' }}>工作区项目</div>
-              {workspaces.map((workspace) => (
-                <label key={workspace.workspaceId} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0', fontSize: 12, cursor: 'pointer' }}>
-                  <input type="checkbox" checked={enabled('project', workspace.workspaceId)} onChange={(event) => toggle('project', workspace.workspaceId, event.target.checked)} />
-                  <span style={{ fontWeight: 500, color: T.labelPrimary }}>{workspace.title}</span>
-                  <span style={noteText}>{`${workspace.path} · ${workspace.mountCount} 个组使用`}</span>
-                </label>
-              ))}
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '7px 0 1px' }}>
+                <span style={{ fontSize: 10, color: T.labelTertiary }}>工作区项目</span>
+                <span style={{ flex: 1 }} />
+                <span style={{ fontSize: 10, color: T.labelTertiary }}>{`已启用 ${enabledWs.length} · 共 ${workspaces.length}`}</span>
+              </div>
+              {/* 过滤框只在工作区足够多时出现；少数工作区不值得常驻一个输入框 */}
+              {workspaces.length > 8 && (
+                <Input style={{ margin: '6px 0 2px' }} placeholder="过滤工作区…" value={wsFilter} onChange={(e) => setWsFilter(e.target.value)} />
+              )}
+              {visibleWs.map(wsRow)}
+              {filtering && visibleWs.length === 0 && <div style={{ ...S.muted, padding: '6px 0' }}>无匹配工作区</div>}
+              {!filtering && restCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setShowAllWs((v) => !v)}
+                  style={{ display: 'block', width: '100%', border: 'none', background: T.bgModulePlatform, borderRadius: 8, padding: '6px 10px', margin: '4px 0 2px', font: 'inherit', fontSize: 12, color: T.labelSecondary, cursor: 'pointer', textAlign: 'left' }}
+                >
+                  {showAllWs ? '▾ 收起其他工作区' : `▸ 展开其他 ${restCount} 个工作区（勾选即启用）`}
+                </button>
+              )}
             </>
           )}
-      <div style={{ height: 1, background: T.borderL1, flex: 'none' }} />
-      <div style={{ ...noteText, paddingTop: 8 }}>取消勾选会移除该分组在该目标下的全部 Skill 链接（移除前将确认）。</div>
-      {manageable && <div style={{ ...noteText, paddingTop: 4 }}>删除组：成员回落「默认」组，执行前需确认。</div>}
       {pendingUnmount && (
         <ModalShell title="确认取消挂载" width={420} onMaskClick={() => setPendingUnmount(null)}>
           <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>取消「{group}」在「{pendingUnmount.targetName}」的挂载？</div>
