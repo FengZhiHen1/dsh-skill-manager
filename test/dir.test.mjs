@@ -2,14 +2,14 @@
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readdir, readFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   CONFIG_NS, SKILLS_DIR_FIELD, DEFAULT_GROUP, configSchema, requireDir,
 } from '../src/core/model/intent.js'
 import { registerConfig } from '../src/adapter/settings.js'
-import { safePath, existsDir, writeJson } from '../src/core/base/fsys.js'
-import { mkTmp, cleanup, assertThrowsCode } from './helpers.mjs'
+import { atomicSwapDir, safePath, existsDir, writeJson } from '../src/core/base/fsys.js'
+import { mkTmp, cleanup, assertRejectsCode, assertThrowsCode } from './helpers.mjs'
 
 test('registerConfig：命名空间与 schema 正确（意图字段齐备）', () => {
   assert.equal(CONFIG_NS, 'skill-manager')
@@ -112,6 +112,65 @@ test('existsDir：目录判定', async () => {
   try {
     assert.equal(await existsDir(root), true)
     assert.equal(await existsDir(join(root, 'nope')), false)
+  } finally {
+    await cleanup(root)
+  }
+})
+
+// 以下三例锁 atomicSwapDir 的失败面：任何失败都不许让旧版消失。
+
+test('atomicSwapDir：构建阶段失败时目标原状不动，无临时目录残留', async () => {
+  const root = await mkTmp()
+  try {
+    const dest = join(root, 'skill')
+    await mkdir(dest, { recursive: true })
+    await writeFile(join(dest, 'f.txt'), '旧版')
+    await assertRejectsCode(
+      atomicSwapDir(dest, async () => {
+        throw new Error('构建失败')
+      }),
+      'write-failed',
+    )
+    assert.equal(await readFile(join(dest, 'f.txt'), 'utf8'), '旧版')
+    assert.deepEqual(await readdir(root), ['skill'])
+  } finally {
+    await cleanup(root)
+  }
+})
+
+test('atomicSwapDir：顶上失败则回滚，目标保持完整旧版', async () => {
+  const root = await mkTmp()
+  try {
+    const dest = join(root, 'skill')
+    await mkdir(dest, { recursive: true })
+    await writeFile(join(dest, 'f.txt'), '旧版')
+    await assertRejectsCode(
+      atomicSwapDir(dest, async (stage) => {
+        await writeFile(join(stage, 'f.txt'), '新版')
+        await rm(stage, { recursive: true, force: true })
+      }),
+      'write-failed',
+    )
+    assert.equal(await readFile(join(dest, 'f.txt'), 'utf8'), '旧版')
+    assert.deepEqual(await readdir(root), ['skill'])
+  } finally {
+    await cleanup(root)
+  }
+})
+
+test('atomicSwapDir：换装成功则新版就位，移开的旧目录被清掉', async () => {
+  const root = await mkTmp()
+  try {
+    const dest = join(root, 'skill')
+    await mkdir(dest, { recursive: true })
+    await writeFile(join(dest, 'f.txt'), '旧版')
+    await writeFile(join(dest, 'stale.txt'), '旧版独有文件')
+    await atomicSwapDir(dest, async (stage) => {
+      await writeFile(join(stage, 'f.txt'), '新版')
+    })
+    assert.equal(await readFile(join(dest, 'f.txt'), 'utf8'), '新版')
+    assert.equal(await existsDir(join(dest, 'stale.txt')), false)
+    assert.deepEqual(await readdir(root), ['skill'])
   } finally {
     await cleanup(root)
   }
