@@ -389,6 +389,51 @@ var primitives = __toESM(require("@deepseek-ai/dsh-client-ui-primitives"), 1);
 var import_dsh_client_ui_primitives = require("@deepseek-ai/dsh-client-ui-primitives");
 var import_jsx_runtime = require("react/jsx-runtime");
 var ChevronIcon = typeof primitives.IconChevronDownOutline14 === "function" ? primitives.IconChevronDownOutline14 : null;
+var ToastImpl = typeof primitives.Toast === "function" ? primitives.Toast : null;
+function useToast() {
+  const [toast, setToast] = (0, import_react.useState)(null);
+  const show = (text) => setToast((t) => ({ seq: (t?.seq ?? 0) + 1, text }));
+  return [toast, show, () => setToast(null)];
+}
+function ToastHost({ toast, onDone }) {
+  if (!toast) return null;
+  if (ToastImpl) return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(ToastImpl, { text: toast.text, onDone }, toast.seq);
+  return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(FallbackToast, { text: toast.text, onDone }, toast.seq);
+}
+function FallbackToast({ text, onDone }) {
+  const [fade, setFade] = (0, import_react.useState)(false);
+  (0, import_react.useEffect)(() => {
+    const t1 = setTimeout(() => setFade(true), 3e3);
+    const t2 = setTimeout(onDone, 4e3);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
+  }, [onDone]);
+  return /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
+    "div",
+    {
+      role: "status",
+      style: {
+        position: "fixed",
+        top: 16,
+        left: "50%",
+        transform: "translateX(-50%)",
+        zIndex: 1200,
+        background: T.bgLayer3,
+        color: T.labelPrimary,
+        border: `1px solid ${T.borderL2}`,
+        borderRadius: 10,
+        padding: "8px 14px",
+        fontSize: 12,
+        boxShadow: "0 8px 24px rgba(0,0,0,.18)",
+        opacity: fade ? 0 : 1,
+        transition: "opacity 1s"
+      },
+      children: text
+    }
+  );
+}
 var GhostBtn = (props) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "ghost", size: "sm", ...props });
 var OutlineBtn = (props) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "outline", size: "sm", ...props });
 var PrimaryBtn = (props) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "primary", size: "sm", ...props });
@@ -809,7 +854,7 @@ function secondaryFlags(it) {
   if (it.nameVisible === false) flags.push("\u5B89\u88C5\u540D\u6587\u6CD5\u4E0D\u53EF\u89C1");
   return flags;
 }
-function ManageView({ call, data, config, reload }) {
+function ManageView({ call, data, config, reload, showToast }) {
   const [origin, setOrigin] = (0, import_react3.useState)("");
   const [originOpen, setOriginOpen] = (0, import_react3.useState)(false);
   const [groupFilter, setGroupFilter] = (0, import_react3.useState)("\u9ED8\u8BA4");
@@ -817,9 +862,15 @@ function ManageView({ call, data, config, reload }) {
   const [busy, setBusy] = (0, import_react3.useState)(false);
   const [error, setError] = (0, import_react3.useState)(null);
   const [notice, setNotice] = (0, import_react3.useState)(null);
+  const [flashDir, setFlashDir] = (0, import_react3.useState)(null);
   const [dialog, setDialog] = (0, import_react3.useState)(null);
   const [menuFor, setMenuFor] = (0, import_react3.useState)(null);
   const [expandedMount, setExpandedMount] = (0, import_react3.useState)(null);
+  (0, import_react3.useEffect)(() => {
+    if (!flashDir) return void 0;
+    const t = setTimeout(() => setFlashDir(null), 1600);
+    return () => clearTimeout(t);
+  }, [flashDir]);
   const { groups, skillsIntent, setSkillDisabled, moveSkill, renameGroup, deleteGroup } = config;
   const displaySkills = (0, import_react3.useMemo)(() => data.lib.skills.map((it) => {
     const intent = skillsIntent[it.dir];
@@ -883,12 +934,14 @@ function ManageView({ call, data, config, reload }) {
         }
         const r = await call("update", { names: [name], confirmLocalChanges: payload.confirmLocalChanges === true });
         const it = r.results.find((item) => item.name === name);
-        if (it?.status === "updated") setNotice({ tone: "ok", text: `${name} \u5DF2\u66F4\u65B0\u81F3 ${String(it.commit || "").slice(0, 7)}\uFF08${it.via === "ls-remote" ? "git" : "API"} \u901A\u9053\uFF09` });
-        else if (it) setNotice({ tone: "warn", text: `${name} \u66F4\u65B0\u672A\u5B8C\u6210\uFF08${it.status}\uFF09\uFF1A${it.reason || it.error || "\u672A\u8FD4\u56DE\u539F\u56E0"}` });
+        if (it?.status === "updated") {
+          showToast(`${name} \u5DF2\u66F4\u65B0\u81F3 ${String(it.commit || "").slice(0, 7)}\uFF08${it.via === "ls-remote" ? "git" : "API"} \u901A\u9053\uFF09`);
+          setFlashDir(name);
+        } else if (it) setNotice({ tone: "warn", text: `${name} \u66F4\u65B0\u672A\u5B8C\u6210\uFF08${it.status}\uFF09\uFF1A${it.reason || it.error || "\u672A\u8FD4\u56DE\u539F\u56E0"}` });
         else setNotice({ tone: "warn", text: `${name}\uFF1A\u66F4\u65B0\u7ED3\u679C\u672A\u542B\u8BE5\u6761\u76EE\uFF0C\u8BF7\u70B9\u300C\u21BB \u5237\u65B0\u300D\u6838\u5BF9\u884C\u72B6\u6001` });
       } else if (action === "remove") {
         const r = await call("remove", { name });
-        setNotice({ tone: "ok", text: r.backup ? `${name} \u5DF2\u51FA\u5E93\uFF0C\u5907\u4EFD\u4E8E ${r.backup}` : `${name} \u5DF2\u51FA\u5E93\uFF08\u76EE\u5F55\u672C\u5DF2\u7F3A\u5931\uFF0C\u65E0\u7269\u53EF\u5907\uFF09` });
+        showToast(r.backup ? `${name} \u5DF2\u51FA\u5E93\uFF0C\u5907\u4EFD\u4E8E ${r.backup}` : `${name} \u5DF2\u51FA\u5E93\uFF08\u76EE\u5F55\u672C\u5DF2\u7F3A\u5931\uFF0C\u65E0\u7269\u53EF\u5907\uFF09`);
       }
       reload();
     } catch (e) {
@@ -928,7 +981,11 @@ function ManageView({ call, data, config, reload }) {
         setError(new Error(failures.join("\uFF1B")));
         setNotice({ tone: "warn", text: parts.length > 0 ? `\u5237\u65B0\u90E8\u5206\u5B8C\u6210\uFF1A${parts.join("\uFF1B")}` : "\u5237\u65B0\u672A\u5168\u90E8\u5B8C\u6210\uFF0C\u8BE6\u89C1\u9519\u8BEF\u6761" });
       } else {
-        setNotice(parts.length > 0 ? { tone: "warn", text: `\u5237\u65B0\u5B8C\u6210\uFF1A${parts.join("\uFF1B")}` } : { tone: "ok", text: "\u5237\u65B0\u5B8C\u6210\uFF1A\u73B0\u573A\u4E00\u81F4" });
+        if (parts.length > 0) {
+          setNotice({ tone: "warn", text: `\u5237\u65B0\u5B8C\u6210\uFF1A${parts.join("\uFF1B")}` });
+        } else {
+          showToast("\u5237\u65B0\u5B8C\u6210\uFF1A\u73B0\u573A\u4E00\u81F4");
+        }
       }
       reload();
     } finally {
@@ -960,7 +1017,7 @@ function ManageView({ call, data, config, reload }) {
     setDialog(null);
     if (!config.createGroup(name)) return;
     setGroupFilter(name);
-    setNotice({ tone: "ok", text: `\u5DF2\u521B\u5EFA\u5206\u7EC4\u300C${name}\u300D` });
+    showToast(`\u5DF2\u521B\u5EFA\u5206\u7EC4\u300C${name}\u300D`);
   };
   return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: S.panel, children: [
     /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { display: "flex", gap: 14, alignItems: "flex-start" }, children: [
@@ -1020,7 +1077,7 @@ function ManageView({ call, data, config, reload }) {
           const mountIssues = status?.issues || [];
           return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { position: "relative" }, children: [
             idx > 0 ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: dividerStyle }) : null,
-            /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: S.listRow, children: [
+            /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { ...S.listRow, background: flashDir === it.dir ? `color-mix(in srgb, ${T.brand} 10%, transparent)` : "transparent", transition: "background-color 1.4s" }, children: [
               /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { flex: 1, minWidth: 0 }, title: it.description, children: [
                 /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { fontWeight: 600, color: T.labelPrimary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, children: it.name }),
                 /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { ...noteText, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, children: [
@@ -1068,7 +1125,7 @@ function ManageView({ call, data, config, reload }) {
                 }
               )
             ] }),
-            expandedMount === it.dir && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { ...subRowPanel }, children: mountIssues.map((row, midx) => {
+            expandedMount === it.dir && mountIssues.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { ...subRowPanel }, children: mountIssues.map((row, midx) => {
               const repair = mountIssueRepair(row.issue, { name: it.dir, targetLabel: targetLabel(row.target, data.workspaces), path: row.path, root: data.root });
               return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { display: "flex", alignItems: "center", gap: 8, fontSize: 12, padding: "4px 0" }, children: [
                 /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: dotStyle(T.error) }),
@@ -1433,7 +1490,7 @@ ${w.path}`.toLowerCase().includes(wsFilter.trim().toLowerCase())) : showAllWs ? 
 var import_react4 = require("react");
 var import_dsh_client_ui_primitives4 = require("@deepseek-ai/dsh-client-ui-primitives");
 var import_jsx_runtime4 = require("react/jsx-runtime");
-function SearchView({ call, reload }) {
+function SearchView({ call, reload, showToast }) {
   const [query, setQuery] = (0, import_react4.useState)("");
   const [results, setResults] = (0, import_react4.useState)(null);
   const [busy, setBusy] = (0, import_react4.useState)(false);
@@ -1473,7 +1530,7 @@ function SearchView({ call, reload }) {
       const r = await call("repo-skills", { repo, ref });
       if (r.candidates.length <= 1) {
         await call("add", { repo, dir: r.candidates[0] ? r.candidates[0].path : dir, ref: r.branch });
-        setNotice({ tone: "ok", text: `\u5DF2\u5165\u5E93 ${repo}` });
+        showToast(`\u5DF2\u5165\u5E93 ${repo}`);
         reload();
       } else {
         showCandidates({ repo, branch: r.branch, list: r.candidates });
@@ -1511,7 +1568,11 @@ function SearchView({ call, reload }) {
         setCandidates(null);
         setSelected(/* @__PURE__ */ new Set());
       }
-      setNotice(failures.length > 0 ? { tone: "warn", text: `\u5DF2\u5165\u5E93 ${done} \u4E2A\uFF0C\u5931\u8D25 ${failures.length} \u4E2A\uFF08\u9010\u6761\u539F\u56E0\u89C1\u4E0B\u65B9\u7EA2\u5B57\uFF09` } : { tone: "ok", text: `\u5DF2\u5165\u5E93 ${done} \u4E2A` });
+      if (failures.length > 0) {
+        setNotice({ tone: "warn", text: `\u5DF2\u5165\u5E93 ${done} \u4E2A\uFF0C\u5931\u8D25 ${failures.length} \u4E2A\uFF08\u9010\u6761\u539F\u56E0\u89C1\u4E0B\u65B9\u7EA2\u5B57\uFF09` });
+      } else {
+        showToast(`\u5DF2\u5165\u5E93 ${done} \u4E2A`);
+      }
     } finally {
       inFlight.current = false;
       setBusy(false);
@@ -1646,6 +1707,7 @@ function SkillsSection({ call, workspaces, scope, subscribeSkillSettings }) {
   const [data, setData] = (0, import_react5.useState)(null);
   const [configOverrideUnconfigured, setConfigOverrideUnconfigured] = (0, import_react5.useState)(false);
   const [reloadTick, reload] = useTick();
+  const [toast, showToast, dismissToast] = useToast();
   const [snap, setSnap] = (0, import_react5.useState)(() => scope.getSnapshot());
   const [editError, setEditError] = (0, import_react5.useState)(null);
   (0, import_react5.useEffect)(() => {
@@ -1814,8 +1876,9 @@ function SkillsSection({ call, workspaces, scope, subscribeSkillSettings }) {
       /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { style: { flex: 1, minWidth: 0, wordBreak: "break-all" }, children: editError.message }),
       editError.prompt ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(RepairCopy, { text: editError.prompt }) : null
     ] }) : null,
-    tab === "manage" && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(ManageView, { call, data, config, reload }),
-    tab === "search" && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(SearchView, { call, reload })
+    tab === "manage" && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(ManageView, { call, data, config, reload, showToast }),
+    tab === "search" && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(SearchView, { call, reload, showToast }),
+    /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(ToastHost, { toast, onDone: dismissToast })
   ] });
 }
 function ErrorLineWrap({ error, root }) {

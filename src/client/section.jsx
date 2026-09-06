@@ -4,7 +4,7 @@
 // 参考：插件运行时.md「配置即意图」「视图设计」；DSR-011、DSR-017、DSR-018。
 import { useState, useEffect, useRef } from 'react'
 import { T, S, badgeStyle } from './theme.js'
-import { ErrorLine, OutlineBtn, useTick } from './ui.jsx'
+import { ErrorLine, OutlineBtn, useTick, useToast, ToastHost } from './ui.jsx'
 import { buildRepairPrompt, RepairCopy, settingsRejectedRepair } from './repair.jsx'
 import { ManageView } from './manage.jsx'
 import { SearchView } from './search.jsx'
@@ -24,6 +24,8 @@ export function SkillsSection({ call, workspaces, scope, subscribeSkillSettings 
   // 快照显示已配置、但 Host overview 仍报 skilldir-unconfigured → 回到未配置引导
   const [configOverrideUnconfigured, setConfigOverrideUnconfigured] = useState(false)
   const [reloadTick, reload] = useTick()
+  // 成功事件瞬态 Toast（宿主原语，顶中浮层自动消散）；warn/error 仍走内联卡（需行动的不自动消失）
+  const [toast, showToast, dismissToast] = useToast()
 
   // ---------- 配置即意图：settings 域直读直写，与原生卡片同构 ----------
   // 写为 scope.set('groups'|'skills', next) 整字段替换：本地即时生效，Host 对账器后台收敛。
@@ -236,8 +238,9 @@ export function SkillsSection({ call, workspaces, scope, subscribeSkillSettings 
             </div>
           )
         : null}
-      {tab === 'manage' && <ManageView call={call} data={data} config={config} reload={reload} />}
-      {tab === 'search' && <SearchView call={call} reload={reload} />}
+      {tab === 'manage' && <ManageView call={call} data={data} config={config} reload={reload} showToast={showToast} />}
+      {tab === 'search' && <SearchView call={call} reload={reload} showToast={showToast} />}
+      <ToastHost toast={toast} onDone={dismissToast} />
     </div>
   )
 }

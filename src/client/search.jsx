@@ -12,8 +12,9 @@ import { GhostBtn, OutlineBtn, PrimaryBtn, ErrorLine, NoticeBar } from './ui.jsx
  * @param {object} props
  * @param {(endpoint: string, payload?: object) => Promise<unknown>} props.call RPC 门面
  * @param {() => void} props.reload 入库成功后重读 overview
+ * @param {(text: string) => void} props.showToast 成功事件瞬态 Toast
  */
-export function SearchView({ call, reload }) {
+export function SearchView({ call, reload, showToast }) {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState(null)
   const [busy, setBusy] = useState(false)
@@ -63,7 +64,7 @@ export function SearchView({ call, reload }) {
       const r = await call('repo-skills', { repo, ref })
       if (r.candidates.length <= 1) {
         await call('add', { repo, dir: r.candidates[0] ? r.candidates[0].path : dir, ref: r.branch })
-        setNotice({ tone: 'ok', text: `已入库 ${repo}` })
+        showToast(`已入库 ${repo}`)
         reload()
       } else {
         showCandidates({ repo, branch: r.branch, list: r.candidates })
@@ -102,9 +103,11 @@ export function SearchView({ call, reload }) {
         setCandidates(null)
         setSelected(new Set())
       }
-      setNotice(failures.length > 0
-        ? { tone: 'warn', text: `已入库 ${done} 个，失败 ${failures.length} 个（逐条原因见下方红字）` }
-        : { tone: 'ok', text: `已入库 ${done} 个` })
+      if (failures.length > 0) {
+        setNotice({ tone: 'warn', text: `已入库 ${done} 个，失败 ${failures.length} 个（逐条原因见下方红字）` })
+      } else {
+        showToast(`已入库 ${done} 个`)
+      }
     } finally {
       inFlight.current = false
       setBusy(false)

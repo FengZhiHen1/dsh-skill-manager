@@ -2,7 +2,7 @@
 //
 // 边界：列表纯前端过滤零请求，写入只经 settings 意图与 call 门面；targetKey 推导单源在 derive.js，失效组回落在 service.js。
 // 参考：插件运行时.md「管理视图」、挂载与同步.md「行状态走查」；DSR-008/009/017/018。
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { Input, Menu } from '@deepseek-ai/dsh-client-ui-primitives'
 import { T, S, badgeStyle, cardStyle, cardTitle, noteText, dotStyle, sectionHead, statusPillStyle, dividerStyle, navItemStyle, navItemActiveStyle, pillBase } from './theme.js'
 import { GhostBtn, OutlineBtn, PrimaryBtn, ErrorLine, NoticeBar, RowMenu, MenuItem, menuCardStyle, ChevronIcon, UpdateConfirmationDialog, ConfirmDialog, ModalShell } from './ui.jsx'
@@ -61,8 +61,9 @@ function secondaryFlags(it) {
  * @param {object} props.data overview 聚合（root/lib/health/workspaces）
  * @param {object} props.config 配置意图读写门面（SkillsSection 组装）
  * @param {() => void} props.reload 重读 overview
+ * @param {(text: string) => void} props.showToast 成功事件瞬态 Toast（warn/error 不走这里）
  */
-export function ManageView({ call, data, config, reload }) {
+export function ManageView({ call, data, config, reload, showToast }) {
   const [origin, setOrigin] = useState('')
   const [originOpen, setOriginOpen] = useState(false)
   const [groupFilter, setGroupFilter] = useState('默认')
@@ -70,12 +71,21 @@ export function ManageView({ call, data, config, reload }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
   const [notice, setNotice] = useState(null)
+  // 行操作成功后的行高亮（C：反馈落在事情发生的对象上）：dir 命中行品牌色晕渐隐
+  const [flashDir, setFlashDir] = useState(null)
   // 互斥模态收敛为单一判别状态（CORE-01）：同时至多一个对话框，非法组合不可表示。
   const [dialog, setDialog] = useState(null)
   // dialog 形状：{ kind:'update', name, detail } | { kind:'remove', name }
   //   | { kind:'group-delete', name } | { kind:'create' }
   const [menuFor, setMenuFor] = useState(null)
   const [expandedMount, setExpandedMount] = useState(null)
+
+  // 行高亮渐隐窗：1.6s 后清除（配合行背景 transition 淡出）
+  useEffect(() => {
+    if (!flashDir) return undefined
+    const t = setTimeout(() => setFlashDir(null), 1600)
+    return () => clearTimeout(t)
+  }, [flashDir])
 
   const { groups, skillsIntent, setSkillDisabled, moveSkill, renameGroup, deleteGroup } = config
 
@@ -147,12 +157,14 @@ export function ManageView({ call, data, config, reload }) {
         // 批量语义下单条失败不断批（ok:true + failed/skipped 结果），结果必须按 tone 上屏。
         // 否则用户确认后石沉大海：失败只进灰字等于无反馈。
         const it = r.results.find((item) => item.name === name)
-        if (it?.status === 'updated') setNotice({ tone: 'ok', text: `${name} 已更新至 ${String(it.commit || '').slice(0, 7)}（${it.via === 'ls-remote' ? 'git' : 'API'} 通道）` })
-        else if (it) setNotice({ tone: 'warn', text: `${name} 更新未完成（${it.status}）：${it.reason || it.error || '未返回原因'}` })
+        if (it?.status === 'updated') {
+          showToast(`${name} 已更新至 ${String(it.commit || '').slice(0, 7)}（${it.via === 'ls-remote' ? 'git' : 'API'} 通道）`)
+          setFlashDir(name) // 行高亮渐隐：反馈落在事情发生的对象上
+        } else if (it) setNotice({ tone: 'warn', text: `${name} 更新未完成（${it.status}）：${it.reason || it.error || '未返回原因'}` })
         else setNotice({ tone: 'warn', text: `${name}：更新结果未含该条目，请点「↻ 刷新」核对行状态` })
       } else if (action === 'remove') {
         const r = await call('remove', { name })
-        setNotice({ tone: 'ok', text: r.backup ? `${name} 已出库，备份于 ${r.backup}` : `${name} 已出库（目录本已缺失，无物可备）` })
+        showToast(r.backup ? `${name} 已出库，备份于 ${r.backup}` : `${name} 已出库（目录本已缺失，无物可备）`)
       }
       reload()
     } catch (e) {
@@ -198,9 +210,11 @@ export function ManageView({ call, data, config, reload }) {
         setError(new Error(failures.join('；')))
         setNotice({ tone: 'warn', text: parts.length > 0 ? `刷新部分完成：${parts.join('；')}` : '刷新未全部完成，详见错误条' })
       } else {
-        setNotice(parts.length > 0
-          ? { tone: 'warn', text: `刷新完成：${parts.join('；')}` }
-          : { tone: 'ok', text: '刷新完成：现场一致' })
+        if (parts.length > 0) {
+          setNotice({ tone: 'warn', text: `刷新完成：${parts.join('；')}` })
+        } else {
+          showToast('刷新完成：现场一致')
+        }
       }
       reload()
     } finally {
@@ -234,7 +248,7 @@ export function ManageView({ call, data, config, reload }) {
     setDialog(null)
     if (!config.createGroup(name)) return
     setGroupFilter(name)
-    setNotice({ tone: 'ok', text: `已创建分组「${name}」` })
+    showToast(`已创建分组「${name}」`)
   }
 
   return (
@@ -311,7 +325,7 @@ export function ManageView({ call, data, config, reload }) {
                     return (
                       <div key={it.dir} style={{ position: 'relative' }}>
                         {idx > 0 ? <div style={dividerStyle} /> : null}
-                        <div style={S.listRow}>
+                        <div style={{ ...S.listRow, background: flashDir === it.dir ? `color-mix(in srgb, ${T.brand} 10%, transparent)` : 'transparent', transition: 'background-color 1.4s' }}>
                           <div style={{ flex: 1, minWidth: 0 }} title={it.description}>
                             <div style={{ fontWeight: 600, color: T.labelPrimary, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{it.name}</div>
                             <div style={{ ...noteText, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -358,7 +372,8 @@ export function ManageView({ call, data, config, reload }) {
                             />
                           )}
                         </div>
-                        {expandedMount === it.dir && (
+                        {/* 展开面板与问题存续绑定：消解即塌缩，不留空壳（2026-09-06 走查修复） */}
+                        {expandedMount === it.dir && mountIssues.length > 0 && (
                           <div style={{ ...subRowPanel }}>
                             {mountIssues.map((row, midx) => {
                               const repair = mountIssueRepair(row.issue, { name: it.dir, targetLabel: targetLabel(row.target, data.workspaces), path: row.path, root: data.root })

@@ -10,6 +10,52 @@ import { T, S, badgeStyle, dotStyle } from './theme.js'
 /** 防御：icon 为可选装饰，缺失时降级为文本箭头，绝不让整卡渲染失败。 */
 export const ChevronIcon = typeof primitives.IconChevronDownOutline14 === 'function' ? primitives.IconChevronDownOutline14 : null
 
+/** 宿主 Toast 原语（顶中浮层，holdMs + onDone）；缺失时 ToastHost 用内置简易浮层兜底。 */
+const ToastImpl = typeof primitives.Toast === 'function' ? primitives.Toast : null
+
+/**
+ * 成功事件的瞬态 Toast 状态：`[toast, show, dismiss]`，toast = { seq, text } | null。
+ * 同一文案连播靠 seq 递进重挂载（宿主 Toast 以 key 重启周期）。
+ */
+export function useToast() {
+  const [toast, setToast] = useState(null)
+  const show = (text) => setToast((t) => ({ seq: (t?.seq ?? 0) + 1, text }))
+  return [toast, show, () => setToast(null)]
+}
+
+/**
+ * Toast 挂载点（页面根放一次）。宿主原语缺失时退化为同几何 token 浮层（3s 保持 + 渐隐），
+ * 成功反馈绝不静默丢失。
+ */
+export function ToastHost({ toast, onDone }) {
+  if (!toast) return null
+  if (ToastImpl) return <ToastImpl key={toast.seq} text={toast.text} onDone={onDone} />
+  return <FallbackToast key={toast.seq} text={toast.text} onDone={onDone} />
+}
+
+/** Toast 原语缺失时的兜底浮层：fixed 顶中，token 配色，3s 保持 + 1s 渐隐。 */
+function FallbackToast({ text, onDone }) {
+  const [fade, setFade] = useState(false)
+  useEffect(() => {
+    const t1 = setTimeout(() => setFade(true), 3000)
+    const t2 = setTimeout(onDone, 4000)
+    return () => { clearTimeout(t1); clearTimeout(t2) }
+  }, [onDone])
+  return (
+    <div
+      role="status"
+      style={{
+        position: 'fixed', top: 16, left: '50%', transform: 'translateX(-50%)', zIndex: 1200,
+        background: T.bgLayer3, color: T.labelPrimary, border: `1px solid ${T.borderL2}`, borderRadius: 10,
+        padding: '8px 14px', fontSize: 12, boxShadow: '0 8px 24px rgba(0,0,0,.18)',
+        opacity: fade ? 0 : 1, transition: 'opacity 1s',
+      }}
+    >
+      {text}
+    </div>
+  )
+}
+
 /** 行内次要按钮（ghost sm）。 */
 export const GhostBtn = (props) => <Button variant="ghost" size="sm" {...props} />
 /** 行内主操作按钮（outline sm）。 */
