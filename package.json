@@ -29,7 +29,6 @@
     "zod": "^3.25.0"
   },
   "peerDependencies": {
-    "@deepseek-ai/dsh-settings": "*",
     "@deepseek-ai/dsh-storage-domain": "*"
   },
   "dsh": {
@@ -47,7 +46,7 @@
     }
   },
   "devDependencies": {
-    "@deepseek-ai/dsh-storage-domain": "0.1.0-rc.7",
+    "@deepseek-ai/dsh-storage-domain": "0.1.2-rc.1",
     "esbuild": "^0.28.2"
   }
 }
