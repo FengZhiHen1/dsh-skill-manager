@@ -3,12 +3,18 @@
 // 边界：列表纯前端过滤零请求，写入只经 settings 意图与 call 门面；targetKey 推导单源在 derive.js，失效组回落在 service.js。
 // 参考：插件运行时.md「管理视图」、挂载与同步.md「行状态走查」；DSR-008/009/017/018。
 import { useState, useMemo } from 'react'
-import { Input } from '@deepseek-ai/dsh-client-ui-primitives'
-import { T, S, badgeStyle, cardStyle, cardTitle, noteText, dotStyle, sectionHead, statusPillStyle, dividerStyle, navItemStyle, navItemActiveStyle } from './theme.js'
-import { GhostBtn, OutlineBtn, PrimaryBtn, ErrorLine, NoticeBar, RowMenu, MenuItem, menuCardStyle, UpdateConfirmationDialog, ConfirmDialog, ModalShell } from './ui.jsx'
+import { Input, Menu } from '@deepseek-ai/dsh-client-ui-primitives'
+import { T, S, badgeStyle, cardStyle, cardTitle, noteText, dotStyle, sectionHead, statusPillStyle, dividerStyle, navItemStyle, navItemActiveStyle, pillBase } from './theme.js'
+import { GhostBtn, OutlineBtn, PrimaryBtn, ErrorLine, NoticeBar, RowMenu, MenuItem, menuCardStyle, ChevronIcon, UpdateConfirmationDialog, ConfirmDialog, ModalShell } from './ui.jsx'
 import { buildRepairPrompt, RepairCopy, mountIssueRepair } from './repair.jsx'
 
 const ORIGIN_LABEL = { github: 'GitHub', local: '本地', self: '自研' }
+/** 来源筛选项（工具条下拉）：'' = 全部。 */
+const ORIGIN_OPTIONS = [
+  { id: '', label: '全部来源' },
+  { id: 'github', label: 'GitHub' },
+  { id: 'self', label: '自研/本地' },
+]
 
 /** targetKey（`scope|project` 格式）转成人话显示名。 */
 function targetLabel(target, workspaces) {
@@ -56,6 +62,7 @@ function secondaryFlags(it) {
  */
 export function ManageView({ call, data, config, reload }) {
   const [origin, setOrigin] = useState('')
+  const [originOpen, setOriginOpen] = useState(false)
   const [groupFilter, setGroupFilter] = useState('默认')
   const [q, setQ] = useState('')
   const [busy, setBusy] = useState(false)
@@ -267,11 +274,24 @@ export function ManageView({ call, data, config, reload }) {
           {/* 库工具条：搜索过滤 / 来源筛选 / ↻ 刷新；无本地导入入口 */}
           <div style={{ ...S.toolbar, marginBottom: 12 }}>
             <Input style={{ flex: 1, minWidth: 140 }} placeholder="搜索名称 / 描述…" value={q} onChange={(e) => setQ(e.target.value)} />
-            <select style={{ ...S.select, border: 'none', background: T.bgModulePlatform, borderRadius: 8, padding: '5px 10px' }} value={origin} onChange={(e) => setOrigin(e.target.value)}>
-              <option value="">全部来源</option>
-              <option value="github">GitHub</option>
-              <option value="self">自研/本地</option>
-            </select>
+            {/* 来源筛选：宿主 Menu（portal 逃逸面板裁剪，选中态 ✓，compact 小字号），不用原生 select——其弹出层由 OS 绘制无法美化 */}
+            <Menu
+              open={originOpen}
+              portal
+              compact
+              anchor={(
+                <button type="button" disabled={busy} onClick={() => setOriginOpen((v) => !v)} style={S.filterTrigger}>
+                  {ORIGIN_OPTIONS.find((o) => o.id === origin)?.label ?? '全部来源'}
+                  {ChevronIcon
+                    ? <ChevronIcon style={{ color: T.labelSecondary, transition: 'transform .16s', transform: originOpen ? 'rotate(180deg)' : undefined }} />
+                    : <span style={{ color: T.labelSecondary, fontSize: 10 }}>{originOpen ? '▴' : '▾'}</span>}
+                </button>
+              )}
+              items={ORIGIN_OPTIONS}
+              selectedId={origin}
+              onSelect={(id) => { setOrigin(id); setOriginOpen(false) }}
+              onClose={() => setOriginOpen(false)}
+            />
             <GhostBtn onClick={refreshAll} disabled={busy} title="重新检查全部上游、执行一次安全对账并刷新列表">↻ 刷新</GhostBtn>
           </div>
           {notice ? <NoticeBar notice={notice} /> : null}
@@ -446,6 +466,28 @@ function GroupNav({ groups, selected, total, countForGroup, onSelect, onCreate }
   )
 }
 
+/**
+ * 范围勾选行（DSH 全局与工作区共用）：hover 浅底反馈，勾选态品牌色晕 + 品牌色复选框。
+ * hint（路径等辅助文本）截断并 title 悬浮全文；count >0 时尾部出 pill。
+ */
+function ScopeRow({ checked, title, hint, count, onToggle }) {
+  const [hover, setHover] = useState(false)
+  return (
+    <label
+      style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', borderRadius: 8, fontSize: 12, cursor: 'pointer', background: checked ? `color-mix(in srgb, ${T.brand} 8%, transparent)` : hover ? T.bgModulePlatform : 'transparent' }}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+    >
+      <input type="checkbox" checked={checked} onChange={(event) => onToggle(event.target.checked)} style={{ accentColor: T.brand, width: 13, height: 13, margin: 0, flex: 'none' }} />
+      <span style={{ fontWeight: 500, color: T.labelPrimary, flex: 'none' }}>{title}</span>
+      {hint
+        ? <span style={{ ...noteText, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={hint}>{hint}</span>
+        : <span style={{ flex: 1 }} />}
+      {count > 0 ? <span style={{ ...pillBase, flex: 'none' }}>{`${count} 个组使用`}</span> : null}
+    </label>
+  )
+}
+
 /** 新建分组模态（与更新确认同一遮罩语言）；客户端预检长度与保留字，完整规则 Host validate 兜底。 */
 function CreateGroupDialog({ onCancel, onCreate }) {
   const [name, setName] = useState('')
@@ -484,7 +526,8 @@ function CreateGroupDialog({ onCancel, onCreate }) {
 
 /**
  * 当前分组的使用范围：直写 settings 配置，本地即时生效，后台对账收敛。
- * 工作区两区收纳：已勾选常显，未勾选收进折叠区；工作区数超阈值出过滤框，过滤时平铺全部匹配项。
+ * 工作区两区收纳：已勾选常显，未勾选收进折叠区；超阈值出过滤框，过滤时平铺全部匹配项。
+ * 列表区为内嵌滚动面板，7 行封顶内滚，不随工作区数撑高卡片。
  * 防御：取消勾选会经对账移除该组在此目标下的全部链接。
  * 波及半径与「点一下复选框」的心智不对称，移除数 >0 时必须走遮罩确认。
  */
@@ -541,17 +584,6 @@ function GroupScopePanel({ config, group, workspaces, skills, onGroupOp }) {
     ? workspaces.filter((w) => `${w.title}\n${w.path}`.toLowerCase().includes(wsFilter.trim().toLowerCase()))
     : (showAllWs ? workspaces : enabledWs)
 
-  const wsRow = (workspace) => (
-    <label key={workspace.workspaceId} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0', fontSize: 12, cursor: 'pointer' }}>
-      <input type="checkbox" checked={wsChecked(workspace)} onChange={(event) => toggle('project', workspace.workspaceId, event.target.checked)} />
-      <span style={{ fontWeight: 500, color: T.labelPrimary, flex: 'none' }}>{workspace.title}</span>
-      <span style={{ ...noteText, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={workspace.path}>
-        {workspace.path}
-      </span>
-      {workspace.mountCount > 0 ? <span style={{ ...noteText, flex: 'none' }}>{`${workspace.mountCount} 个组使用`}</span> : null}
-    </label>
-  )
-
   return (
     <div style={{ ...cardStyle, padding: '12px 14px' }}>
       {renaming
@@ -600,32 +632,47 @@ function GroupScopePanel({ config, group, workspaces, skills, onGroupOp }) {
           )}
       {renaming && <div style={{ ...noteText, marginBottom: 8 }}>改名立即生效：分组成员与挂载规则同步改名，Skill 本体不受影响。</div>}
       <div style={dividerStyle} />
-      <label style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 0', fontSize: 12, cursor: 'pointer' }}>
-        <input type="checkbox" checked={enabled('global')} onChange={(event) => toggle('global', null, event.target.checked)} />
-        <span style={{ fontWeight: 500, color: T.labelPrimary }}>DSH 全局</span>
-        <span style={noteText}>对所有 DSH 项目生效</span>
-      </label>
+      <div style={{ padding: '4px 0' }}>
+        <ScopeRow checked={enabled('global')} title="DSH 全局" hint="对所有 DSH 项目生效" count={0} onToggle={(checked) => toggle('global', null, checked)} />
+      </div>
       <div style={dividerStyle} />
       {workspaces.length === 0
         ? <div style={{ ...S.muted, padding: '8px 0' }}>当前没有 DSH 工作区；请在 DSH 原生工作区界面创建或打开项目。</div>
         : (
             <>
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, padding: '7px 0 1px' }}>
-                <span style={{ fontSize: 10, color: T.labelTertiary }}>工作区项目</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 2px 6px' }}>
+                <span style={{ fontSize: 11, fontWeight: 600, color: T.labelSecondary }}>工作区项目</span>
                 <span style={{ flex: 1 }} />
-                <span style={{ fontSize: 10, color: T.labelTertiary }}>{`已启用 ${enabledWs.length} · 共 ${workspaces.length}`}</span>
+                <span style={pillBase}>{`已启用 ${enabledWs.length} · 共 ${workspaces.length}`}</span>
               </div>
-              {/* 过滤框只在工作区足够多时出现；少数工作区不值得常驻一个输入框 */}
+              {/* 过滤框只在工作区足够多时出现；少数工作区不值得常驻一个输入框。
+                  间隙挂包装 div：primitives Input 的 style 落在内层 input 上，margin 推不开外框 */}
               {workspaces.length > 8 && (
-                <Input style={{ margin: '6px 0 2px' }} placeholder="过滤工作区…" value={wsFilter} onChange={(e) => setWsFilter(e.target.value)} />
+                <div style={{ marginBottom: 8 }}>
+                  <Input placeholder="过滤工作区…" value={wsFilter} onChange={(e) => setWsFilter(e.target.value)} />
+                </div>
               )}
-              {visibleWs.map(wsRow)}
-              {filtering && visibleWs.length === 0 && <div style={{ ...S.muted, padding: '6px 0' }}>无匹配工作区</div>}
+              {/* 内嵌滚动面板：行高约 29px，7 行封顶（上界理由：设置面板可视高度有限，超出内滚不撑破卡片） */}
+              {(visibleWs.length > 0 || filtering) && (
+                <div style={{ border: `1px solid ${T.borderL1}`, borderRadius: 10, padding: 2, maxHeight: 208, overflowY: 'auto', scrollbarWidth: 'thin' }}>
+                  {visibleWs.map((workspace) => (
+                    <ScopeRow
+                      key={workspace.workspaceId}
+                      checked={wsChecked(workspace)}
+                      title={workspace.title}
+                      hint={workspace.path}
+                      count={workspace.mountCount}
+                      onToggle={(checked) => toggle('project', workspace.workspaceId, checked)}
+                    />
+                  ))}
+                  {filtering && visibleWs.length === 0 && <div style={{ ...S.muted, padding: '8px 10px' }}>无匹配工作区</div>}
+                </div>
+              )}
               {!filtering && restCount > 0 && (
                 <button
                   type="button"
                   onClick={() => setShowAllWs((v) => !v)}
-                  style={{ display: 'block', width: '100%', border: 'none', background: T.bgModulePlatform, borderRadius: 8, padding: '6px 10px', margin: '4px 0 2px', font: 'inherit', fontSize: 12, color: T.labelSecondary, cursor: 'pointer', textAlign: 'left' }}
+                  style={{ display: 'block', width: '100%', border: `1px dashed ${T.borderL2}`, background: 'transparent', borderRadius: 8, padding: '6px 10px', marginTop: 6, font: 'inherit', fontSize: 11, color: T.labelSecondary, cursor: 'pointer', textAlign: 'center' }}
                 >
                   {showAllWs ? '▾ 收起其他工作区' : `▸ 展开其他 ${restCount} 个工作区（勾选即启用）`}
                 </button>

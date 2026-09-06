@@ -58,10 +58,11 @@ export const statusPillStyle = (kind) => {
 /** 页面布局基元速查（行卡/下拉/面板/提示文本等，全部由 T token 组合）。 */
 export const S = {
   row: { display: 'flex', alignItems: 'center', gap: '8px', padding: '9px 12px', border: `1px solid ${T.borderL1}`, borderRadius: 12, marginBottom: 8, fontSize: 13 },
-  select: { padding: '4px 8px', borderRadius: 6, border: `1px solid ${T.borderL1}`, background: T.bgBase, color: T.labelPrimary, fontSize: 12 },
   panel: { padding: '10px 12px' },
   /** 高密度列表行（容器卡 + 分隔线用法）：比 S.row 描边卡轻，行内不再带边框。 */
   listRow: { display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', fontSize: 13 },
+  /** 筛选器触发钮（宿主 Menu 的 anchor）：浅底小圆角，与工具条输入框同高。 */
+  filterTrigger: { display: 'inline-flex', alignItems: 'center', gap: 4, border: 'none', background: T.bgModulePlatform, borderRadius: 8, padding: '5px 10px', font: 'inherit', fontSize: 12, color: T.labelPrimary, cursor: 'pointer' },
   muted: { color: T.labelSecondary, fontSize: 12 },
   guide: { padding: '24px 16px', textAlign: 'center', color: T.labelSecondary, fontSize: 13 },
   dangerText: { color: T.error },
