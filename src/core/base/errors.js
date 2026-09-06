@@ -1,28 +1,30 @@
-// dsh-skill-manager — 稳定的业务错误类型与修复提示词 facts（DSR-018）。
+// errors — 稳定业务错误类型与按 code 的修复提示词 facts。
 //
-// 所有业务失败都抛出 SkillManagerError；service 的 dispatch 把任意错误翻译成
-// 传输中立 Result：{ ok:false, error:{ code, message, details:{ retryable,
-// repair } } }。repair = { operation, summary, facts, recommendation }——
-// summary/recommendation 按 code 取本文件模板表，抛出点携带动态 facts
-// （相关路径、条目现场），operation 由 dispatch 注入端点名。任何失败（含
-// internal 兜底）都必须携带 repair；最终提示词文本由 Client 统一模板组装
-// （P6）。未知异常归类 internal，不冒泡杀死 Host。
+// 边界：只出码表与模板，提示词的最终文本由 Client 统一模板组装。
+// 参考：插件运行时.md「RPC 传输」；DSR-018。
 
 /**
- * 稳定业务错误（DSR-018）：service 的 dispatch 把这类错误统一翻译为 Result
- * 失败侧；code 为 REPAIR_META 码表稳定码，facts 为抛出点携带的现场上下文。
+ * 稳定业务错误：service 的 dispatch 把这类错误统一翻译为 Result 失败侧。
+ * code 取 REPAIR_META 的稳定码，facts 是抛出点携带的现场上下文。
  */
 export class SkillManagerError extends Error {
-  /** 稳定错误码（见 需求.md R-19 与 插件运行时.md 错误协议）。 */
+  /** 稳定错误码；表外 code 由 buildRepair 落通用模板。 */
   code
-  /** 是否值得重试（网络类错误为 true）。 */
+  /** 是否值得重试，网络类错误为 true。 */
   retryable
   /**
-   * 动态修复 facts（[{ label, value }]）：抛出点附带的现场信息（相关路径、
-   * 条目名、配置值），与 code 模板在 buildRepair 合并。可缺省。
+   * 动态修复 facts：抛出点附带的现场信息，如相关路径、条目名、配置值。
+   * 与 code 模板在 buildRepair 合并，可缺省。
    */
   facts
 
+  /**
+   * 构造一次稳定业务错误。
+   * @param {string} code - 稳定错误码
+   * @param {string} message - 面向用户的中文失败描述
+   * @param {boolean} [retryable] - 是否建议重试
+   * @param {Array<{label: string, value: string}>} [facts] - 抛出点现场，按抛出序进 repair
+   */
   constructor(code, message, retryable = false, facts = []) {
     super(message)
     this.name = 'SkillManagerError'
@@ -159,8 +161,9 @@ const GENERIC_REPAIR = {
 }
 
 /**
- * 组装 repair facts（DSR-018）：code 模板 + 动态现场。operation 为端点名；
- * facts 保留抛出序（上下文清单）；表外 code 落通用模板。
+ * 组装 repair facts：code 模板加动态现场。
+ * operation 是端点名，缺省回落 code；facts 保留抛出序。
+ * 表外 code 落通用模板，保证任何失败都带可复制的修复上下文。
  * @param {string} code - 稳定错误码
  * @param {{ operation?: string, facts?: Array<{label: string, value: string}> }} context
  */
@@ -174,7 +177,7 @@ export function buildRepair(code, { operation, facts = [] } = {}) {
   }
 }
 
-/** 未配置本地 skill 目录的统一错误（需求.md R-22）。 */
+/** 未配置本地 skill 目录时的统一错误，由 requireDir 在各端点入口抛出。 */
 export const unconfigured = () =>
   new SkillManagerError(
     'skilldir-unconfigured',

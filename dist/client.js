@@ -43,7 +43,7 @@ var API_TIMEOUT_MS = 15e3;
 var DOWNLOAD_TIMEOUT_MS = 9e4;
 var DOWNLOAD_ENDPOINTS = /* @__PURE__ */ new Set(["add", "update"]);
 var RpcError = class extends Error {
-  /** @type {string} 稳定错误码（Host errors.js 码表；transport = 通道层失败） */
+  /** @type {string} 稳定错误码，取自 Host 侧错误码表；transport = 通道层失败 */
   code;
   /** @type {boolean} Host details.retryable（transport 一律视为可重试） */
   retryable;

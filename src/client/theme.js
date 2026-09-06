@@ -1,5 +1,7 @@
-// dsh-skill-manager — Client 主题 token 与样式基元（插件运行时.md「样式」：全部走 --dsw-alias-* token，不注入全局样式表）。
-// 自旧根 client.js 基元段搬位（P6），色值零硬编码；组件层直接展开这些对象为内联 style。
+// theme — Client 主题 token 与样式基元：色值零硬编码，全部映射 --dsw-alias-* token。
+//
+// 边界：不注入全局样式表，组件层直接展开这些对象为内联 style。
+// 参考：插件运行时.md「Client 入口」「视图设计」；DSR-008。
 
 /** 主题 token 表：全部映射宿主 --dsw-alias-* CSS 变量，宿主换肤即时生效（零硬编码色值）。 */
 export const T = {
@@ -25,7 +27,11 @@ export const badgeStyle = (color) => ({
   background: `color-mix(in srgb, ${color} 15%, transparent)`,
 })
 
-/** 状态徽章（DSR-008）：原生 pending pill 几何（高 ~19px、圆角 999、11px）。正常态灰底灰字，可更新深色字，仅真警告用彩色。 */
+/**
+ * 状态徽章基元：沿用原生 pending pill 的几何。
+ * 高 ~19px、圆角 999、字号 11px。
+ * 默认灰底灰字，可更新态深色字，真警告态才用彩色。
+ */
 export const pillBase = {
   display: 'inline-block',
   padding: '1px 8px',
@@ -36,7 +42,12 @@ export const pillBase = {
   color: T.labelSecondary,
   whiteSpace: 'nowrap',
 }
-/** 状态徽章按态取样式：updatable 深色强调 / warn / error 色晕，其余（ok/中性）用灰底基元。 */
+/**
+ * 状态徽章按态取样式：几何沿用 pillBase，只换配色。
+ * updatable → 深色强调。
+ * warn、error → 对应色晕。
+ * 其余（ok、中性）→ 灰底基元。
+ */
 export const statusPillStyle = (kind) => {
   if (kind === 'updatable') return { ...pillBase, color: T.labelPrimary, fontWeight: 500 }
   if (kind === 'warn') return { ...pillBase, ...badgeStyle(T.warn) }
@@ -56,7 +67,7 @@ export const S = {
   toolbar: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 },
 }
 
-// 视觉基元（插件运行时.md「视图设计」：白底描边卡 / 浅底卡 / 状态点）
+// 视觉基元：白底描边卡、浅底卡、状态点。
 /** 白底描边卡（页签内容卡、行分组容器）。 */
 export const cardStyle = { border: `1px solid ${T.borderL1}`, borderRadius: 12, background: T.bgLayer3 }
 /** 浅底子卡（卡内嵌信息块）。 */

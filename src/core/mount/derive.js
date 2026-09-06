@@ -1,10 +1,8 @@
-// dsh-skill-manager — 挂载推导与工作区投影（挂载与同步.md「DSH skill 根与工作区事实」
-// 「工作区投影」「挂载推导」；DSR-015 mount 层，DSR-017 junction-only 收敛）。
+// derive — 挂载推导与工作区投影：settings 意图与工作区投影进，期望集 {skill -> [target]} 出。
 //
-// 纯函数域：settings 意图（groups 挂载规则展平 + skills 组归属/禁用）与当前
-// 工作区投影进来，期望集 {skill -> [target]} 出去；不落 storage、不碰文件系统。
-// 目标只有 dsh 一个应用（app 字段随 synced 表退役，DSR-017）；工作区信息每次
-// 现算自 workspaceRegistry 投影，无镜像归一（mirrorWorkspaceProjects 已删除）。
+// 边界：纯函数域，不落 storage、不碰文件系统；目标应用只有 dsh 一个。
+// 工作区信息每次现算自 workspaceRegistry 投影，不做镜像归一。
+// 参考：挂载与同步.md「DSH skill 根与工作区事实」「工作区投影」「挂载推导」；DSR-015、DSR-017。
 
 import { join } from 'node:path'
 import { SkillManagerError } from '../base/errors.js'
@@ -14,9 +12,8 @@ import { DEFAULT_GROUP } from '../model/intent.js'
 export const targetKey = (t) => `${t.scope}|${t.project ?? 'global'}`
 
 /**
- * 全局 skill 根（挂载与同步.md）：真实路径一律由 Host 经
- * `ctx.dshHomePath('skills')` 注入为 globalRootPath；此无参回退
- * `~/.dsh/skills` 仅为纯函数测试保留，不得用于真实物化路径。
+ * 全局 skill 根：真实路径由 Host 经 `ctx.dshHomePath('skills')` 注入为 globalRootPath。
+ * 无参回退 `~/.dsh/skills` 仅为纯函数测试保留，不得用于真实物化路径。
  */
 export function globalRoot(globalRootPath) {
   if (typeof globalRootPath === 'string' && globalRootPath !== '') return globalRootPath
@@ -61,7 +58,7 @@ export function targetDir(t, { workspacesById, globalRootPath }) {
 }
 
 /**
- * 挂载推导（挂载与同步.md「挂载推导」）。
+ * 挂载推导：把组的挂载规则应用到组内每个 skill，产出期望集与失效引用告警。
  * @param {object} input
  * @param {Map<string,string>} input.memberships 参与推导的 skill（未禁用未缺失）：dir → 组名
  * @param {Array<{group,scope,project}>} input.mounts settings 意图展平出的挂载规则
@@ -72,7 +69,7 @@ export function targetDir(t, { workspacesById, globalRootPath }) {
 export function deriveDesired({ memberships, mounts, workspacesById, globalRootPath }) {
   const warnings = []
   const flatMounts = Array.isArray(mounts) ? mounts : []
-  // 失效工作区引用报告（R-12）：与组内是否有成员无关，先按规则全集报，按文案去重。
+  // 失效工作区引用报告：与组内是否有成员无关，先按规则全集报，按文案去重。
   const seenWarnings = new Set()
   for (const m of flatMounts) {
     if (m?.scope === 'project' && typeof m.project === 'string' && m.project !== '' && !workspacesById.has(m.project)) {

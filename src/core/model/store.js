@@ -1,28 +1,15 @@
-// dsh-skill-manager — storage 域投影形状与存取门面（DSR-015 model 层；DSR-017 两表收敛）。
+// store — storage 域投影形状与存取门面：两表 schema、spec 构建器与窄接口。
 //
-// 权威语义见 docs/technical-details/目录配置与状态存储.md：
-// - storage 域 `skill_manager` 是**运行时投影**，只有两表：skills（github 入库
-//   元数据）与 check_cache（上游检查结果缓存）。用户意图的唯一事实源是
-//   settings 命名空间；物化状态由文件系统现场现算（无 synced/projects 台账，
-//   备份事实源是备份目录本身，DSR-017）。
-// - 域读为内存同步读；写经域写链持久化先行（put/delete 均为异步）。
-// - version 保持 1：storage-json 后端对 version 严格相等校验，bump 会让存量
-//   域打不开；新 spec 未声明的旧表（synced/projects/backups 乃至 legacy 七表）
-//   在首次写入时从域文件整体抹除（打开只载入声明表、写入整文档重序列化），
-//   无需迁移代码（目录配置与状态存储.md「已核实事实」）。
-// - legacy 七表 spec 仅供一次性迁移（src/adapter/migrate.js）读取存量意图。
-//
-// P1 搬位说明：defineDomain/domainTable 的 @deepseek-ai 包裹在
-// src/adapter/storage.js（core 不 import @deepseek-ai/*）。
-// 其余模块只依赖 createStore 返回的门面。测试用 createStore(fakeDomain) 注入
-// 内存假句柄（fakeDomain.table(name) 返回带同步 get/entries/keys 与异步
-// put/delete/update 的对象），不依赖真实 storage 服务。
+// 边界：core 不 import @deepseek-ai/*；域声明的平台包裹在 adapter 层。
+// 边界：域只是运行时投影，意图唯一事实源在 settings，物化状态文件系统现算。
+// 参考：目录配置与状态存储.md「storage 域形状」「已核实事实」；DSR-008/015/017。
 
 import { z } from 'zod'
 
 /**
- * 入库元数据（键 = 安装名）。新登记只有 origin:"github"；存量 "local"/"self"
- * 记录兼容读取并视为 self（无上游操作、无删除入口、不新登记，DSR-017）。
+ * 入库元数据（键 = 安装名）。新登记只有 origin:"github"；
+ * 存量 "local"/"self" 记录兼容读取并视为 self。
+ * 视为 self 的含义：无上游操作、无删除入口、不新登记。
  * origin_path 仅供旧记录通过校验，不再写入。
  */
 const skillRecord = z.object({
@@ -53,7 +40,7 @@ const checkRecord = z.object({
   missing: z.boolean(),
 })
 
-// ---- 以下三个 schema 只服务 legacy 七表 spec 的存量读取（迁移窗口），新 spec 不声明 ----
+// ---- 以下 schema 仅服务 legacy 七表 spec 的存量读取，新 spec 不声明 ----
 
 const groupRecord = z.object({
   created_at: z.string(),
@@ -83,7 +70,11 @@ const backupRecord = z.object({
 })
 
 /**
- * 域声明构建器（目录配置与状态存储.md「storage 域形状」）：两表，version 恒 1。
+ * 域声明构建器：storage 域 skill_manager 两表，version 恒 1。
+ * version 不能 bump：storage-json 后端对 version 严格相等校验，bump 会让存量域打不开。
+ * 新 spec 未声明的旧表（synced/projects/backups 乃至 legacy 七表）在首次写入时整体抹除。
+ * 抹除机制：打开只载入声明表，写入整文档重序列化，故无需清场代码。
+ * 无 synced/projects 台账表；备份事实源是备份目录本身。
  * @param {{ defineDomain: Function, domainTable: Function }} 平台包裹（adapter 注入）
  */
 export const buildSkillManagerSpec = ({ defineDomain, domainTable }) => defineDomain({
@@ -96,8 +87,8 @@ export const buildSkillManagerSpec = ({ defineDomain, domainTable }) => defineDo
 })
 
 /**
- * 旧七表 spec 构建器（含 groups/mounts/synced/projects/backups 与带意图的
- * skills）——仅供一次性迁移读取存量意图；迁移完成后不再使用。
+ * legacy 七表 spec 构建器：含 groups/mounts/synced/projects/backups 与带意图 skills。
+ * 仅供 adapter 层一次性读取存量意图；兼容导入完成后不再使用。
  * @param {{ defineDomain: Function, domainTable: Function }} 平台包裹（adapter 注入）
  */
 export const buildLegacySkillManagerSpec = ({ defineDomain, domainTable }) => defineDomain({
@@ -121,8 +112,10 @@ export function backupId(name, at = new Date()) {
 }
 
 /**
- * 存取门面：把域句柄（或测试假句柄）包装成业务模块使用的窄接口。
- * 读全部同步（域为内存权威）；写全部异步（持久化先行）。
+ * 存取门面：把域句柄或测试假句柄包装成业务模块使用的窄接口。
+ * 读全部同步（域为内存权威）；写全部异步（put/delete 均持久化先行）。
+ * 其余模块只依赖本门面，不直接持有域句柄，也不依赖真实 storage 服务。
+ * 假句柄契约：table(name) 返回同步 get/entries/keys 与异步 put/delete/update 的对象。
  */
 export function createStore(domain) {
   const table = (name) => domain.table(name)
@@ -142,8 +135,9 @@ export function createStore(domain) {
 }
 
 /**
- * 上游检查缓存读取（DSR-008 状态直显）：checkedAt + 按安装名的最近结果。
- * 只由 check/update/remove 经门面维护；读取不发网络请求。
+ * 上游检查缓存读取（状态直显口径）：返回 checkedAt 与按安装名的最近结果。
+ * 缓存只由 check/update/remove 经门面维护。
+ * 读取不发网络请求。
  */
 export function readCheckCache(store) {
   const results = Object.fromEntries(store.checkEntries())

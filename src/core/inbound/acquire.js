@@ -1,7 +1,7 @@
-// dsh-skill-manager — 搜索、仓库探测、入库（入站操作.md；DSR-015 inbound 层）。
-// 自原 lib/inbound.js 搬位（P1）。解包原语在 zipball.js；检查/更新在 upstream.js；
-// 入库/出库/备份恢复在 backups.js。错误归类由抛出点（net/zipball/base）直给
-// SkillManagerError，本层不再做文案转译。
+// acquire — 搜索、仓库探测与入库：把远端 skill 取进库目录。
+//
+// 边界：错误归类由抛出点直给 SkillManagerError，本层不做文案转译。
+// 参考：入站操作.md「搜索与仓库探测」「add」。
 
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -11,7 +11,7 @@ import { atomicSwapDir, safePath } from '../base/fsys.js'
 import { dirHash, parseSkillMd } from '../model/library.js'
 import { copyTree, explodeZipball, nowIso, pathExists, skillsFromFiles, validateInstallName, withMaterializedSkillDir } from './zipball.js'
 
-/** skills.sh 搜索（R-07）。错误语义：net 层异常（remote-unreachable）原样透传。 */
+/** skills.sh 搜索：net 层异常原样透传，本层不二次包装。 */
 export async function search(query, limit = 20, offset = 0) {
   return searchSkillsSh(String(query ?? ''), limit, offset)
 }
@@ -28,8 +28,9 @@ function skillsFromTree(tree) {
 }
 
 /**
- * 仓库探测（R-08）：Trees API 主路径，truncated/失败回退 zipball。
- * 错误语义：net/zipball 层异常（bad-repo/remote-unreachable/bad-zipball）原样透传。
+ * 仓库探测：列出含 SKILL.md 的候选目录。
+ * Trees API 为主路径，结果截断或请求失败时回退 zipball 探测。
+ * net 与 zipball 层的异常原样透传，本层不二次包装。
  */
 export async function repoSkills(repoSlugInput, branch = 'main') {
   const repoSlug = normalizeRepoSlug(repoSlugInput)
@@ -60,10 +61,13 @@ export async function repoSkills(repoSlugInput, branch = 'main') {
 }
 
 /**
- * 入库（R-08/R-09）。
- * Side Effects: 下载 zipball → 原子换装写入 root 下新目录 → 登记 skills 表 → 触发对账。
- * @throws {SkillManagerError} bad-repo / remote-unreachable / bad-zipball / no-skill-md /
- *   needs-selection / path-stale / bad-name / already-installed / name-conflict / write-failed
+ * 入库：下载 zipball，落到库目录并登记，随后触发对账。
+ * 定位子目录走非 strict：指定路径未命中时回退自动探测，不报 path-stale。
+ * Side Effects: 原子换装写入 root 下新目录 → 登记 skills 表 → 触发对账。
+ * @throws {SkillManagerError} 解析与网络：bad-repo / remote-unreachable / bad-zipball
+ * @throws {SkillManagerError} 目录定位：no-skill-md / needs-selection
+ * @throws {SkillManagerError} 落库：bad-name / already-installed / name-conflict / write-failed
+ * @throws {GhError} 下载失败按 kind 归类，由 dispatch 直通为稳定错误码
  */
 export async function add({ root, store, repo: repoInput, dir, ref = 'main', as, ctx }) { // quality-floor: ignore docstring-promise 函数体确有 throw SkillManagerError（already-installed/name-conflict）；扫描器将参数解构花括号配误作函数体起点致漏看
   const repoSlug = normalizeRepoSlug(repoInput)
@@ -104,12 +108,12 @@ export async function add({ root, store, repo: repoInput, dir, ref = 'main', as,
         ],
       )
     }
-    // 原子换装入库（DSR-017）：同卷临时目录构建后 rename 就位，杜绝半写目录
-    // 经 junction 实时暴露给 DSH。add 目标不存在（上方 name-conflict 已拦截），
-    // 换装退化为直达 rename；tmp 清理由 withMaterializedSkillDir 的 finally 保证。
+    // 入库走原子换装：同卷临时目录构建后 rename 就位，杜绝半写目录暴露给 DSH。
+    // add 目标此处必不存在（上方 name-conflict 已拦截），换装退化为直达 rename。
+    // tmp 清理由 withMaterializedSkillDir 的 finally 保证。
     await atomicSwapDir(dest, (stage) => copyTree(tmp, stage))
 
-    // 入库元数据只投影版本事实；disabled/group 是 settings 意图，绝不写入（DSR-011/017）。
+    // 入库元数据只投影版本事实；disabled/group 属 settings 意图，绝不写进登记表。
     await store.putSkill(installName, {
       origin: 'github',
       repo: repoSlug,

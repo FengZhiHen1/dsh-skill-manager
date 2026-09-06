@@ -1,13 +1,14 @@
-// dsh-skill-manager — 修复提示词统一组件（DSR-018 / R-17 / AC-15；插件运行时.md L186）。
-// 三处呈现面共用：RPC 操作失败（Host 下发 repair facts）、settings 校验拒绝（本地上下文）、
-// 行状态「挂载失败」展开面（本地现场）。文案模板归 Client（刷新即生效），Host 只供事实。
+// repair — 修复提示词统一组件：RPC 失败、settings 拒绝、挂载失败三处共用一套模板。
+//
+// 边界：文案模板归 Client（刷新即生效），Host 只供事实。
+// 参考：插件运行时.md「Client 入口」；DSR-018、R-17。
 import { useState, useEffect } from 'react'
 import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
 import { T } from './theme.js'
 
 /**
- * 剪贴板写入：clipboard API 优先，失败或非安全上下文回退隐藏 textarea +
- * execCommand。边界：两条通道都失败返回 false（调用方如实回显，不谎报成功）。
+ * 剪贴板写入：优先 clipboard API，非安全上下文或失败时回退隐藏 textarea + execCommand。
+ * 边界：两条通道都失败时返回 false，调用方如实回显，不谎报成功。
  * @param {string} text 待复制文本
  * @returns {Promise<boolean>} 是否确认写入剪贴板
  */
@@ -56,6 +57,7 @@ export function fallbackRepair({ operation = 'unknown', code = 'internal', messa
 
 /**
  * 统一模板组装完整修复提示词（纯文本，交本地 Agent 使用）。
+ * repair 为 RPC 操作失败时 Host 下发的 facts；为 null → 走 fallbackRepair 本地兜底。
  * @param {{ root?: string, code?: string, message?: string, repair?: object|null }} input
  */
 export function buildRepairPrompt({ root, code, message, repair }) {
@@ -137,7 +139,7 @@ export function mountIssueRepair(issue, { name, targetLabel, path, root }) {
   return { operation: 'mount-inspect', summary: meta.summary, facts, recommendation: meta.recommendation }
 }
 
-/** settings 校验被拒的本地 repair facts（DSR-018：该呈现面 Host 不参与，上下文在 Client 手里）。 */
+/** settings 校验被拒的本地 repair facts：该呈现面 Host 不参与，上下文在 Client 手里。 */
 export function settingsRejectedRepair(field, attempted, current, root) {
   return {
     operation: 'settings.set',

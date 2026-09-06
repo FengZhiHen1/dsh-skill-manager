@@ -1,9 +1,12 @@
-// dsh-skill-manager — 设置导航图标补丁（插件运行时.md L189：宿主外壳按 section id 硬编码图标，未开放注册）。
-// 「技能」默认齿轮与「通用」撞图标；客户端找到本插件导航行，把齿轮 svg 就地改写为 ✦ 星形。
-// 宿主 DOM 结构变化导致找不到目标时静默保持原图标，不影响任何功能。
+// nav-icon — 设置导航图标补丁：改画设置面板里「技能」那一行的图标。
+//
+// 边界：宿主外壳按 section id 硬编码图标且未开放注册，只能就地改 DOM 节点。
+// 参考：插件运行时.md「Client 入口」。
 
 const NAV_STAR_PATH = 'M8 1.6 L9.85 6.15 L14.4 8 L9.85 9.85 L8 14.4 L6.15 9.85 L1.6 8 L6.15 6.15 Z'
 
+// 「技能」的默认齿轮与「通用」撞图标，故改写其 svg 子节点为 ✦ 星形。
+// 宿主 DOM 结构变化导致找不到目标时静默保持原图标，不影响任何功能。
 function patchSkillsNavIcon() {
   for (const label of document.querySelectorAll('span[class*="navLabel"]')) {
     if (label.textContent !== '技能') continue
@@ -22,7 +25,10 @@ function patchSkillsNavIcon() {
   }
 }
 
-/** 设置面板为模态挂载，导航行随面板开关反复出现，用 MutationObserver 跟随；返回 disposer。 */
+/**
+ * 监听 DOM 变化重画导航图标，返回 disposer。
+ * 设置面板为模态挂载，导航行随开关反复出现，故用 MutationObserver 跟随。
+ */
 export function observeSkillsNavIcon() {
   patchSkillsNavIcon()
   const observer = new MutationObserver((mutations) => {

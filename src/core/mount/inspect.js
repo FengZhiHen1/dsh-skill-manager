@@ -1,9 +1,8 @@
-// dsh-skill-manager — 只读走查与归属判据单源（挂载与同步.md「归属判据」「行状态走查」；
-// DSR-015 mount 层；DSR-017：判据由 findOrphanLinks 单源承载，对账摘除、remove
-// 摘除与行状态走查三处共用；独立健康视图已废止，走查即行状态）。
+// inspect — 只读走查与归属判据单源：扫描链接现场、判定孤儿链接、产出行状态。
 //
-// 不变式：本模块全部只读，不修改任何文件。工作区从注册表消失后其根不在扫描
-// 范围内，既有现场保持原样（R-12 仅报告）。
+// 边界：全部只读，不修改任何文件；无独立健康视图，行状态即走查结果。
+// 扫描：工作区从注册表消失后其根不在列，其下既有链接与目录不作处置、只报告。
+// 参考：挂载与同步.md「归属判据」「行状态走查」；DSR-015、DSR-017。
 
 import { lstat, readdir } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
@@ -67,8 +66,9 @@ function desiredPathSet(desired, { workspacesById, globalRootPath }) {
 }
 
 /**
- * 归属判据单源（挂载与同步.md「归属判据」）：扫描根下 owned（指向当前配置
- * 目录）且不在期望集内的链接。三处共用——
+ * 归属判据单源：返回扫描根下 owned 且不在期望集内的链接。
+ * owned 即指向当前配置目录，定义见 scanMountLinks。
+ * 三处共用：
  * - 对账摘除：reconcile 对返回值逐个 removeLink（摘除与孤儿清扫同一步）；
  * - remove 摘除：调用方按 `target === <root>/<name>` 过滤后摘除；
  * - 行状态走查：walkMountState 借同一现场集判定。
@@ -80,11 +80,11 @@ export async function findOrphanLinks({ root, desired, globalRootPath, workspace
 }
 
 /**
- * 行状态走查（挂载与同步.md「行状态走查」）：只读，与对账共用期望推导与
- * 扫描原语。每个期望目标判定其一：
- * ok | link-missing（期望位置不存在）| target-occupied（真实目录，含旧版
- * copy 遗留与遮蔽现场）| wrong-target（链接指向对应源之外——含库内他处，
- * 后者对账可自检修复，走查只报告）。
+ * 行状态走查：只读，与对账共用期望推导与扫描原语；每个期望目标判定其一：
+ * - link-missing — 期望位置不存在；
+ * - target-occupied — 期望位置是真实目录，非本插件所建，一律不触碰只报告；
+ * - wrong-target — 链接指向对应源之外，库内他处对账可自检修复，走查仅报告。
+ * 无异常的 skill 不入结果（即全部 ok）。
  * @returns {Map<string, Array<{ target: string, path: string, issue: string }>>}
  */
 export async function walkMountState({ root, desired, links, globalRootPath, workspacesById }) {

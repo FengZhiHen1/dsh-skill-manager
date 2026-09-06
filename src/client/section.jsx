@@ -1,6 +1,7 @@
-// dsh-skill-manager — 技能设置页骨架：配置即意图 + 两视图页签（插件运行时.md L185「数据源」与「视图设计」L195）。
-// 渲染即时（settings mirror 快照直读，永不等待网络）；列表/行状态/工作区来自单次 overview；
-// 配置写 = scope.set('groups'|'skills', next) 整字段替换（本地即时生效，Host 对账器后台收敛；DSR-011）。
+// section — 技能设置页骨架：配置即意图 + 管理/搜索两视图页签。
+//
+// 边界：配置渲染零网络（settings mirror 快照直读），数据读全部经 overview RPC。
+// 参考：插件运行时.md「配置即意图」「视图设计」；DSR-011、DSR-017、DSR-018。
 import { useState, useEffect } from 'react'
 import { T, S, badgeStyle } from './theme.js'
 import { ErrorLine, OutlineBtn, useTick } from './ui.jsx'
@@ -20,11 +21,12 @@ export function SkillsSection({ call, workspaces, scope, subscribeSkillSettings 
   const [tab, setTab] = useState('manage')
   const [error, setError] = useState(null)
   const [data, setData] = useState(null)
-  // 快照显示已配置、但 Host overview 仍报 skilldir-unconfigured（配置卡片刚改、mirror 未同步）→ 回到未配置引导
+  // 快照显示已配置、但 Host overview 仍报 skilldir-unconfigured → 回到未配置引导
   const [configOverrideUnconfigured, setConfigOverrideUnconfigured] = useState(false)
   const [reloadTick, reload] = useTick()
 
-  // ---------- 配置即意图（settings 域直读直写，与原生卡片同构） ----------
+  // ---------- 配置即意图：settings 域直读直写，与原生卡片同构 ----------
+  // 写为 scope.set('groups'|'skills', next) 整字段替换：本地即时生效，Host 对账器后台收敛。
   const [snap, setSnap] = useState(() => scope.getSnapshot())
   const [editError, setEditError] = useState(null) // { message, prompt|null }
   useEffect(() => {
@@ -41,11 +43,12 @@ export function SkillsSection({ call, workspaces, scope, subscribeSkillSettings 
   const skillsDir = configReady && typeof snap.value.skillsDir === 'string' ? snap.value.skillsDir : ''
 
   /**
-   * 配置写与拒绝检测。DSH settings-scope.ts 语义：Host validate 拒绝时 mutate
-   * 应答 ok=false，客户端 recover（重载镜像后静默回退），set() **照常 resolve**
-   * 不抛；因此被拒判定 = 写 resolve 后权威快照的该字段 ≠ 尝试值。set() 抛错
-   * 只剩传输/围栏类失败（请求未达 Host），单独呈错——两态都有明确反馈，无静默。
-   * 检测按字段独立比对：多字段编辑（如组改名连改两处）各自的写后快照互不误伤。
+   * 配置写与拒绝检测，依据 DSH settings-scope.ts 的客户端语义。
+   * Host validate 拒绝时 mutate 应答 ok=false，客户端 recover 重载镜像静默回退，set() 照常 resolve 不抛。
+   * 因此被拒判定 = 写 resolve 后权威快照的该字段 ≠ 尝试值。
+   * set() 抛错只剩传输/围栏类失败（请求未达 Host），单独呈错。
+   * 被拒与抛回两态都有明确反馈，无静默。
+   * 检测按字段独立比对：多字段编辑（如组改名连改两处）互不误伤。
    */
   const editConfig = (field, next) => {
     setEditError(null)
@@ -92,8 +95,8 @@ export function SkillsSection({ call, workspaces, scope, subscribeSkillSettings 
     editConfig('groups', { ...groups, [group]: { ...groups[group], mounts: next } })
   }
   const createGroup = (name) => {
-    // 防御（2026-09-05 走查）：groups 字段是全量覆盖写——撞名会静默覆盖既有组的
-    // 挂载规则，撞「默认」还会连带把默认组重置为复制品。客户端先拒，Host 不拦。
+    // 防御：groups 字段是全量覆盖写，撞名会静默覆盖既有组的挂载规则。
+    // 撞「默认」还会把默认组重置成复制品，故客户端先拒，Host 不拦。
     if (Object.prototype.hasOwnProperty.call(groups, name)) {
       setEditError({ message: `分组「${name}」已存在，已拒绝创建（避免覆盖既有组的挂载规则）`, prompt: null })
       return false
@@ -144,7 +147,7 @@ export function SkillsSection({ call, workspaces, scope, subscribeSkillSettings 
         })
       })
       .catch((e) => {
-        // Host 说未配置而快照说有（配置竞态：刚保存/外部改动）→ 回到未配置引导，不停在"加载中"
+        // Host 报未配置而快照显示已配置：配置刚保存或外部修改、mirror 未同步，不停在"加载中"
         if (e && e.code === 'skilldir-unconfigured') setConfigOverrideUnconfigured(true)
         else setError(e)
       })
@@ -180,7 +183,7 @@ export function SkillsSection({ call, workspaces, scope, subscribeSkillSettings 
     )
   }
 
-  // 文字页签：激活下划线 + 每页一句副标题（两视图，同步视图随 DSR-017 废止）。
+  // 文字页签：激活下划线 + 每页一句副标题，当前为管理/搜索两视图。
   const TABS = [
     { key: 'manage', label: '管理', sub: '先为分组配置可用范围，再管理其中的 Skill。' },
     { key: 'search', label: '搜索', sub: '从 skills.sh 搜索，或直接从 GitHub 仓库入库。' },
@@ -219,7 +222,7 @@ export function SkillsSection({ call, workspaces, scope, subscribeSkillSettings 
   )
 }
 
-/** 页级错误呈现：RpcError 带修复复制入口（DSR-018 RPC 失败面）。 */
+/** 页级错误呈现：RpcError 文案附修复提示词复制入口。 */
 function ErrorLineWrap({ error, root }) {
   if (!error) return null
   return (

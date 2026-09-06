@@ -1,17 +1,8 @@
-// dsh-skill-manager — 应用服务层（原 lib/api.js → P1 搬位；P2 语义收敛：
-// 无台账 bundle、行状态走查、junction-only、备份目录事实源；P4 传输迁移：
-// connection.rpc 通道 + createDispatch 三路队列 + Result 包装，插件运行时.md）。
-// 配置（用户意图）不经过本层：UI 经 settings 域直读直写 settings.yaml 的
-// skill-manager 段，Host 对账器监听配置变更后台收敛。本层只提供：
-//   - 只读视图：overview（库列表+行状态+工作区投影）、warm、backups
-//   - 网络/文件操作：check / search / repo-skills / add / update / remove /
-//     restore / sync（11 端点终表，插件运行时.md；health/import/
-//     project-skills/claim-empty/config 已随 DSR-016/017 废止）
-// 队列：读请求不排队（bundle 缓存快照 + 写屏障）；文件写 FIFO 串行；
-// 网络慢操作独立队列。
-// 结果形状（Host 平台契约，connection.rpc）：{ok:true,value} 或
-// {ok:false,error:{code,message,details:{retryable}}}；本层绝不抛出越过
-// dispatch 的错误（未配置门禁等统一转 Result 失败侧）。
+// service — 应用服务层：UI/Host 的全部读写端点在此编排。
+//
+// 边界：配置不经过本层，UI 直读写 settings.yaml；本层绝不抛出越过 dispatch 的错误。
+// 队列：读请求不排队、文件写 FIFO 串行、网络慢操作独立队列。
+// 参考：插件运行时.md「RPC 传输」「请求调度与缓存」；DSR-013/014/017。
 
 import { SkillManagerError, buildRepair } from './base/errors.js'
 import { requireDir, DEFAULT_GROUP, makeGroups } from './model/intent.js'
@@ -72,10 +63,10 @@ async function readWorkspaceProjection(listWorkspaces) {
 }
 
 /**
- * 每请求会话：按当前配置读 skills 目录根，组装只读 bundle（无台账：期望集来自
- * settings 意图 + 工作区投影现算，行状态来自文件系统走查，DSR-017）。
- * globalRootPath 由 Host 经 dshHomePath 注入（挂载与同步.md「DSH skill 根」）。
- * @param {() => SettingsScope} scopeGetter - 类型为 @deepseek-ai/dsh-settings 的 SettingsScope（命名空间注册在 src/adapter/settings.js）
+ * 每请求会话：按当下配置解析 skills 目录根，组装只读 bundle 快照。
+ * 无台账：期望集由 settings 意图与工作区投影现算，行状态由文件系统走查现算。
+ * globalRootPath 由 Host 注入，本层不自行推导 DSH 根。
+ * @param {() => SettingsScope} scopeGetter - settings 句柄取器，命名空间注册见 adapter/settings.js
  */
 export function createSession(scopeGetter, listWorkspaces, getStore, backupsRoot, globalRootPath, shared) {
   const root = requireDir(scopeGetter())
@@ -102,7 +93,7 @@ export function createSession(scopeGetter, listWorkspaces, getStore, backupsRoot
             }
           : it
       })
-      // 参与推导的 skill 集 = 未禁用且未缺失（挂载与同步.md「挂载推导」）。
+      // 参与推导的 skill 集 = 未禁用且未缺失。
       const skills = viewItems.filter((it) => !it.disabled && !it.missing).map((it) => it.dir)
       // 配置挂载展平（global 的 project 归一为 null；形状非法项跳过，对账容忍）。
       const mounts = []
@@ -117,14 +108,14 @@ export function createSession(scopeGetter, listWorkspaces, getStore, backupsRoot
           })
         }
       }
-      // 成员归属：失效组引用回落「默认」（目录配置与状态存储.md 不变式）。
+      // 成员归属：失效组引用回落「默认」，不因此拒绝整份配置。
       const memberships = new Map(skills.map((dir) => {
         const g = intentSkills?.[dir]?.group
         return [dir, typeof g === 'string' && g !== '' && (g in configGroups || g === DEFAULT_GROUP) ? g : DEFAULT_GROUP]
       }))
       const groupsDoc = makeGroups(configGroups, intentSkills, new Set(skills))
       const { desired, warnings } = deriveDesired({ memberships, mounts, workspacesById, globalRootPath })
-      // 行状态走查 + 孤儿集：一次扫描，代际随 bundle 引用失效（插件运行时.md 缓存表）。
+      // 行状态走查与孤儿集共用同一次扫描，结果随 bundle 快照一起失效。
       const links = await scanMountLinks({ root, globalRootPath, workspacesById })
       const mountRows = await walkMountState({ root, desired, links, globalRootPath, workspacesById })
       const orphans = await findOrphanLinks({ root, desired, globalRootPath, workspacesById, links })
@@ -156,7 +147,7 @@ export function createSession(scopeGetter, listWorkspaces, getStore, backupsRoot
         orphans,
       }
     },
-    /** 全量对账（junction-only，无 method 参数，DSR-017）。 */
+    /** 全量对账：现算期望并收敛挂载，junction-only。 */
     async reconcile() {
       const b = await this.bundle()
       return reconcileMod.reconcile({
@@ -201,9 +192,9 @@ export function buildApi(scopeGetter, { listWorkspaces = () => [], getStore, bac
   }
 
   /**
-   * 写路径收尾：重算并预热 bundle 缓存 + 清空哈希缓存，使随后的读请求
-   * （UI 操作后的 reload）命中预热快照。失败不掩盖写结果：清缓存，
-   * 下次读冷扫兜底。
+   * 写路径收尾：重算并预热 bundle 快照，同时清空哈希缓存。
+   * 于是写后的读请求（UI reload）直接命中热缓存。
+   * 失败不掩盖写结果：清缓存，让下次读走冷扫兜底。
    */
   async function refreshCache() {
     try {
@@ -260,16 +251,19 @@ export function buildApi(scopeGetter, { listWorkspaces = () => [], getStore, bac
       return { ok: true }
     },
 
+    /** skills.sh 搜索：网络队列端点，同样要求已配置目录。 */
     async 'search'(payload) {
-      session() // 未配置门禁（R-22：search 也在门禁内）
+      session() // 未配置门禁：search 也在门禁内
       return acquire.search(payload.query, Number(payload.limit ?? 20), Number(payload.offset ?? 0))
     },
 
+    /** 仓库探测：列出该仓库内含 SKILL.md 的候选目录。 */
     async 'repo-skills'(payload) {
       session() // 未配置门禁
       return acquire.repoSkills(String(payload.repo ?? ''), payload.ref ? String(payload.ref) : 'main')
     },
 
+    /** 入库：zipball 落地为原子换装，随后登记并触发对账。 */
     async 'add'(payload) {
       const s = session()
       const result = await acquire.add({
@@ -285,6 +279,7 @@ export function buildApi(scopeGetter, { listWorkspaces = () => [], getStore, bac
       return result
     },
 
+    /** 上游检查：三态结果逐条回填 check_cache。 */
     async 'check'(payload) {
       const s = session()
       return upstream.check({
@@ -295,6 +290,7 @@ export function buildApi(scopeGetter, { listWorkspaces = () => [], getStore, bac
       })
     },
 
+    /** 覆盖更新：检出本地修改时必须带显式确认。 */
     async 'update'(payload) {
       const s = session()
       const result = await upstream.update({
@@ -309,11 +305,13 @@ export function buildApi(scopeGetter, { listWorkspaces = () => [], getStore, bac
       return result
     },
 
+    /** 备份列表：以备份目录实际内容为事实源。 */
     async 'backups'() {
       const s = session()
       return backupsMod.backups({ backupsRoot: s.backupsRoot })
     },
 
+    /** 从备份恢复：目标占位则拒绝，就位走原子换装。 */
     async 'restore'(payload) {
       const s = session()
       const result = await backupsMod.restore({ root: s.root, store: s.store, id: String(payload.id ?? ''), backupsRoot: s.backupsRoot, ctx: s })
@@ -321,6 +319,7 @@ export function buildApi(scopeGetter, { listWorkspaces = () => [], getStore, bac
       return result
     },
 
+    /** 出库：仅限 github 来源登记，先自动备份再摘链与删目录。 */
     async 'remove'(payload) {
       const s = session()
       const workspacesById = await readWorkspaceProjection(listWorkspaces)
@@ -336,7 +335,7 @@ export function buildApi(scopeGetter, { listWorkspaces = () => [], getStore, bac
       return result
     },
 
-    /** 全量对账（自身即幂等收敛；method 参数随 junction-only 删除，DSR-017）。 */
+    /** 全量对账端点：自身幂等收敛，收敛后预热读缓存。 */
     async 'sync'() {
       const s = session()
       const result = await s.reconcile()
@@ -347,11 +346,12 @@ export function buildApi(scopeGetter, { listWorkspaces = () => [], getStore, bac
 }
 
 /**
- * 任意错误 → RPC Result 失败侧（平台契约 error 形状 {code,message,details}；
- * details = {retryable, repair}：retryable 供客户端重试提示，repair 为 DSR-018
- * 修复 facts（operation=端点名，模板见 base/errors.js）。GhError 的 kind 字段
- * 直通错误码（入站操作.md 网络分类）。绝不外抛——handler 抛异常会退化成平台
- * 500 纯文本，客户端只剩 transport failure 兜底。
+ * 任意错误 → RPC Result 失败侧，绝不外抛。
+ * 外抛会让 handler 退化成平台 500 纯文本，客户端只剩 transport failure 兜底。
+ * SkillManagerError 用自身 code/retryable/facts；GhError 的 kind 直通错误码。
+ * 其余一律归 internal 且不可重试。
+ * repair 由 base/errors.js 的码表模板加动态 facts 组装。
+ * @param {string} operation - 端点名，注入 repair.operation
  */
 export function toRpcFailure(error, operation) {
   if (error instanceof SkillManagerError) {
@@ -383,9 +383,10 @@ export function toRpcFailure(error, operation) {
 }
 
 /**
- * connection.rpc 通道分发器：按方法表三路排队（READ 快照直返 / NET 网络队列 /
- * 其余 WRITE FIFO），把结果与错误统一包成平台 Result。signal 刻意不透传：
- * 写操作半途而废即半成品现场，断连也必须跑完；读与网络操作短平快无取消价值。
+ * connection.rpc 通道分发器：按方法表三路排队，结果与错误统一包成平台 Result。
+ * READ 直返快照 / NET 走网络队列 / 其余走 WRITE FIFO。
+ * signal 刻意不透传：写操作半途而废即半成品现场，断连也必须跑完。
+ * 读与网络操作短平快，无取消价值。
  * @returns {(endpoint: string, payload: unknown) => Promise<{ok: boolean, value?: unknown, error?: object}>}
  */
 export function createDispatch(api, { writeQueue = createQueue(), netQueue = createQueue() } = {}) {

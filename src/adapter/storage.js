@@ -1,7 +1,7 @@
-// dsh-skill-manager — storage 域 @deepseek-ai 包裹层（DSR-015 adapter 接缝）。
-// defineDomain/domainTable 与 openStore 是全包唯一接触 @deepseek-ai/dsh-storage-domain
-// 的地方（自原 lib/store.js 搬出，P1 搬位不改语义）；域形状与读写门面在
-// core/model/store.js。
+// storage — storage 域的 @deepseek-ai 包裹层：把 core 纯 schema 接成平台域规格。
+//
+// 边界：全包唯一接触 @deepseek-ai/dsh-storage-domain 之处，域形状在 core/model/store.js。
+// 参考：DSR-015。
 
 import { defineDomain, domainTable } from '@deepseek-ai/dsh-storage-domain'
 import { buildLegacySkillManagerSpec, buildSkillManagerSpec, createStore } from '../core/model/store.js'

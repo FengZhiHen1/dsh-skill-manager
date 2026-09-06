@@ -1,19 +1,13 @@
-// dsh-skill-manager — 进程内缓存层（延迟优化，插件运行时.md「低延迟路径」）。
+// cache — 进程内缓存：bundle 快照、SKILL.md 元数据、目录哈希三块。
 //
-// 三个缓存，全部以配置目录为事实边界：
-// - bundle 缓存：overview/warm 与写后预热共享的库快照（session().bundle()
-//   返回值），单飞冷扫、TTL 后失效、写操作后 refresh 预热——读请求在缓存热
-//   时零扫描零存储读。
-// - meta 缓存：每个 skill 目录的 SKILL.md 解析结果，按 stat 签名
-//   （mtimeMs:size）复用，重扫退化为 N 次 stat。
-// - hash 缓存：dirHash 短 TTL（默认 5s），供 check 的本地修改展示用；
-//   破坏性路径（update 判定本地修改）必须 fresh 强制重算；写操作统一清空。
-//
-// 一致性：读走冻结快照（同一引用永不撕裂）；写操作串行 + refresh 后缓存
-// 才更新，UI 操作后的 reload 命中预热缓存。配置目录变更 → bundle 键失配
-// → 自动冷扫。
+// 边界：以配置目录为事实边界；读走冻结快照不撕裂，写后 refresh 才更新。
+// 参考：插件运行时.md「请求调度与缓存」；DSR-013。
 
-/** 共享缓存句柄。 */
+/**
+ * 建共享缓存句柄：TTL 配置与两张 Map 的裸容器，跨端点共享一份。
+ * bundleTtlMs 默认 800ms，hashTtlMs 默认 5000ms。
+ * @param {{ bundleTtlMs?: number, hashTtlMs?: number }} [opts]
+ */
 export function createSharedCache({ bundleTtlMs = 800, hashTtlMs = 5000 } = {}) {
   return {
     bundleTtlMs,
@@ -23,7 +17,7 @@ export function createSharedCache({ bundleTtlMs = 800, hashTtlMs = 5000 } = {}) 
     bundle: null, // { root, items, skills, mounts, memberships, groups, desired, warnings, workspacesById, workspacesView, links, mountRows, orphans }
     bundleAt: 0,
     bundleInflight: null,
-    // meta 缓存：`${root}\0${dir}` -> { sig, hasSkillMd, meta }
+    // meta 缓存：`${root}\0${dir}` -> { sig, hasSkillMd, meta }，按 stat 签名复用
     meta: new Map(),
     // hash 缓存：dir -> { hash, at }
     hashes: new Map(),
@@ -48,8 +42,9 @@ export function clearHashes(shared) {
 }
 
 /**
- * 构造 dirHash 的缓存门面：`hashOf(dir, { fresh })`。fresh=true 强制重算
- * （update 的本地修改判定）；默认先查短 TTL 缓存（check 的展示性判定）。
+ * 构造 dirHash 的缓存门面，形态为 hashOf(dir, { fresh })。
+ * 默认先查短 TTL 缓存，命中即返回，供展示性判定使用。
+ * fresh=true 绕过缓存强制重算，供 update 的本地修改判定使用。
  */
 export function hashOf(shared, dirHashFn) {
   return async (dir, { fresh = false } = {}) => {

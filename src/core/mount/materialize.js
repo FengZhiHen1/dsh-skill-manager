@@ -1,9 +1,8 @@
-// dsh-skill-manager — junction 物化与摘除（挂载与同步.md「物化」「失败语义」；
-// DSR-015 mount 层；DSR-017 junction-only：失败即报「挂载失败」，不降级 copy，
-// `method` 参数与 copy 兜底、synced 哈希簿记一并删除）。
+// materialize — junction 物化与摘除：在库与挂载根之间建链、拆链两个动作。
 //
-// 不变式（C-03/C-04）：本模块在 DSH 全局根与工作区根只创建/删除 junction，
-// 永不创建、修改或删除真实目录；一切非链接内容只入行状态，不触碰。
+// 边界：对全局根与工作区根只创建/删除 junction，永不触碰真实目录。
+// 失败即报「挂载失败」，无 copy 降级；非链接内容只入行状态，不做处置。
+// 参考：挂载与同步.md「物化」「失败语义」；需求.md C-03/C-04 与 DSR-015/017。
 
 import { lstat, mkdir, rm, stat, symlink } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -71,8 +70,8 @@ export async function materializeOne({ root, skill, t, workspacesById, globalRoo
   } else {
     try {
       await lstat(dst)
-      // 目标已是真实目录：非本插件所有（本插件永不创建真实目录；含旧版本
-      // 遗留 copy 物化），按「挂载失败·目标被占用」报告，永不覆盖或删除。
+      // 目标已是真实目录：本插件只建 junction，真实目录必非我方所建。
+      // 按「挂载失败·目标被占用」报告，永不覆盖或删除。
       throw new SkillManagerError('target-occupied', `目标已被真实目录占用（含旧版本 copy 遗留），本插件不触碰: ${dst}`, false, [
         { label: '目标路径', value: dst },
         { label: '期望链接的库内条目', value: src },

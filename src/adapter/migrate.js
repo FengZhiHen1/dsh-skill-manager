@@ -1,19 +1,18 @@
-// dsh-skill-manager — 旧 storage 意图一次性迁移（插件运行时.md「迁移」）。
+// migrate — 旧 storage 意图一次性迁移：读存量 → 投影进 settings → 标记完成。
 //
-// 历史版本把用户意图（groups 表、mounts 表、skills 表的 disabled/group）存在
-// storage 域。新架构意图唯一事实源是 settings 命名空间。本模块在启动时：
-//   1. 用 legacySkillManagerSpec（旧七表）打开域，读存量意图；
-//   2. 有数据且 settings 未标记 intentMigrated → scope.update 投影进配置；
-//   3. 关闭旧域；随后 openStore 用新两表 spec 打开（version 相同，未声明表
-//      不被读取；新 spec 的首次写入会整文档重发、把旧表从文件抹除，迁移自动幂等）。
+// 边界：intentMigrated 已为 true 即整体跳过，重复启动幂等。
+// 时序：必须先于 openStore——新旧 spec 同名，未声明的旧表由新 spec 首写抹除。
+// 参考：目录配置与状态存储.md「旧意图迁移」。
 
 import { legacySkillManagerSpec } from './storage.js'
 import { DEFAULT_GROUP } from '../core/model/intent.js'
 
 /**
  * 一次性迁移旧意图进 settings。
- * @param {object} ctx Host 上下文（注入 storage）
+ * self 来源记录不进意图：本地 skill 无版本管理，也不登记。
+ * @param {object} ctx Host 上下文，须注入 storage
  * @param {import('@deepseek-ai/dsh-settings').SettingsScope} scope 已注册的配置 scope
+ * @param {{ warn?: Function }} [logger] 可选日志器，旧域打不开时只告警不外抛
  * @returns {Promise<boolean>} 是否执行了迁移写入
  */
 export async function migrateLegacyIntent(ctx, scope, logger) {

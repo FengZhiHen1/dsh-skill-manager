@@ -1,6 +1,7 @@
-// dsh-skill-manager — 上游检查与更新（入站操作.md；DSR-015 inbound 层）。
-// 自原 lib/inbound.js 搬位（P1）。解包与临时目录生命周期在 zipball.js
-// （withMaterializedSkillDir 保证失败不漏 tmp）。
+// upstream — 上游检查与更新：远程探测、本地修改判定、库内更新落盘。
+//
+// 边界：解包与临时目录生命周期在 zipball.js，失败不漏 tmp。
+// 参考：入站操作.md「check」「update」；DSR-015。
 
 import { SkillManagerError } from '../base/errors.js'
 import { fetchZipball, remoteHead } from '../base/net.js'
@@ -9,13 +10,14 @@ import { dirHash } from '../model/library.js'
 import { copyTree, nowIso, pathExists, withMaterializedSkillDir } from './zipball.js'
 
 /**
- * 目录哈希门面：显式传入 hash（生产为带 TTL 缓存的 hashOf）时走它；
- * fresh=true 强制重算（update 的本地修改判定禁止用陈旧基线）。
- * 未传入（测试/纯函数路径）→ 直接新鲜直算。
+ * 目录哈希门面：按入参三态分流。
+ * 传入 hash → 走传入实现，生产侧带 TTL 缓存；fresh=true → 绕过缓存重算。
+ * 未传入 → 新鲜直算，即测试与纯函数路径。
+ * why 强制重算：update 的本地修改判定必须以当下内容为准，禁陈旧基线。
  */
 const hashDir = (hash, dir, fresh = false) => (hash !== undefined ? hash(dir, { fresh }) : dirHash(dir))
 
-/** 检查结果子集 → 缓存条目（DSR-008 状态直显；checked_at 随写入刷新）。 */
+/** 检查结果子集 → 缓存条目，checked_at 随写入时刻刷新。 */
 function cacheEntryFromCheck(r, checkedAt) {
   return {
     checked_at: checkedAt,
@@ -35,8 +37,8 @@ function cacheEntryFromCheck(r, checkedAt) {
 }
 
 /**
- * 合并有上游（repo）的检查结果进缓存；无上游条目（skipped）不入缓存。
- * 两表面无独立缓存对象（DSR-017）：逐条 putCheck，键即安装名。
+ * 合并有上游 repo 的检查结果进缓存。
+ * 无上游的 skipped 条目不入缓存，逐条 putCheck，键即安装名。
  */
 async function mergeCheckCache(store, results, checkedAt = nowIso()) {
   for (const r of results) {
@@ -46,11 +48,11 @@ async function mergeCheckCache(store, results, checkedAt = nowIso()) {
 }
 
 /**
- * 检查（R-10 三态；DSR-008：并行探测 + 结果缓存）。
- * 单 skill 网络异常降级为该条 check_failed，不再拖垮整批。
- * 同 repo 同分支只探测一次上游（多目录仓库省网络往返），结果广播给各成员。
- * @param {Function} [hash] 目录哈希门面（hashOf）；缺省新鲜直算
- * Side Effects: 检查结果逐条写 check_cache（mergeCheckCache）。
+ * 检查上游状态，返回每个 skill 的三态结果。
+ * 单条网络异常降级为该条 check_failed，不再拖垮整批。
+ * 同 repo 同分支只探测一次上游，结果广播给各成员。
+ * Side Effects: 检查结果逐条写 check_cache。
+ * @param {Function} [hash] - 目录哈希门面，缺省新鲜直算
  */
 export async function check({ root, store, names, hash }) {
   const entries = new Map(store.skillEntries())
@@ -122,10 +124,12 @@ export async function check({ root, store, names, hash }) {
 }
 
 /**
- * 更新（R-10；目录缺失时即使 commit 未变也拉回）。
+ * 更新到上游最新版，目录缺失时即使 commit 未变也拉回。
  * 覆盖发生前由 Host 强制要求确认，避免 UI 外的 API 调用绕过风险提示。
+ * 单条失败不中断批次，失败原因进该条 reason。
  * Side Effects: 原子换装库目录、写 skills 表与 check_cache、changed 时触发对账。
  * @throws {SkillManagerError} local-changes-confirmation-required — 检出本地修改且未显式确认
+ * @throws {SkillManagerError} path-stale — 记录的 path_in_repo 在上游已失效
  */
 export async function update({ root, store, names, confirmLocalChanges = false, ctx, hash }) { // quality-floor: ignore docstring-promise 函数体确有 throw SkillManagerError（local-changes-confirmation-required）；扫描器将参数解构花括号配误作函数体起点致漏看
   const entries = new Map(store.skillEntries())
@@ -176,10 +180,10 @@ export async function update({ root, store, names, confirmLocalChanges = false, 
     }
     try {
       const payload = await fetchZipball(entry.repo, entry.branch)
-      // 覆盖语义（原子换装，DSR-017/入站操作.md）：新版在临时位置构建完成并
-      // 校验后 rename 交换替换旧目录，再清理旧目录；不存在删旧后重写的半写窗口。
-      // strict：记录的 path_in_repo 失效时报 path-stale + 候选（入站操作.md）；
-      // 临时目录清理由 withMaterializedSkillDir 的 finally 保证（失败不漏 tmp）。
+      // 覆盖走原子换装：新版在临时位置构建并校验完成后才整体替换旧目录。
+      // 因此不存在"先删旧再重写"的半写窗口。
+      // strict=true：记录的 path_in_repo 在上游失效时报 path-stale 并附候选目录。
+      // 临时目录由 withMaterializedSkillDir 的 finally 清理，失败也不漏 tmp。
       await withMaterializedSkillDir(payload, entry.path_in_repo ?? undefined, true, async ({ tmp }) => {
         await atomicSwapDir(dest, (stage) => copyTree(tmp, stage))
       })
@@ -194,7 +198,7 @@ export async function update({ root, store, names, confirmLocalChanges = false, 
 
       results.push({ name, status: 'updated', commit: head.sha, via: head.via })
     } catch (error) {
-      // 单条失败不中断批次（入站操作.md 批量更新语义）
+      // 单条失败不中断批次，失败原因进该条 reason。
       results.push({ name, status: 'skipped', reason: error instanceof Error ? error.message : String(error) })
     }
   }
@@ -202,7 +206,7 @@ export async function update({ root, store, names, confirmLocalChanges = false, 
   if (changed) {
     sync = await ctx.reconcile()
   }
-  // DSR-008：更新结果直接回填检查缓存，行徽章无需等下一次全局检查即翻转为已是最新。
+  // 更新结果直接回填检查缓存，行徽章无需等下一次全局检查即翻转为已是最新。
   const cacheEntries = []
   for (const r of results) {
     const entry = entries.get(r.name)

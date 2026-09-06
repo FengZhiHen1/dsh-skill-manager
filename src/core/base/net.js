@@ -1,8 +1,8 @@
-// dsh-skill-manager — GitHub / skills.sh 网络通道（对齐 distributor net.py 语义）。
-// 分支解析：GitHub API 主路径，失败回退 git ls-remote（入站操作.md）。
-// 错误协议：GitHub 通道失败抛 GhError（kind 即稳定码，dispatch 直通）；仓库解析/
-// slug/搜索的语义失败直接抛 SkillManagerError（remote-unreachable/bad-repo），
-// 调用方不做文案匹配转译。
+// net — GitHub 与 skills.sh 网络通道：分支解析、zipball 下载、搜索。
+//
+// 边界：GitHub 通道失败抛 GhError，kind 即稳定错误码；语义失败抛 SkillManagerError。
+// 调用方按码分流，不做文案匹配转译。
+// 参考：入站操作.md「搜索与仓库探测」；DSR-003（参考基线）、DSR-015。
 
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -30,9 +30,19 @@ const UA = { 'User-Agent': 'dsh-skill-manager', Accept: 'application/vnd.github+
 const TIMEOUT_MS = 15000
 const DOWNLOAD_TIMEOUT_MS = 90000
 
-/** 网络错误分类（入站操作.md）：not_found / rate_limited / unreachable / http_error。 */
+/**
+ * 网络错误分类：not_found / rate_limited / unreachable / http_error。
+ * kind 会被 toRpcFailure 直接当作稳定错误码。
+ */
 export class GhError extends Error {
+  /** 稳定分类码，同时是 REPAIR_META 的键。 */
   kind
+
+  /**
+   * 构造一次网络分类错误。
+   * @param {string} kind - 稳定分类码
+   * @param {string} detail - 面向用户的中文失败描述
+   */
   constructor(kind, detail) {
     super(detail)
     this.name = 'GhError'
@@ -41,10 +51,11 @@ export class GhError extends Error {
 }
 
 /**
- * TLS 证书校验失败的 node/OpenSSL 错误码集。最常见诱因：本机 GitHub 加速/代理
- * 工具（SteamTools、Clash 等）以自签 CA 替换证书——git 通道（ls-remote）经系统
- * 证书库信任它，而 node fetch 用自带 CA 列表、不读系统证书库，于是出现
- * 「check 正常、update/add 下载失败」的分裂现场（2026-09-05 实测归因）。
+ * TLS 证书校验失败的 node/OpenSSL 错误码集。
+ * 最常见诱因：本机 GitHub 加速或代理工具以自签 CA 替换证书。
+ * 例：SteamTools、Clash 这类工具的 GitHub 加速功能。
+ * git 通道经系统证书库信任它，node fetch 用自带 CA 列表、不读系统证书库。
+ * 于是出现「check 正常、update/add 下载失败」的分裂现场。
  */
 const TLS_CERT_CODES = new Set([
   'UNABLE_TO_VERIFY_LEAF_SIGNATURE',
@@ -59,7 +70,10 @@ const TLS_CERT_CODES = new Set([
   'CERT_REJECTED',
 ])
 
-/** fetch 异常 → GhError 归类（入站操作.md 网络分类）：证书类失败点破归因与对策。 */
+/**
+ * fetch 异常 → GhError 归类。
+ * 证书类失败点破归因与对策，其余归 unreachable。
+ */
 export function classifyFetchError(error) {
   const code = error?.cause?.code
   if (typeof code === 'string' && TLS_CERT_CODES.has(code)) {
@@ -88,13 +102,19 @@ async function ghFetch(url, timeoutMs = TIMEOUT_MS) {
   return response
 }
 
-/** GET api.github.com{path} → JSON。 */
+/**
+ * GET api.github.com{path} → JSON。
+ * 失败由 ghFetch 抛 GhError，本函数不重新归类。
+ */
 export async function ghApi(path) {
   const response = await ghFetch(`${API}${path}`)
   return response.json()
 }
 
-/** 下载二进制（zipball）。 */
+/**
+ * 下载二进制，例如 zipball。
+ * 失败由 ghFetch 抛 GhError，本函数不重新归类。
+ */
 export async function ghDownload(url) {
   const response = await ghFetch(url, DOWNLOAD_TIMEOUT_MS)
   return Buffer.from(await response.arrayBuffer())
@@ -147,7 +167,7 @@ export async function resolveRemote(repoSlug, branch) {
 }
 
 /**
- * 仓库 slug 规范化与校验（目录配置与状态存储.md 校验规则）。
+ * 归一并校验仓库 slug，容忍 https 地址与 .git 后缀写法。
  * @throws {SkillManagerError} bad-repo — 归一后仍不满足 owner/repo 文法
  */
 export function normalizeRepoSlug(slug) {
@@ -163,8 +183,8 @@ export function normalizeRepoSlug(slug) {
 }
 
 /**
- * skills.sh 搜索（fetch.py search_skills_sh 语义，15 秒超时）。
- * @throws {SkillManagerError} remote-unreachable（可重试）— 请求失败或非 2xx
+ * skills.sh 搜索：15 秒超时，只保留 GitHub 两段式来源的结果。
+ * @throws {SkillManagerError} remote-unreachable — 请求失败或非 2xx
  */
 export async function searchSkillsSh(query, limit = 20, offset = 0) {
   const params = new URLSearchParams({ q: query, limit: String(limit), offset: String(offset) })
@@ -204,11 +224,11 @@ export async function searchSkillsSh(query, limit = 20, offset = 0) {
 }
 
 /**
- * 下载 zipball 二进制（API 形态 URL）。
- * ⚠ 不用 `github.com/<slug>/archive/…` 主站形态：P9 实测（2026-09-05）本机对
- * github.com:443 直连持续 connect timeout（undici 不随系统代理），而
- * api.github.com 全程可达；API 形态与主站 zipball 内容等价（同 302 到 codeload），
- * 且与 check/repo-skills 同域，共享已被实测验证的连通面。
+ * 下载 zipball 二进制，只走 api.github.com 形态 URL。
+ * why 不用主站 archive 形态：github.com:443 直连可持续 connect timeout，
+ * 因为 undici 不随系统代理；而 api.github.com 全程可达。
+ * 两种形态内容等价，同转 codeload，且与 check/探测共享已被实测的连通面。
+ * 失败由 ghDownload 抛 GhError 透传，kind 是稳定分类。
  */
 export async function fetchZipball(repoSlug, branch) {
   const url = `https://api.github.com/repos/${repoSlug}/zipball/${encodeURIComponent(branch)}`

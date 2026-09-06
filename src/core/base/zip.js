@@ -1,13 +1,8 @@
-// dsh-skill-manager — 极简 ZIP 读取器（零依赖，node:zlib）。
+// zip — 极简 ZIP 读取器：只读、零依赖，只用 node:zlib。
 //
-// 用途：GitHub zipball 与本地 .zip 的 skill 探测/入库（入站操作.md
-// 的 zipball 回退路径）。只读、只支持 store(0)/deflate(8) 与单卷 ZIP，
-// 尺寸与偏移一律以中央目录为准（正确处理流式写入的数据描述符条目）。
-// 实现取舍：相比设计文档初稿的 fflate 依赖，零依赖方案免去 pnpm 安装链，
-// 与仓库既有零依赖插件风格（dsh-guardrails）一致；GitHub zipball 为标准
-// deflate ZIP，本读取器足以覆盖。若未来需要 zip64/加密/分卷，再换库。
-// 错误协议：结构损坏/不支持形态一律抛 SkillManagerError('bad-zipball')，
-// 经 dispatch 落码表模板（REPAIR_META['bad-zipball']）。
+// 边界：只服务 zipball 解包一侧，不支持 zip64、加密与分卷。
+// 形态不支持或结构损坏一律抛 bad-zipball，不做静默降级。
+// 参考：入站操作.md「搜索与仓库探测」。
 
 import { inflateRawSync } from 'node:zlib'
 import { SkillManagerError } from './errors.js'
@@ -31,10 +26,12 @@ function findEocd(buffer) {
 }
 
 /**
- * 解包 ZIP 字节流。
+ * 解包 ZIP 字节流，返回文件名到内容的映射。
+ * 键是正斜杠相对路径；目录条目不产出键。
+ * 尺寸与偏移以中央目录为准，因此兼容流式写入的数据描述符条目。
  * @param {Buffer} buffer
- * @returns {Record<string, Buffer>} 文件名（正斜杠相对路径）→ 内容。
- * @throws {SkillManagerError} bad-zipball — 中央目录缺失/越界/条目损坏/压缩方法不支持
+ * @returns {Record<string, Buffer>} 文件名（正斜杠相对路径）→ 内容
+ * @throws {SkillManagerError} bad-zipball — 中央目录缺失、越界或条目形态不支持
  */
 export function unzip(buffer) {
   const eocd = findEocd(buffer)

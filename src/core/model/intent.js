@@ -1,28 +1,16 @@
-// dsh-skill-manager — 配置即意图领域模型（插件运行时.md「配置即意图」；DSR-015 model 层）。
+// intent — 配置即意图领域模型：settings 段 schema、形式校验与组纯推导。
 //
-// 配置命名空间 skill-manager（settings.yaml 的 skill-manager 段）承载全部
-// 用户意图：
-//   skillsDir      本地 skills 目录（空串 = 未配置）
-//   groups         组集合：{ 组名: { mounts: [{ scope, project }] } }；默认组
-//                  「默认」的 schema 默认挂载 = 全局（原 ensureSeedMounts 语义）
-//   skills         技能意图：{ 目录名: { disabled, group } }
-//   intentMigrated 旧 storage 意图一次性迁移标记（迁移后为 true，UI 不展示）
-// validate 只做形式校验（组名格式/意图形状）；引用完整性（组是否存在、
-// 工作区是否存在）由对账层容忍回落，不在写路径拒绝——settings 写是字段级
-// 原子，跨字段编辑中间态必须放行。
-// P1 搬位说明：本文件 = 原 lib/dir.js 的意图面（settings 命名空间注册与
-// @deepseek-ai import 在 src/adapter/settings.js；fs 原语在 src/core/base/fsys.js）
-// + 原 lib/groups.js 的组纯推导。registerConfig 的 validate 闭包提为
-// validateConfigIntent 具名导出（逻辑逐行未动）。
+// 边界：settings 命名空间注册与 @deepseek-ai 平台 import 在 adapter 层。
+// 参考：插件运行时.md「配置即意图」；DSR-015。
 
 import { statSync } from 'node:fs'
 import { isAbsolute, resolve } from 'node:path'
 import z from 'schemastery'
 import { SkillManagerError } from '../base/errors.js'
 
-/** Settings namespace for the plugin configuration. */
+/** 插件配置的 settings 命名空间名。 */
 export const CONFIG_NS = 'skill-manager'
-/** Configured local skills directory; empty string means unconfigured. */
+/** 本地 skills 目录的配置键名；空串 = 未配置。 */
 export const SKILLS_DIR_FIELD = 'skillsDir'
 /** 虚拟默认组（不落 settings.groups 也始终存在）。 */
 export const DEFAULT_GROUP = '默认'
@@ -56,7 +44,14 @@ const skillIntentSchema = () => z.object({
   group: z.string().default(DEFAULT_GROUP),
 })
 
-/** 配置 schema：全部用户意图字段。默认种子 = 「默认」组挂载全局。 */
+/**
+ * 配置 schema：全部用户意图字段，落在 settings.yaml 的 skill-manager 段。
+ * skillsDir      本地 skills 目录绝对路径；空串 = 未配置。
+ * groups         组集合 { 组名: { mounts: [{ scope, project }] } }。
+ * skills         技能意图 { 目录名: { disabled, group } }。
+ * intentMigrated 存量 storage 意图一次性导入标记；导入后 UI 不展示。
+ * 默认种子 = 「默认」组挂载全局。
+ */
 export const configSchema = () => z.object({
   [SKILLS_DIR_FIELD]: z.string().default(''),
   intentMigrated: z.boolean().default(false),
@@ -65,8 +60,10 @@ export const configSchema = () => z.object({
 })
 
 /**
- * settings 形式校验（原 lib/dir.js registerConfig 内联 validate 闭包；引用完整性
- * 交由对账层容忍）。skillsDir 为空跳过（未配置不拦编辑）。
+ * settings 段形式校验：路径绝对性、组名合法性、意图形状。
+ * skillsDir 为空直接跳过——未配置时不拦编辑。
+ * 引用完整性（组是否存在、工作区是否存在）由对账层容忍回落，写路径不拒绝。
+ * settings 写是字段级原子，跨字段编辑中间态必须放行。
  * @throws {Error} 非绝对路径 / 非法组名（validateGroupName 转抛）/ 意图形状错误
  *   ——settings validate 契约以消息面呈现，不要求稳定码
  */
@@ -74,8 +71,8 @@ export function validateConfigIntent(value) {
   const dir = value?.[SKILLS_DIR_FIELD]
   if (typeof dir !== 'string' || dir === '') return
   if (!isAbsolute(dir)) throw new Error('本地 skill 目录必须是绝对路径')
-  // 「默认」是虚拟组的合法 groups 键（挂载配置载体，见 docs L40/L47）；保留字
-  // 规则约束的是命名组创建/改名路径（客户端预检仍走 validateGroupName 全量）。
+  // 「默认」是虚拟组的合法 groups 键，仅作挂载配置载体。
+  // 保留字规则约束命名组创建/改名路径；客户端预检仍走 validateGroupName 全量。
   for (const name of Object.keys(value?.groups ?? {})) {
     if (name !== DEFAULT_GROUP) validateGroupName(name)
   }
@@ -88,11 +85,10 @@ export function validateConfigIntent(value) {
 }
 
 /**
- * Resolve the currently configured skills directory and require it to exist.
- * The setting is read on every call so live configuration changes apply
- * immediately.
+ * 解析当前配置的 skills 目录并要求其存在，返回解析后的绝对路径。
+ * 每次调用现读配置，目录切换保存后即刻生效。
  * @throws {SkillManagerError} skilldir-unconfigured — 未配置或空串
- * @throws {SkillManagerError} skilldir-missing — 已配置但目录不存在/非目录/不可访问
+ * @throws {SkillManagerError} skilldir-missing — 已配置但目录不存在 / 非目录 / 不可访问
  */
 export function requireDir(scope) {
   const dir = scope.get()[SKILLS_DIR_FIELD]
@@ -120,10 +116,9 @@ export function requireDir(scope) {
   return root
 }
 
-// ---- 组纯推导（原 lib/groups.js，逐行未动）----
-// 组集合与成员归属的唯一事实源是 settings 命名空间（groups 键集合 +
-// skills[dir].group）；本模块只做纯推导，不再操作 storage 表。
-// 虚拟组 默认 不落配置也始终存在。
+// ---- 组纯推导 ----
+// 组集合与成员归属的唯一事实源在 settings 命名空间：groups 键集合 + skills[dir].group。
+// 本段只做纯推导，不再操作 storage 表；虚拟组「默认」不落配置也始终存在。
 
 /**
  * 从配置意图构造组文档：{ 组名: [成员目录名] }（与推导/对账同形）。

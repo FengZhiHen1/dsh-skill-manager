@@ -1,5 +1,7 @@
-// dsh-skill-manager — Client 通用 UI 基元与对话框（插件运行时.md「视图设计」：⋯ 行菜单 DSR-008、遮罩对话框语言）。
-// 按钮/输入复用 ui-primitives 原子组件；icon 为可选装饰，缺失时降级文本箭头，绝不让整卡渲染失败。
+// ui — Client 通用 UI 基元与对话框：按钮、通知条、行菜单、遮罩对话框。
+//
+// 边界：按钮复用 ui-primitives 原子组件；icon 缺失时降级文本箭头，不整卡失败。
+// 参考：插件运行时.md「视图设计」；DSR-008、DSR-017。
 import { useEffect, useRef, useState } from 'react'
 import * as primitives from '@deepseek-ai/dsh-client-ui-primitives'
 import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -13,10 +15,10 @@ export const GhostBtn = (props) => <Button variant="ghost" size="sm" {...props} 
 /** 行内主操作按钮（outline sm）。 */
 export const OutlineBtn = (props) => <Button variant="outline" size="sm" {...props} />
 /**
- * 主行动按钮（primary sm）。⚠ 必须显式声明 variant：宿主 ui-primitives Button
- * 默认 variant='ghost'（rc.1 tag 实测），不传即静默降级成无框无底的文字按钮，
- * 与对话框内 outline 取消按钮同排时呈现"一个有框一个没框"（2026-09-05 走查
- * 反馈）；宿主自身对话框（RiskConfirmation）一律显式 primary。
+ * 主行动按钮（primary sm）：必须显式声明 variant。
+ * 宿主 ui-primitives Button 默认 variant='ghost'，不传即静默降级成无框无底的文字按钮。
+ * 与对话框内 outline 取消按钮同排时，会呈现"一个有框一个没框"。
+ * 宿主自身对话框（RiskConfirmation）一律显式 primary。
  */
 export const PrimaryBtn = (props) => <Button variant="primary" size="sm" {...props} />
 
@@ -27,9 +29,8 @@ export function ErrorLine({ error }) {
 }
 
 /**
- * 操作结果通知条（tone 双态）：ok = 灰字一行；warn = 琥珀警示卡（与非行级警告条
- * 同一视觉语言）。批量语义下单条 skipped/失败必须经 warn 态上屏——历史上只进
- * muted 灰字，用户在长列表里等于无反馈（2026-09-05 走查反馈）。
+ * 操作结果通知条，tone 双态：ok 为灰字一行；warn 为琥珀警示卡，与非行级警告条同一视觉语言。
+ * 批量操作里的单条 skipped/失败必须走 warn 态，否则长列表中用户等于无反馈。
  * @param {{ notice: {tone: 'ok'|'warn', text: string}|null }} props
  */
 export function NoticeBar({ notice }) {
@@ -94,17 +95,14 @@ export const menuCardStyle = {
 export const menuDivider = <div style={{ height: 1, margin: '5px 6px', background: T.borderL2 }} />
 
 /**
- * 行操作 ⋯ 菜单，按来源分化（DSR-017/插件运行时.md L207）：
+ * 行操作 ⋯ 菜单，条目按 skill 来源分化：
  * - github 行：立即更新 / 禁用|启用 / 移动到分组 ▸ / 删除（红色）；
  * - github 缺失行：恢复 / 删除（红色）；
- * - 自有（self/local）行：禁用|启用 / 移动到分组 ▸ ——无更新（无上游）、无删除（C-03 只读红线）。
- *
- * 浮层几何（2026-09-05 走查修复）：主/子菜单一律 position:fixed、锚定触发按钮
- * rect（triggerRect）。此前 absolute 锚在行卡上——宿主设置面板是定高
- * overflow:hidden 容器（.panel），分组过多时菜单超出面板底边被裁掉，且滚动时
- * 浮层随行卡移动，被裁部分永远滚不到。fixed 逃逸裁剪与滚动流：近底自动向上翻、
- * 近左自动向右翻、max-height 按可用空间封顶 + 内部滚动；任何外层滚动/缩放即
- * 关闭（trigger rect 失效，浮层不跟随文档流）。
+ * - self/local 行：禁用|启用 / 移动到分组 ▸，无更新（无上游）、无删除（只读红线）。
+ * 浮层几何：主/子菜单一律 position:fixed，锚定触发按钮的 rect。
+ * 宿主设置面板是定高 overflow:hidden 容器，absolute 会被面板底边裁掉且滚不到。
+ * fixed 逃逸裁剪与滚动流：近底自动向上翻、近左自动向右翻、max-height 按可用空间封顶并内部滚动。
+ * 任何外层滚动/缩放即关闭菜单：trigger rect 失效，浮层不跟随文档流。
  */
 export function RowMenu({ it, groupNames, busy, onAction, onMove, onClose, triggerRect }) {
   const menuRef = useRef(null)

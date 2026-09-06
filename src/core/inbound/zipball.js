@@ -1,7 +1,8 @@
-// dsh-skill-manager — zipball → skill 目录管线（入站操作.md；DSR-015 inbound 层）。
-// 自原 lib/inbound.js 搬位（P1，逻辑未动）：add/upstream/backups 三消费方共用的
-// 解包、定位、临时目录物化与文件树复制原语；nowIso/pathExists/validateInstallName
-// 为入站域共享小工具，统一收在本文件（原为 lib/inbound.js 模块内私有 helper）。
+// zipball — zipball 字节 → skill 目录的管线：解包、定位、临时目录物化与文件树复制。
+//
+// 边界：临时目录生命周期由 withMaterializedSkillDir 持有，失败不漏 tmp。
+// 消费方为 add/upstream/backups；nowIso/pathExists/validateInstallName 为入站共享小工具。
+// 参考：入站操作.md；DSR-015。
 
 import { cp, mkdir, mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -76,9 +77,9 @@ export function skillsFromFiles(files) {
 }
 
 /**
- * 定位 skill 目录。
- * @param {boolean} strict - true 时指定子目录未命中直接报 path-stale（update 用，
- *   防止上游重构后静默装错 skill）；false 回退自动探测（add/repo-skills 用）。
+ * 定位 zipball 内的 skill 目录：指定子目录命中即用，未命中按 strict 报错或自动探测。
+ * @param {boolean} strict - true：指定子目录未命中直接报 path-stale，禁止静默装错（update 用）；
+ *   false：回退自动探测（add/repo-skills 用）。
  * @throws {SkillManagerError} no-skill-md — 仓内无任何 SKILL.md
  * @throws {SkillManagerError} path-stale — strict 且记录路径在上游失效
  * @throws {SkillManagerError} needs-selection — 多候选且无法唯一收窄
@@ -126,14 +127,14 @@ async function materializeSkillDir(payload, subdir, strict = false) {
 }
 
 /**
- * materializeSkillDir 的安全包装：fn 拿到 {tmp, dir} 后，无论成功或抛错，
- * 临时目录必定清理（finally rm force）。fn 须在返回前把内容复制/换装到持久位置。
+ * materializeSkillDir 的安全包装：fn 拿到 {tmp, dir} 后，无论成败临时目录必定清理。
+ * fn 须在返回前把内容复制/换装到持久位置。
+ * 错误语义：materializeSkillDir 与 fn 的异常均继续上抛，本包装只负责 finally 清 tmp。
  * @param {Buffer} payload zipball 字节
  * @param {string|undefined} subdir 仓内子目录（可空 = 自动探测）
  * @param {boolean} strict 传给 locateSkillDir 的严格模式
  * @param {(env: {tmp: string, dir: string}) => Promise<unknown>} fn 消费回调
  * @returns fn 的返回值
- * 错误语义：materializeSkillDir 与 fn 的全部异常原样透传（finally 清 tmp 后继续上抛）。
  */
 export async function withMaterializedSkillDir(payload, subdir, strict, fn) {
   const { tmp, dir } = await materializeSkillDir(payload, subdir, strict)

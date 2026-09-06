@@ -1,7 +1,8 @@
-// dsh-skill-manager — 出库、备份与恢复（入站操作.md；DSR-015 inbound 层；
-// DSR-017：备份事实源 = 备份目录 + _backup_meta.json（无登记表）；remove 一律
-// 自动备份（keepFiles 与本地导入端点一并废止——本地 skill 无版本管理，在
-// 配置目录内自管目录即可，不经插件入库）。
+// backups — 出库、备份列表与恢复：外部 skill 的离库、快照盘点与回库。
+//
+// 边界：备份事实源 = 备份目录 + _backup_meta.json，无登记表；出库一律自动备份。
+// 本地 skill 无版本管理，不经插件入库，由用户在配置目录内自管目录。
+// 参考：入站操作.md「remove」「restore」「backups 列表」；DSR-015。
 
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -14,14 +15,14 @@ import { removeLink } from '../mount/materialize.js'
 import { copyTree, nowIso, pathExists, validateInstallName } from './zipball.js'
 
 /**
- * 出库（入站操作.md「remove」）：仅限 origin:"github"。执行顺序不可交换：
+ * 出库：仅限 origin:"github" 的外部 skill。执行顺序不可交换：
  * 1. 备份整目录（missing 条目无物可备，backup=null）；
- * 2. 摘除该 name 的全部物化链接（归属判据单源扫描全局根与活动工作区根，
- *    指向 <root>/<name> 者删除；真实目录与其他链接一律不动）；
+ * 2. 摘除该 name 的全部物化链接：归属判据单源扫描全局根与活动工作区根；
+ *    指向 <root>/<name> 者删除，真实目录与其他链接一律不动；
  * 3. 删除库内目录；
  * 4. 删除 skills 登记与 check_cache 条目。
  * 不触碰 settings 意图（disabled/group 残留，日后入库自然落回原组）。
- * 任一步失败不回滚已完成步骤；错误消息携带已完成动作供展示（DSR-018 facts 归 P5）。
+ * 任一步失败不回滚已完成步骤，错误消息携带已完成动作供展示。
  * @throws {SkillManagerError} not-removable — 非 github 登记（本地/自研无删除入口）
  */
 export async function remove({ root, store, name, backupsRoot, workspacesById, globalRootPath }) { // quality-floor: ignore docstring-promise 函数体确有 throw SkillManagerError（not-removable 等）；扫描器将参数解构花括号配误作函数体起点致漏看
@@ -35,7 +36,7 @@ export async function remove({ root, store, name, backupsRoot, workspacesById, g
   const src = safePath(root, name)
   const present = await pathExists(src)
 
-  // 1. 备份（一律自动，keepFiles 选项随本地导入一并废止）。
+  // 1. 备份：出库一律自动，无跳过选项。
   let backup = null
   if (present) {
     const id = backupId(name)
@@ -54,8 +55,8 @@ export async function remove({ root, store, name, backupsRoot, workspacesById, g
     }
   }
 
-  // 2. 摘除全部物化链接（与对账同一归属判据：owned 链接中 realpath 指向
-  //    <root>/<name> 者删除；真实目录与其他链接一律不动）。
+  // 2. 摘除全部物化链接：与对账同一归属判据，owned 链接中 realpath
+  //    指向 <root>/<name> 者删除，真实目录与其他链接一律不动。
   const detached = []
   const srcCanonical = await canonicalPath(src)
   for (const link of await scanMountLinks({ root, globalRootPath, workspacesById })) {
@@ -75,10 +76,11 @@ export async function remove({ root, store, name, backupsRoot, workspacesById, g
 }
 
 /**
- * 备份列表（入站操作.md）：事实源 = 备份目录实际内容（无登记表，DSR-017）；
- * 逐个读 _backup_meta.json 补名称与时间。元数据三态分流：缺失（ENOENT）= 正常
- * 降级（has_meta=false，名字回退 id）；损坏/形状非法 = meta_corrupt=true 同样降级
- * 展示（恢复时由 restore 硬拒）；其余读取异常（权限等）抛出转码，不静默。
+ * 备份列表：事实源 = 备份目录实际内容，逐个读 _backup_meta.json 补名称与时间。
+ * 元数据三态分流：
+ * - 缺失（ENOENT）→ 正常降级：has_meta=false，名字回退 id；
+ * - 损坏/形状非法 → meta_corrupt=true，同样降级展示，恢复时由 restore 硬拒；
+ * - 其余读取异常（权限等）→ 转码抛出 backup-meta-invalid，不静默。
  * @throws {SkillManagerError} backup-meta-invalid — 元数据读取异常（非缺失、非损坏）
  */
 export async function backups({ backupsRoot }) { // quality-floor: ignore docstring-promise 函数体确有 throw SkillManagerError（backup-meta-invalid）；扫描器将参数解构花括号配误作函数体起点致漏看
@@ -120,13 +122,13 @@ export async function backups({ backupsRoot }) { // quality-floor: ignore docstr
 }
 
 /**
- * 恢复（入站操作.md「restore」）：id = 不含路径分隔符的普通目录名且目录实际存在
- * （登记存在性检查随 backups 表一并删除）；目标占位拒绝；原子换装就位（剥除
- * _backup_meta.json）；有 record 的 github 快照按登记恢复（剥除意图字段，
- * content_hash 缺失时以恢复结果重算基线）；local/self/无记录 = 本地文件恢复，
- * 不写登记。完成后触发对账。
- * 元数据三态与 backups 同判据：缺失 = 本地恢复；损坏/不可读 = 硬拒（类型无法
- * 判定不静默恢复，避免把 github 快照悄悄恢复成无上游登记）。
+ * 恢复：备份快照经原子换装从备份目录回库，完成后触发对账。
+ * id = 不含路径分隔符的普通目录名，且目录实际存在（存在性只查文件系统）。
+ * 元数据三态与 backups 同判据：缺失 = 本地恢复；损坏或不可读 = 硬拒。
+ * 类型无法判定不静默恢复，避免把 github 快照悄悄恢复成无上游登记。
+ * 就位时剥除 _backup_meta.json；目标已占位一律拒绝。
+ * 有 record 的 github 快照按登记恢复，并剥除意图字段；content_hash 缺失时以恢复结果重算基线。
+ * local/self/无记录 = 本地文件恢复，不写登记。
  * @throws {SkillManagerError} not-found — id 非法或备份目录不存在
  * @throws {SkillManagerError} bad-name — 回退推导名不满足安装名文法
  * @throws {SkillManagerError} backup-meta-invalid — 元数据存在但损坏/形状非法/不可读
@@ -151,7 +153,7 @@ export async function restore({ root, store, id, backupsRoot, ctx }) { // qualit
   } catch (error) {
     if (error instanceof SkillManagerError) throw error
     if (error && error.code === 'ENOENT') {
-      // 无元数据 = 本地文件恢复（入站操作.md 契约内路径）
+      // 无元数据 = 本地文件恢复（契约规定路径，不是错误）
     } else {
       throw new SkillManagerError('backup-meta-invalid', `备份 ${id} 的 _backup_meta.json 不可用（损坏或读取失败），无法判定恢复类型：${error instanceof Error ? error.message : String(error)}`, false, [
         { label: '备份目录', value: src },

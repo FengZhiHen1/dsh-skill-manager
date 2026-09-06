@@ -1,5 +1,7 @@
-// dsh-skill-manager — 管理视图（插件运行时.md「视图设计·管理视图」L197-208：分组优先、两视图、行徽章与 ⋯ 菜单按来源分化）。
-// 列表过滤纯前端（零请求）；行状态徽章来自 overview（走查随快照下发）；挂载失败徽章点击展开明细并复制修复提示词（DSR-018）。
+// manage — 管理视图（与搜索视图并列）：分组范围配置与技能库行列表，破坏性动作一律遮罩确认。
+//
+// 边界：列表纯前端过滤零请求，写入只经 settings 意图与 call 门面；targetKey 推导单源在 derive.js，失效组回落在 service.js。
+// 参考：插件运行时.md「管理视图」、挂载与同步.md「行状态走查」；DSR-008/009/017/018。
 import { useState, useMemo } from 'react'
 import { Input, Pill } from '@deepseek-ai/dsh-client-ui-primitives'
 import { T, S, badgeStyle, cardStyle, cardTitle, noteText, dotStyle, sectionHead, statusPillStyle } from './theme.js'
@@ -8,7 +10,7 @@ import { buildRepairPrompt, RepairCopy, mountIssueRepair } from './repair.jsx'
 
 const ORIGIN_LABEL = { github: 'GitHub', local: '本地', self: '自研' }
 
-/** targetKey（`scope|project`，derive.js 单源）转人话。 */
+/** targetKey（`scope|project` 格式）转成人话显示名。 */
 function targetLabel(target, workspaces) {
   if (typeof target !== 'string') return String(target ?? '—')
   if (target.startsWith('global|')) return 'DSH 全局'
@@ -18,10 +20,10 @@ function targetLabel(target, workspaces) {
 }
 
 /**
- * 管理视图（插件运行时.md「视图设计·管理视图」）：分组优先两段式——
- * 上段组胶囊选择 + 当前组使用范围（settings 直写即时生效），下段技能库行
- * （过滤纯前端零请求；状态徽章来自 overview 走查；⋯ 菜单按来源分化；
- * 出库/删组/取消挂载/覆盖更新等破坏性动作一律遮罩确认，DSR-018 失败带复制入口）。
+ * 管理视图：分组优先两段式，上段组胶囊选择与当前组使用范围，下段技能库行。
+ * 使用范围 settings 直写即时生效；过滤纯前端零请求。
+ * 行状态徽章来自 overview 快照随附的走查；⋯ 菜单按来源分化。
+ * 出库/删组/取消挂载/覆盖更新等破坏性动作一律遮罩确认；失败带复制入口。
  * @param {object} props
  * @param {Function} props.call RPC 门面
  * @param {object} props.data overview 聚合（root/lib/health/workspaces）
@@ -63,7 +65,7 @@ export function ManageView({ call, data, config, reload }) {
   const groupNames = Object.keys(groups)
   const countForGroup = (group) => displaySkills.filter((item) => item.group === group).length
 
-  // 非行级警告条（挂载与同步.md：未匹配工作区引用等推导警告 + 孤儿链接现场），逐条列出并附复制入口。
+  // 非行级警告条：未匹配工作区引用等推导警告与孤儿链接现场，逐条列出并附修复复制入口。
   const warningLines = []
   for (const w of data.lib.warnings || []) {
     warningLines.push({
@@ -108,8 +110,8 @@ export function ManageView({ call, data, config, reload }) {
           }
         }
         const r = await call('update', { names: [name], confirmLocalChanges: payload.confirmLocalChanges === true })
-        // 批量语义下单条失败不断批（ok:true + skipped 结果）——结果必须按 tone 上屏，
-        // 否则用户确认后石沉大海（2026-09-05 走查反馈：skipped 只进灰字等于无反馈）。
+        // 批量语义下单条失败不断批（ok:true + skipped 结果），结果必须按 tone 上屏。
+        // 否则用户确认后石沉大海：skipped 只进灰字等于无反馈。
         const it = (r.results || []).find((item) => item.name === name)
         if (it?.status === 'updated') setNotice({ tone: 'ok', text: `${name} 已更新至 ${String(it.commit || '').slice(0, 7)}（${it.via === 'ls-remote' ? 'git' : 'API'} 通道）` })
         else if (it) setNotice({ tone: 'warn', text: `${name} 更新未完成（${it.status}）：${it.reason || it.error || '未返回原因'}` })
@@ -130,8 +132,9 @@ export function ManageView({ call, data, config, reload }) {
     }
   }
 
-  // ↻ 刷新（DSR-008/017）：重查全部上游 + 执行一次安全对账 + 刷新列表——Agent 按修复提示词修完现场后的收敛入口。
-  // check 与 sync 的结果合并为一条通知（后写覆盖前写会丢上游不可达计数）；有问题一律 warn 态。
+  // ↻ 刷新：重查全部上游，执行一次安全对账，再重读列表。
+  // 这是 Agent 按修复提示词修完现场后的收敛入口。check 与 sync 的结果合并为一条通知：
+  // 分开回写会后写覆盖前写，丢掉上游不可达计数；有问题一律 warn 态。
   const refreshAll = async () => {
     setBusy(true)
     setError(null)
@@ -184,7 +187,7 @@ export function ManageView({ call, data, config, reload }) {
     deleteGroup(name)
     if (groupFilter === name) setGroupFilter('默认')
   }
-  // DSR-009：新建成功后跳到新组，便于立即配置它的使用范围；拒绝（撞名）时错误条已上屏，不再假装成功。
+  // 新建成功后跳到新组，便于立即配置它的使用范围；拒绝（撞名）时错误条已上屏，不再假装成功。
   const doCreateGroup = (name) => {
     if (!config.createGroup(name)) { setCreateOpen(false); return }
     setCreateOpen(false)
@@ -194,7 +197,7 @@ export function ManageView({ call, data, config, reload }) {
 
   return (
     <div style={S.panel}>
-      {/* 分组优先：先选择当前组并配置它的全局/工作区使用范围，再浏览技能库（胶囊行是纯选择器，DSR-009） */}
+      {/* 分组优先：先选择当前组并配置它的全局/工作区使用范围，再浏览技能库；胶囊行是纯选择器 */}
       <div style={{ marginBottom: 14 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
           <span style={sectionHead}>分组</span>
@@ -203,7 +206,7 @@ export function ManageView({ call, data, config, reload }) {
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
           <Pill active={groupFilter === ''} onClick={() => setGroupFilter('')}>{`全部 · ${data.lib.skills.length}`}</Pill>
           <Pill active={groupFilter === '默认'} onClick={() => setGroupFilter('默认')}>{`默认 · ${countForGroup('默认')}`}</Pill>
-          {/* 「默认」上一行已固定渲染（groups 表合法含「默认」键，be9b15d 后不再只是回落伪组），map 中排除防重复 */}
+          {/* 「默认」上一行已固定渲染，map 中排除防重复；groups 表合法含「默认」键，它是真实组非回落伪组 */}
           {groupNames.filter((group) => group !== '默认').map((group) => (
             <Pill key={group} active={groupFilter === group} onClick={() => setGroupFilter(group)}>{`${group} · ${countForGroup(group)}`}</Pill>
           ))}
@@ -219,7 +222,7 @@ export function ManageView({ call, data, config, reload }) {
           : <GroupScopePanel config={config} group={groupFilter} workspaces={data.workspaces} skills={data.lib.skills} onGroupOp={groupOp} />}
       </div>
 
-      {/* 非行级警告条（琥珀晕卡逐条，附修复复制入口，DSR-018） */}
+      {/* 非行级警告条（琥珀晕卡逐条，附修复复制入口） */}
       {warningLines.map((w) => (
         <div key={w.key} style={{ ...badgeStyle(T.warn), borderRadius: 10, padding: '9px 12px', marginBottom: 8, fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={dotStyle(T.warn)} />
@@ -233,7 +236,7 @@ export function ManageView({ call, data, config, reload }) {
         <span style={noteText}>{`${groupFilter === '' ? '全部' : groupFilter} · ${list.length} 个`}</span>
         {data.lib.checkedAt ? <span style={noteText}>{`上游状态检查于 ${fmtCheckedAt(data.lib.checkedAt)}`}</span> : null}
       </div>
-      {/* 库工具条：搜索过滤 / 来源筛选 / ↻ 刷新（本地导入入口随 DSR-017 废止） */}
+      {/* 库工具条：搜索过滤 / 来源筛选 / ↻ 刷新；无本地导入入口 */}
       <div style={{ ...S.toolbar, marginBottom: 12 }}>
         <Input style={{ flex: 1, minWidth: 140 }} placeholder="搜索名称 / 描述…" value={q} onChange={(e) => setQ(e.target.value)} />
         <select style={{ ...S.select, border: 'none', background: T.bgModulePlatform, borderRadius: 8, padding: '5px 10px' }} value={origin} onChange={(e) => setOrigin(e.target.value)}>
@@ -379,7 +382,7 @@ const subRowPanel = {
   border: `1px solid ${T.borderL1}`,
 }
 
-/** DSR-009：新建分组模态（与更新确认同一遮罩语言）；客户端预检长度与保留字，完整规则 Host validate 兜底。 */
+/** 新建分组模态（与更新确认同一遮罩语言）；客户端预检长度与保留字，完整规则 Host validate 兜底。 */
 function CreateGroupDialog({ onCancel, onCreate }) {
   const [name, setName] = useState('')
   const [error, setError] = useState(null)
@@ -416,10 +419,10 @@ function CreateGroupDialog({ onCancel, onCreate }) {
 }
 
 /**
- * 当前分组的使用范围：直接编辑 settings 配置（本地即时生效，后台对账收敛；插件运行时.md L202）。
- * 防御（2026-09-05 走查事故）：取消勾选 = 该组在此目标下全部链接被对账摘除——
- * 波及半径与"点一下复选框"的心智完全不对称，故移除数 >0 时必须经遮罩确认
- * （与更新确认同一对话框语言），明示目标与链接数、强调只删指针不删文件。
+ * 当前分组的使用范围：直写 settings 配置，本地即时生效，后台对账收敛。
+ * 防御：取消勾选会经对账移除该组在此目标下的全部链接。
+ * 波及半径与「点一下复选框」的心智不对称，移除数 >0 时必须走遮罩确认。
+ * 复用更新确认的同一对话框语言，明示目标与链接数，强调只删指针不删文件。
  */
 function GroupScopePanel({ config, group, workspaces, skills, onGroupOp }) {
   const [renaming, setRenaming] = useState(false)
@@ -430,7 +433,7 @@ function GroupScopePanel({ config, group, workspaces, skills, onGroupOp }) {
   const enabled = (scopeKind, workspaceId) => mounts.some((mount) => (
     mount.scope === scopeKind && (scopeKind === 'global' || mount.project === workspaceId)
   ))
-  // 与 Host bundle 同源的失效组回落：组引用不存在 → 成员按「默认」推导（service.js memberships）。
+  // 失效组回落，与 Host 端同源：组引用不存在 → 成员按「默认」推导。
   const effectiveGroup = (skill) => {
     const g = skill.group || '默认'
     return Object.prototype.hasOwnProperty.call(groups, g) ? g : '默认'
@@ -454,7 +457,7 @@ function GroupScopePanel({ config, group, workspaces, skills, onGroupOp }) {
     toggleMount(group, pendingUnmount.scopeKind, pendingUnmount.workspaceId, false)
     setPendingUnmount(null)
   }
-  // 「默认」是虚拟组，不可改名/删除（DSR-009 入口收进本卡）
+  // 「默认」是虚拟组，不可改名/删除；分组操作入口收进本卡
   const manageable = group !== '默认'
   const submitRename = () => {
     const trimmed = newName.trim()

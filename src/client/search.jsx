@@ -1,5 +1,7 @@
-// dsh-skill-manager — 搜索视图（插件运行时.md「视图设计·搜索视图」L210-215；入库唯一通道：skills.sh 搜索或 GitHub 仓库探测）。
-// 本地导入入口随 DSR-017 废止；候选多选批量入库串行逐个 add、单条失败不中断（DSR-008）；搜索失败保留上次结果与原因。
+// search — 搜索视图：入库唯一入口，走 skills.sh 搜索或 GitHub 仓库探测。
+//
+// 边界：候选多选批量入库串行逐个 add，单条失败不中断批次。
+// 参考：插件运行时.md「搜索视图」；DSR-007、DSR-008、DSR-017。
 import { useState } from 'react'
 import { Input } from '@deepseek-ai/dsh-client-ui-primitives'
 import { T, S, badgeStyle, cardStyle, cardTitle, noteText, dotStyle, subCardStyle } from './theme.js'
@@ -20,7 +22,7 @@ export function SearchView({ call, reload }) {
   const [candidates, setCandidates] = useState(null)
   const [selected, setSelected] = useState(new Set())
 
-  // 多候选统一入口：搜索入库与直接添加（探测仓库）共用（DSR-007/008 复选批量入库）
+  // 多候选统一入口：搜索入库与探测仓库共用同一候选列表，复选后批量入库
   const showCandidates = (value) => {
     setCandidates(value)
     setSelected(new Set())
@@ -36,7 +38,7 @@ export function SearchView({ call, reload }) {
       setResults(r)
       setCandidates(null)
     } catch (e) {
-      // 失败保留上一次成功结果与失败原因，不覆盖输入（设计：搜索视图）
+      // 失败时保留上一次成功结果与失败原因，不覆盖当前输入
       setError(e)
     } finally {
       setBusy(false)
@@ -108,7 +110,7 @@ export function SearchView({ call, reload }) {
         />
         <PrimaryBtn onClick={doSearch} disabled={busy || !query.trim()}>{busy ? '搜索中…' : '搜索'}</PrimaryBtn>
       </div>
-      {/* 直接添加 = 探测仓库（DSR-007）；多候选交给候选列表选择。notice 必须是
+      {/* 直接添加的语义是探测仓库；多候选交给候选列表选择。notice 必须是
           {tone,text} 形状——NoticeBar 按对象字段渲染，裸字符串会渲染成空反馈条。 */}
       <DirectAdd call={call} reload={reload} busy={busy} setBusy={setBusy} setError={setError} onCandidates={showCandidates} onAdded={() => setNotice({ tone: 'ok', text: '已入库' })} />
       {error ? <ErrorLine error={error} /> : null}
@@ -180,7 +182,7 @@ export function SearchView({ call, reload }) {
   )
 }
 
-/** DSR-007：直接添加入口语义为「探测仓库」；单候选直接入库，多候选进候选选择列表。 */
+/** 直接添加入口语义为「探测仓库」：单候选直接入库，多候选进候选选择列表。 */
 function DirectAdd({ call, reload, busy, setBusy, setError, onCandidates, onAdded }) {
   const [repo, setRepo] = useState('')
   const [branch, setBranch] = useState('')

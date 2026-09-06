@@ -1,10 +1,7 @@
-// dsh-skill-manager — 对账编排（挂载与同步.md「对账流程」；DSR-015 mount 层；
-// DSR-017 junction-only + 无台账：删除 synced/projects 写回与 save，摘除与孤儿
-// 清扫合并为 findOrphanLinks 单源一步，物化只建 junction）。
+// reconcile — 全量对账：推导期望集 → 摘除孤儿链接 → 物化期望 → 维护 git exclude 托管块。
 //
-// 全量幂等：任意子项失败不影响其他子项，返回 { results, warnings, errors }。
-// 未配置目录由 service 层 requireDir 门禁先行拦截（skilldir-unconfigured），
-// 到这里 root 必已存在。
+// 边界：无状态写回；未配置目录由 service 层 requireDir 门禁先行拦截。
+// 参考：挂载与同步.md「对账流程」；DSR-015/017。
 
 import { readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -17,12 +14,10 @@ const EXCLUDE_END = '# <<< dsh-skill-manager'
 const EXCLUDE_LINE = '/.dsh/skills/'
 
 /**
- * 全量对账（挂载与同步.md「对账流程」）：
- *   1. 推导活动期望集；
- *   2. 归属判据成立（realpath 落在配置目录内）且不在期望集 → 摘除（删除链接）；
- *   3. 物化活动期望（junction-only，空闲建链 / 库内他处重建 / 库外与真实目录报错）；
- *   4. 维护当前活动工作区 .git/info/exclude 托管块。
- * 无状态写回（DSR-017）。
+ * 全量对账：推导期望集 → 摘除孤儿链接（归属本插件且不在期望集）→
+ * 物化期望（junction-only）→ 维护活动工作区的 git exclude 托管块。
+ * 幂等：任意子项失败不影响其他子项，失败进 results。
+ * @returns {Promise<{results: Array, warnings: Array, errors: Array}>}
  */
 export async function reconcile({ root, memberships, mounts, workspacesById, globalRootPath }) {
   const { desired, warnings } = deriveDesired({ memberships, mounts, workspacesById, globalRootPath })
@@ -67,7 +62,7 @@ function projectIdsWithDesired(desired) {
   return ids
 }
 
-/** 为活动工作区根写/清 .git/info/exclude 托管块（挂载与同步.md「Git exclude」）。 */
+/** 为活动工作区根写或清 .git/info/exclude 托管块。 */
 async function updateGitExcludes({ desired, workspacesById }) {
   const wanted = projectIdsWithDesired(desired)
   for (const [workspaceId, ws] of workspacesById) {

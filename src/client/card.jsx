@@ -1,8 +1,7 @@
-// dsh-skill-manager — 插件配置卡片（插件运行时.md「插件配置卡片」L187/L219；设置→插件→skill-manager）。
-// 与 DSH 原生 PluginCard 同构：li > header（名称/描述/未保存标记/折叠箭头）+ body（字段 + footer：放弃/保存）；
-// 数据经 settings 域（ctx.settingsScope）直读直写 skillsDir。Host validate 拒绝时
-// scope.set 照常 resolve（客户端 recover 静默回滚，settings-scope.ts 语义），被拒判定
-// = 写后权威快照 ≠ 尝试值；草稿保留供修改，附修复复制入口（DSR-018）。
+// card — 插件配置卡片：设置 → 插件 → skill-manager 的 skillsDir 编辑入口。
+//
+// 边界：只读写 ctx.settingsScope 的 skillsDir，不走 RPC；布局与原生 PluginCard 同构。
+// 参考：插件运行时.md「插件配置卡片」；DSR-018。
 import { useState, useEffect } from 'react'
 import { T } from './theme.js'
 import { ChevronIcon, GhostBtn } from './ui.jsx'
@@ -46,7 +45,10 @@ export function SkillManagerCard({ scope, uiWorkspace }) {
 
   const dirty = touched && draft !== current
 
-  /** 失败呈现（DSR-018 卡片面）：message 人话 + repair 复制入口；code 区分被拒与传输失败。 */
+  /**
+   * 失败呈现：组装 footer 显示的 message 与可复制的修复提示词。
+   * code 区分被拒与传输失败两类。
+   */
   const reject = (message, code) => ({
     message,
     prompt: buildRepairPrompt({
@@ -128,6 +130,7 @@ export function SkillManagerCard({ scope, uiWorkspace }) {
     }
   }
 
+  // 结构：li > header（名称/描述/未保存标记/折叠箭头）+ 折叠 body（字段区 + footer：放弃/保存）。
   return (
     <li style={{ listStyle: 'none', border: `1px solid ${T.borderL2}`, borderRadius: 12, background: open ? T.bgLayer2 : T.bgLayer3, transition: 'border-color .16s, background .16s' }}>
       <button

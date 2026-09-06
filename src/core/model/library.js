@@ -1,13 +1,17 @@
-// dsh-skill-manager — 库扫描与内容基线（入站操作.md 库扫描；目录配置与状态存储.md skills 表）。
-// frontmatter 解析语义沿用：单行 key: value + 块标量折叠。
-// 库成员 = 配置目录直接子目录中含 SKILL.md 者（纯平铺目录，无 skills/ 子层）。
+// library — 库扫描与内容基线：目录遍历、SKILL.md 解析、目录哈希。
+//
+// 边界：纯读视图，不写 storage；库成员 = 配置目录直接子目录中含 SKILL.md 者。
+// 参考：入站操作.md「库扫描」；目录配置与状态存储.md「storage 域形状」。
 
 import { createHash } from 'node:crypto'
 import { readFile, readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 import { existsDir } from '../base/fsys.js'
 
-/** 解析 SKILL.md frontmatter；无 frontmatter 返回 {}。 */
+/**
+ * 解析 SKILL.md frontmatter；无 frontmatter 返回 {}。
+ * 支持单行 key: value 与块标量折叠（> | >- |-）。
+ */
 export function parseSkillMd(text) {
   if (!text.startsWith('---')) return {}
   const end = text.indexOf('\n---', 3)
@@ -86,7 +90,7 @@ async function skillMdSignature(mdPath) {
  * 读取并解析一个 SKILL.md；带 meta 缓存时按签名复用。
  * @param {string} mdPath SKILL.md 绝对路径
  * @param {Map<string, {sig: string, hasSkillMd: boolean, meta: object}> | undefined} meta
- *        共享 meta 缓存（createSharedCache().meta）；缺省不缓存
+ *        createSharedCache 产出的共享 meta 缓存；缺省不缓存
  * @param {string} key 缓存键（`${root}\0${dir}`）
  */
 async function readSkillMeta(mdPath, meta, key) {
@@ -107,14 +111,16 @@ async function readSkillMeta(mdPath, meta, key) {
 }
 
 /**
- * 库扫描：配置目录直接子目录 + 表中 origin 非 self 但目录缺失的条目（missing）。
- * 列表项：name、dir、description、origin(self/github/local)、hasSkillMd、commit、
- * disabled、missing、group（所属组，虚拟组为 默认）。
- * 纯读视图（与测试契约同断言）：不写 storage——本地目录无版本管理不登记；
- * github 记录缺 content_hash 不回填，基线只由入站路径（add/update）维护。
- * disabled/group 为占位默认值，意图字段由 API 层叠加配置（settings.skills）。
- * @param {object} opts `{ meta }`：meta 为共享缓存（createSharedCache().meta），
- *        未改动目录的解析结果按 stat 签名复用，重扫退化为 N 次 stat。
+ * 库扫描：产出库内每个技能的总览列表，含目录缺失条目。
+ * 成员 = 配置目录直接子目录，纯平铺、无 skills/ 子层。
+ * 表中 github 记录但目录缺失 → 补为 missing 条目，作恢复入口。
+ * 列表项字段：name、dir、description、hasSkillMd、commit、disabled、
+ * missing、group；origin 取 self/github/local，group 为所属组（虚拟组 =「默认」）。
+ * 纯读视图（与测试契约同断言）：不写 storage，本地目录无版本管理不登记。
+ * github 记录缺 content_hash 不回填，基线只由入站路径 add/update 维护。
+ * disabled、group 为占位默认值，意图字段由 API 层叠加 settings.skills。
+ * @param {object} opts 传 opts.meta（createSharedCache 产出的共享缓存）
+ *        → 签名一致即复用解析结果，重扫退化为 N 次 stat。
  */
 export async function scanLibrary(root, store, opts = {}) {
   const records = new Map(store.skillEntries())
@@ -148,8 +154,8 @@ export async function scanLibrary(root, store, opts = {}) {
       group: '默认',
     })
   }
-  // 表中 github 记录但目录缺失的条目 → missing 恢复入口（仅 github 有上游可恢复；
-  // 本地 skill 目录删除即消失，无版本管理）。
+  // 表中 github 记录但目录缺失 → 补为 missing 恢复入口；仅 github 有上游可恢复。
+  // 本地 skill 无版本管理，目录删除即消失。
   for (const [name, record] of records) {
     if (!seen.has(name) && record && record.origin === 'github') {
       items.push({
