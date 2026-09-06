@@ -4,7 +4,7 @@
 // 参考：DSR-015、DSR-017；入站操作.md。
 
 import { basename, dirname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path'
-import { mkdir, mkdtemp, readlink, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, readlink, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { SkillManagerError } from './errors.js'
 
 /**
@@ -24,15 +24,50 @@ export function safePath(root, rel) {
 }
 
 /**
- * 判断路径存在且为目录。
+ * 路径探针（lstat 语义，链接不跟随）：返回 'file'|'dir'|'link'|'other'|'absent'。
+ * 边界：任何 lstat 失败（含权限）一律 'absent'，调用方按「不可见」处理。
+ * 单一原语收敛存在性判定：isLink / lstatExists 等均由此派生，不再各写 try/catch。
+ */
+export async function probePath(path) {
+  let info
+  try {
+    info = await lstat(path)
+  } catch {
+    return 'absent'
+  }
+  if (info.isSymbolicLink()) return 'link'
+  if (info.isDirectory()) return 'dir'
+  if (info.isFile()) return 'file'
+  return 'other'
+}
+
+/**
+ * 路径探针（stat 语义，跟随链接）：返回 'file'|'dir'|'other'|'absent'。
+ * 断链/权限失败一律 'absent'；悬挂链接因此不可见（调用方按可占位处理）。
+ */
+export async function probePathFollow(path) {
+  let info
+  try {
+    info = await stat(path)
+  } catch {
+    return 'absent'
+  }
+  if (info.isDirectory()) return 'dir'
+  if (info.isFile()) return 'file'
+  return 'other'
+}
+
+/**
+ * 判断路径存在且为目录（跟随链接）。
  * 边界：任何 stat 失败一律 false，调用方按非目录处理。
  */
 export async function existsDir(path) {
-  try {
-    return (await stat(path)).isDirectory()
-  } catch {
-    return false
-  }
+  return (await probePathFollow(path)) === 'dir'
+}
+
+/** 路径存在性探测（跟随链接；任何 stat 失败含权限都按不存在——调用方以「可占位」处理）。 */
+export async function pathExists(path) {
+  return (await probePathFollow(path)) !== 'absent'
 }
 
 /** 归一相对路径：去掉首尾分隔符，用于校验与展示。 */
@@ -192,7 +227,10 @@ async function swapDirInner(dest, buildFn) {
     if (hadOld) await rm(moved, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 })
   } finally {
     // 只清 stage：旧目录在失败路径上一律保留，唯一删除点是上方的换装成功后置。
-    await rm(stage, { recursive: true, force: true })
+    // 清理失败不得遮蔽在途的业务错误（finally 抛出会替换原异常）。
+    await rm(stage, { recursive: true, force: true }).catch(() => {
+      // stage 残留由下次 mkdtemp 新目录规避，不阻断调用方
+    })
   }
 }
 

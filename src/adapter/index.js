@@ -66,6 +66,7 @@ export default {
       backupsRoot,
       globalRoot: globalRootPath,
       cache: sharedCache,
+      logger: ctx.logger,
     })
 
     // 对账器：配置变更（settings 直写或外部编辑）经 200ms 防抖后触发 sync 收敛。

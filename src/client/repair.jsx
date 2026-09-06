@@ -40,18 +40,32 @@ export async function copyText(text) {
   return fallback()
 }
 
-/** repair 为 null（transport 失败等）时的本地兜底 facts：保证任何失败都有复制入口。 */
+/** repair 为 null（transport/contract-violation 等）时的本地兜底 facts：保证任何失败都有复制入口。 */
 export function fallbackRepair({ operation = 'unknown', code = 'internal', message = '' } = {}) {
-  const transport = code === 'transport'
+  const LOCAL_META = {
+    transport: {
+      // 措辞诚实化：signal 不透传，Host 写操作不被客户端取消打断——超时后结果未知，不谎称「未送达」
+      summary: '与 Host 的 RPC 通道中断：请求是否到达并生效不可知（客户端取消/超时不打断 Host 侧已开始的写操作）。',
+      recommendation: [
+        '先刷新页面核对现场（技能列表与目录是否已变化），再决定是否重试——非幂等操作直接重试可能重复执行',
+        '确认 DSH 实例仍在运行且本插件已加载',
+        '把本提示词交给本地 Agent：只读检查插件加载日志与 settings.yaml 的 skill-manager 段',
+      ],
+    },
+    'contract-violation': {
+      summary: 'Host 返回的数据形状与契约不符（Host 与 Client 版本不匹配，或 Host 端 Bug）。',
+      recommendation: ['刷新页面重载客户端', '仍复现时核对 Host 与插件包版本一致', '把本提示词交给本地 Agent：只读核对 contract.js 声明与实际返回'],
+    },
+  }
+  const meta = LOCAL_META[code] ?? {
+    summary: `操作失败（${code}）。`,
+    recommendation: ['先原样重试一次（偶发失败可能自行恢复）', '仍失败时把本提示词交给本地 Agent：只读排查上下文涉及的路径与配置；任何写操作须先向用户确认'],
+  }
   return {
     operation,
-    summary: transport
-      ? '与 Host 的 RPC 通道失败：请求未能送达或应答无法解析（可能未认证、被围栏拒绝或实例失联）。'
-      : `操作失败（${code}）。`,
+    summary: meta.summary,
     facts: message ? [{ label: '通道错误', value: message }] : [],
-    recommendation: transport
-      ? ['刷新页面后重试一次（客户端与 Host 版本可能不一致）', '确认 DSH 实例仍在运行且本插件已加载', '把本提示词交给本地 Agent：只读检查插件加载日志与 settings.yaml 的 skill-manager 段']
-      : ['先原样重试一次（偶发失败可能自行恢复）', '仍失败时把本提示词交给本地 Agent：只读排查上下文涉及的路径与配置；任何写操作须先向用户确认'],
+    recommendation: meta.recommendation,
   }
 }
 

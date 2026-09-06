@@ -22,6 +22,7 @@ const stubCtx = (calls = []) => ({ reconcile: async () => { calls.push('reconcil
 test('remove：备份 → 按归属判据摘除全部链接 → 删目录 → 清两表；不触碰 settings 意图', async () => {
   const root = await mkTmp()
   const proj = await mkTmp()
+  const proj2 = await mkTmp()
   const groot = await mkTmp()
   const backupsRoot = await mkTmp()
   try {
@@ -33,19 +34,23 @@ test('remove：备份 → 按归属判据摘除全部链接 → 删目录 → �
     await symlink(join(root, 'pdf'), join(parent, 'pdf'), 'junction')
     await symlink(join(root, 'pdf'), join(groot, 'pdf'), 'junction')
     await store.putCheck('pdf', { checked_at: 't', repo: 'a/b', status: 'up_to_date' })
-    // 他人现场：库外链接同名不动
+    // 他人现场：另一工作区根下同名的库外链接（指向库外目录）不属于本插件，不摘除
     const outside = join(proj, 'outside')
     await mkdir(outside, { recursive: true })
+    const theirsParent = join(proj2, '.dsh', 'skills')
+    await mkdir(theirsParent, { recursive: true })
+    await symlink(outside, join(theirsParent, 'pdf'), 'junction')
 
     const r = await remove({
       root, store, name: 'pdf', backupsRoot,
-      workspacesById: projectWorkspaces([{ id: 'w1', path: proj }]),
+      workspacesById: projectWorkspaces([{ id: 'w1', path: proj }, { id: 'w2', path: proj2 }]),
       globalRootPath: groot,
     })
     assert.equal(r.name, 'pdf')
     assert.equal(r.detached.length, 2) // project 根 + 全局根都摘
     assert.equal(await isLink(join(parent, 'pdf')), false)
     assert.equal(await isLink(join(groot, 'pdf')), false)
+    assert.equal(await isLink(join(theirsParent, 'pdf')), true) // 库外同名链接原样保留
     // 备份落盘（目录 + meta 即事实，无登记表）
     const [id] = await readdir(backupsRoot)
     assert.match(id, /^pdf-\d{8}\d{6}\d{3}$/)
@@ -60,6 +65,7 @@ test('remove：备份 → 按归属判据摘除全部链接 → 删目录 → �
   } finally {
     await cleanup(root)
     await cleanup(proj)
+    await cleanup(proj2)
     await cleanup(groot)
     await cleanup(backupsRoot)
   }
@@ -90,7 +96,8 @@ test('remove：仅限 github 登记；自研/本地目录无删除入口；missi
 
 // ---- 备份列表（目录事实源） ----
 
-test('backups：以目录实际内容为准；无 meta 备份仍展示（has_meta=false，名字回退 id）', async () => {  const backupsRoot = await mkTmp()
+test('backups：以目录实际内容为准；无 meta 备份仍展示（has_meta=false，名字回退 id）', async () => {
+  const backupsRoot = await mkTmp()
   try {
     const withMeta = join(backupsRoot, 'pdf-20260820000000000')
     await mkdir(withMeta, { recursive: true })

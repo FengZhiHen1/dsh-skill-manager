@@ -9,16 +9,7 @@ import { SkillManagerError } from '../base/errors.js'
 import { DEFAULT_GROUP } from '../model/intent.js'
 
 /** 挂载目标键（对账结果、行状态与 UI 共用）。global 的 project 归一为 'global' 段。 */
-export const targetKey = (t) => `${t.scope}|${t.project ?? 'global'}`
-
-/**
- * 全局 skill 根：真实路径由 Host 经 `ctx.dshHomePath('skills')` 注入为 globalRootPath。
- * 无参回退 `~/.dsh/skills` 仅为纯函数测试保留，不得用于真实物化路径。
- */
-export function globalRoot(globalRootPath) {
-  if (typeof globalRootPath === 'string' && globalRootPath !== '') return globalRootPath
-  return join('~', '.dsh', 'skills')
-}
+export const targetKey = (t) => `${t.scope}|${t.project ?? 'global'}` // quality-floor: ignore docstring-promise 箭头函数体无 throw（纯模板拼接）；扫描器把后续函数的 throw 误挂到本符号
 
 /**
  * 活动工作区投影 → { workspaceId -> {workspaceId, title, path} }。

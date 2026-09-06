@@ -140,11 +140,23 @@ export const REPAIR_META = {
     summary: '检测到与上游基线不一致的本地修改，更新被拦在显式确认门禁前。',
     recommendation: ['先 diff/备份本地修改', '确认后勾选「已保存本地修改」重试更新', '想长期保留本地版则不要更新该条目（可改为出库转自管）'],
   },
-  // GhError 网络分类（base/net.js 的 kind 直通错误码）
-  not_found: { summary: 'GitHub 上找不到该仓库/分支/路径。', recommendation: ['核对仓库名与 ref（默认 main）', '私有仓库需 GitHub 授权后重试'] },
-  http_error: { summary: 'GitHub 返回异常 HTTP 状态。', recommendation: ['稍后重试', '持续失败查看 GitHub 状态页与仓库可见性'] },
-  rate_limited: { summary: 'GitHub API 匿名限流（60 次/小时/IP）。', recommendation: ['等待约一小时后重试', '高频使用场景建议配置 GitHub token'] },
+  // GhError 网络分类（base/net.js 的 kind 直通错误码；命名法与 SkillManagerError 统一为连字符）
+  'repo-not-found': { summary: 'GitHub 上找不到该仓库/分支/路径。', recommendation: ['核对仓库名与 ref（默认 main）', '私有仓库需 GitHub 授权后重试'] },
+  'repo-http-error': { summary: 'GitHub 返回异常 HTTP 状态。', recommendation: ['稍后重试', '持续失败查看 GitHub 状态页与仓库可见性'] },
+  'rate-limited': { summary: 'GitHub API 匿名限流（60 次/小时/IP）。', recommendation: ['等待约一小时后重试', '高频使用场景建议配置 GitHub token'] },
   unreachable: { summary: '无法访问 GitHub（网络或代理）。', recommendation: ['检查网络连接/代理设置后重试'] },
+  'contract-violation': {
+    summary: 'RPC 载荷形状与契约不符（Host 与 Client 版本不匹配，或 Host 端 Bug）。',
+    recommendation: ['刷新页面重载客户端', '仍复现时核对 Host 与插件包版本', '把本提示词交给本地 Agent：只读核对 contract.js 声明与实际返回'],
+  },
+  'bad-payload': {
+    summary: '请求参数形状非法（数值越界/类型不符），未触碰任何现场。',
+    recommendation: ['刷新页面后重试（客户端与 Host 版本可能不一致）', '手工调用方核对参数类型与取值范围'],
+  },
+  'registration-failed': {
+    summary: '文件已就位但登记写入失败：库目录内容与登记台账可能不一致。',
+    recommendation: ['点「↻ 刷新」核对行状态', '入库/恢复场景重试会报「已存在」属预期——内容确已就位；用「检查更新」对齐台账', '持续失败时把本提示词交给本地 Agent 只读核对 storage 域文件'],
+  },
   'unknown-endpoint': {
     summary: '调用了未注册的插件端点（一般是客户端与 Host 版本不一致）。',
     recommendation: ['刷新页面重载客户端', '仍复现时核对 Host 与插件包版本'],

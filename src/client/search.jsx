@@ -2,7 +2,7 @@
 //
 // 边界：候选多选批量入库串行逐个 add，单条失败不中断批次。
 // 参考：插件运行时.md「搜索视图」；DSR-007、DSR-008、DSR-017。
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { Input } from '@deepseek-ai/dsh-client-ui-primitives'
 import { T, S, badgeStyle, cardStyle, cardTitle, noteText, dotStyle, subCardStyle } from './theme.js'
 import { GhostBtn, OutlineBtn, PrimaryBtn, ErrorLine, NoticeBar } from './ui.jsx'
@@ -30,7 +30,13 @@ export function SearchView({ call, reload }) {
     setError(null)
   }
 
+  // 在途闸门（ref 而非 state：渲染周期间连击也拦得住）。
+  // 并发闸门收进函数体——Enter、按钮、行内「入库」都走同一路径，闸门不挂 UI 属性。
+  const inFlight = useRef(false)
+
   const doSearch = async () => {
+    if (inFlight.current) return
+    inFlight.current = true
     setBusy(true)
     setError(null)
     try {
@@ -41,16 +47,22 @@ export function SearchView({ call, reload }) {
       // 失败时保留上一次成功结果与失败原因，不覆盖当前输入
       setError(e)
     } finally {
+      inFlight.current = false
       setBusy(false)
     }
   }
-  const addFrom = async (repo, dir) => {
+
+  // 探测入库统一流程（搜索行「入库」与直接添加共用，消除复制漂移）：
+  // repo-skills 探测 → 单候选直接入库（候选路径优先，缺省回退传入 dir）/ 多候选进选择列表。
+  const probeAndAdd = async (repo, ref, dir) => {
+    if (inFlight.current) return
+    inFlight.current = true
     setBusy(true)
     setError(null)
     try {
-      const r = await call('repo-skills', { repo, ref: 'main' })
+      const r = await call('repo-skills', { repo, ref })
       if (r.candidates.length <= 1) {
-        await call('add', { repo, dir: r.candidates[0] && r.candidates[0].path ? r.candidates[0].path : dir, ref: r.branch })
+        await call('add', { repo, dir: r.candidates[0] ? r.candidates[0].path : dir, ref: r.branch })
         setNotice({ tone: 'ok', text: `已入库 ${repo}` })
         reload()
       } else {
@@ -59,13 +71,15 @@ export function SearchView({ call, reload }) {
     } catch (e) {
       setError(e)
     } finally {
+      inFlight.current = false
       setBusy(false)
     }
   }
   const suggestName = (c) => (c.path ? c.path.split('/').pop() : (candidates.repo.split('/')[1] || candidates.repo))
   // 批量入库：串行逐个 add（每次 add 自带入库记录与对账），单条失败不中断批次
   const addSelected = async () => {
-    if (!candidates || selected.size === 0) return
+    if (!candidates || selected.size === 0 || inFlight.current) return
+    inFlight.current = true
     setBusy(true)
     setError(null)
     setNotice(null)
@@ -92,6 +106,7 @@ export function SearchView({ call, reload }) {
         ? { tone: 'warn', text: `已入库 ${done} 个，失败 ${failures.length} 个（逐条原因见下方红字）` }
         : { tone: 'ok', text: `已入库 ${done} 个` })
     } finally {
+      inFlight.current = false
       setBusy(false)
     }
   }
@@ -112,7 +127,7 @@ export function SearchView({ call, reload }) {
       </div>
       {/* 直接添加的语义是探测仓库；多候选交给候选列表选择。notice 必须是
           {tone,text} 形状——NoticeBar 按对象字段渲染，裸字符串会渲染成空反馈条。 */}
-      <DirectAdd call={call} reload={reload} busy={busy} setBusy={setBusy} setError={setError} onCandidates={showCandidates} onAdded={() => setNotice({ tone: 'ok', text: '已入库' })} />
+      <DirectAdd busy={busy} onProbeAdd={probeAndAdd} />
       {error ? <ErrorLine error={error} /> : null}
       {notice ? <NoticeBar notice={notice} /> : null}
       {candidates && (
@@ -172,7 +187,7 @@ export function SearchView({ call, reload }) {
                         <div style={{ fontWeight: 600, color: T.labelPrimary }}>{s.name}</div>
                         <div style={noteText}>{`${s.repo}${s.directory ? ' / ' + s.directory : ''} · 安装 ${s.installs}`}</div>
                       </div>
-                      <OutlineBtn onClick={() => addFrom(s.repo, s.directory)} disabled={busy}>入库</OutlineBtn>
+                      <OutlineBtn onClick={() => probeAndAdd(s.repo, 'main', s.directory)} disabled={busy}>入库</OutlineBtn>
                     </div>
                   ))}
                 </div>
@@ -182,36 +197,33 @@ export function SearchView({ call, reload }) {
   )
 }
 
-/** 直接添加入口语义为「探测仓库」：单候选直接入库，多候选进候选选择列表。 */
-function DirectAdd({ call, reload, busy, setBusy, setError, onCandidates, onAdded }) {
+/** 直接添加入口（纯输入采集）：探测/入库流程逻辑在 SearchView 的 probeAndAdd，本组件不持有请求状态。 */
+function DirectAdd({ busy, onProbeAdd }) {
   const [repo, setRepo] = useState('')
   const [branch, setBranch] = useState('')
-  const add = async () => {
+  const submit = () => {
     if (!repo.trim()) return
-    setBusy(true)
-    setError(null)
-    try {
-      const r = await call('repo-skills', { repo: repo.trim(), ref: branch.trim() || 'main' })
-      if (r.candidates.length <= 1) {
-        await call('add', { repo: repo.trim(), dir: r.candidates[0] && r.candidates[0].path ? r.candidates[0].path : undefined, ref: r.branch })
-        if (onAdded) onAdded()
-        reload()
-      } else {
-        onCandidates({ repo: repo.trim(), branch: r.branch, list: r.candidates })
-      }
-    } catch (e) {
-      setError(e)
-    } finally {
-      setBusy(false)
-    }
+    onProbeAdd(repo.trim(), branch.trim() || 'main', undefined)
   }
   return (
     <div style={{ ...cardStyle, padding: '12px 14px', marginBottom: 14 }}>
       <div style={{ ...cardTitle, marginBottom: 10 }}>从 GitHub 仓库添加</div>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-        <Input style={{ flex: 1 }} placeholder="owner/repo" value={repo} onChange={(e) => setRepo(e.target.value)} />
-        <Input style={{ width: 110 }} placeholder="分支（可选）" value={branch} onChange={(e) => setBranch(e.target.value)} />
-        <OutlineBtn onClick={add} disabled={busy || !repo.trim()}>探测仓库</OutlineBtn>
+        <Input
+          style={{ flex: 1 }}
+          placeholder="owner/repo"
+          value={repo}
+          onChange={(e) => setRepo(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') submit() }}
+        />
+        <Input
+          style={{ width: 110 }}
+          placeholder="分支（可选）"
+          value={branch}
+          onChange={(e) => setBranch(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') submit() }}
+        />
+        <OutlineBtn onClick={submit} disabled={busy || !repo.trim()}>探测仓库</OutlineBtn>
       </div>
     </div>
   )

@@ -12,11 +12,12 @@ export function createSharedCache({ bundleTtlMs = 800, hashTtlMs = 5000 } = {}) 
   return {
     bundleTtlMs,
     hashTtlMs,
-    // bundle 缓存（root 键 + TTL + 单飞）
+    // bundle 缓存（root 键 + TTL + 单飞 + 代际守卫：写后 refresh 递进代际，迟到的旧冷扫不回写）
     bundleRoot: null, // 快照对应的配置目录
-    bundle: null, // { root, items, skills, mounts, memberships, groups, desired, warnings, workspacesById, workspacesView, links, mountRows, orphans }
+    bundle: null, // { root, items, skills, mounts, memberships, desired, warnings, workspacesById, workspacesView, links, mountRows, orphans }
     bundleAt: 0,
     bundleInflight: null,
+    bundleGen: 0, // 写后刷新增一；冷扫写回时比对，防迟到旧扫描覆盖新快照
     // meta 缓存：`${root}\0${dir}` -> { sig, hasSkillMd, meta }，按 stat 签名复用
     meta: new Map(),
     // hash 缓存：dir -> { hash, at }

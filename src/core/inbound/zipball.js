@@ -1,10 +1,11 @@
 // zipball — zipball 字节 → skill 目录的管线：解包、定位、临时目录物化与文件树复制。
 //
 // 边界：临时目录生命周期由 withMaterializedSkillDir 持有，失败不漏 tmp。
-// 消费方为 add/upstream/backups；nowIso/pathExists/validateInstallName 为入站共享小工具。
+// 消费方为 add/upstream/backups；nowIso/validateInstallName 为入站共享小工具，
+// 存在性探测统一走 fsys.probePath 族（pathExists 在 fsys）。
 // 参考：入站操作.md；DSR-015。
 
-import { cp, mkdir, mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { SkillManagerError } from '../base/errors.js'
@@ -25,16 +26,6 @@ export function validateInstallName(name) {
 /** 当前时刻 ISO 字符串（时间戳字段统一入口，便于测试替换）。 */
 export function nowIso() {
   return new Date().toISOString()
-}
-
-/** 路径存在性探测（任何 stat 失败含权限都按不存在——调用方以「可占位」处理）。 */
-export async function pathExists(p) {
-  try {
-    await stat(p)
-    return true
-  } catch {
-    return false
-  }
 }
 
 /**
@@ -119,7 +110,8 @@ async function materializeSkillDir(payload, subdir, strict = false) {
   for (const [rel, data] of Object.entries(files)) {
     if (!rel.startsWith(prefix)) continue
     const target = join(tmp, rel.slice(prefix.length))
-    if (target.includes('__pycache__')) continue
+    // 与 copyTree 同源：按路径段精确跳过 __pycache__（子串匹配会误伤 foo__pycache__.md）
+    if (rel.split('/').includes('__pycache__')) continue
     await mkdir(join(target, '..'), { recursive: true })
     await writeFile(target, data)
   }
@@ -141,7 +133,10 @@ export async function withMaterializedSkillDir(payload, subdir, strict, fn) {
   try {
     return await fn({ tmp, dir })
   } finally {
-    await rm(tmp, { recursive: true, force: true })
+    // 清理失败不得遮蔽在途的业务错误（finally 抛出会替换原异常）。
+    await rm(tmp, { recursive: true, force: true }).catch(() => {
+      // tmp 残留归系统临时目录清理范畴，不阻断调用方
+    })
   }
 }
 

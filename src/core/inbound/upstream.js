@@ -5,9 +5,9 @@
 
 import { SkillManagerError } from '../base/errors.js'
 import { fetchZipball, remoteHead } from '../base/net.js'
-import { atomicSwapDir, safePath } from '../base/fsys.js'
+import { atomicSwapDir, pathExists, safePath } from '../base/fsys.js'
 import { dirHash } from '../model/library.js'
-import { copyTree, nowIso, pathExists, withMaterializedSkillDir } from './zipball.js'
+import { copyTree, nowIso, withMaterializedSkillDir } from './zipball.js'
 
 /**
  * 目录哈希门面：按入参三态分流。
@@ -53,15 +53,18 @@ async function mergeCheckCache(store, results, checkedAt = nowIso()) {
  * 同 repo 同分支只探测一次上游，结果广播给各成员。
  * Side Effects: 检查结果逐条写 check_cache。
  * @param {Function} [hash] - 目录哈希门面，缺省新鲜直算
+ * @param {object} [deps] - 测试注入点：{ lsRemote } 替代 git 子进程回退通道
  */
-export async function check({ root, store, names, hash }) {
+export async function check({ root, store, names, hash, deps = {} }) {
   const entries = new Map(store.skillEntries())
   const targets = names && names.length > 0 ? names : [...entries.keys()]
+  // 只探测目标涉及的 repo：names 指定子集时不对全库发起网络探测。
   const heads = new Map()
-  for (const entry of entries.values()) {
-    if (entry.origin !== 'github' || !entry.repo) continue
+  for (const name of targets) {
+    const entry = entries.get(name)
+    if (!entry || entry.origin !== 'github' || !entry.repo) continue
     const key = `${entry.repo}\0${entry.branch ?? ''}`
-    if (!heads.has(key)) heads.set(key, remoteHead(entry.repo, entry.branch))
+    if (!heads.has(key)) heads.set(key, remoteHead(entry.repo, entry.branch, deps))
   }
   const out = await Promise.all(targets.map(async (name) => {
     const entry = entries.get(name)
@@ -126,12 +129,15 @@ export async function check({ root, store, names, hash }) {
 /**
  * 更新到上游最新版，目录缺失时即使 commit 未变也拉回。
  * 覆盖发生前由 Host 强制要求确认，避免 UI 外的 API 调用绕过风险提示。
- * 单条失败不中断批次，失败原因进该条 reason。
+ * 单条失败不中断批次：失败进该条 status='failed'（与「不适用」的 skipped 显式区分），
+ * 词表闭合为 skipped / updated / failed 三态。
+ * 换装与登记分两段：换装成功但登记失败时该条 failed 且 registrationFailed=true，
+ * 现场与台账的漂移显式上屏，不静默。
  * Side Effects: 原子换装库目录、写 skills 表与 check_cache、changed 时触发对账。
  * @throws {SkillManagerError} local-changes-confirmation-required — 检出本地修改且未显式确认
- * @throws {SkillManagerError} path-stale — 记录的 path_in_repo 在上游已失效
+ * @param {object} [deps] - 测试注入点：{ lsRemote } 替代 git 子进程回退通道
  */
-export async function update({ root, store, names, confirmLocalChanges = false, ctx, hash }) { // quality-floor: ignore docstring-promise 函数体确有 throw SkillManagerError（local-changes-confirmation-required）；扫描器将参数解构花括号配误作函数体起点致漏看
+export async function update({ root, store, names, confirmLocalChanges = false, ctx, hash, deps = {} }) { // quality-floor: ignore docstring-promise 函数体确有 throw SkillManagerError（local-changes-confirmation-required）；扫描器将参数解构花括号配误作函数体起点致漏看
   const entries = new Map(store.skillEntries())
   const targets = names && names.length > 0 ? names : [...entries.keys()]
   const localChanges = []
@@ -167,7 +173,7 @@ export async function update({ root, store, names, confirmLocalChanges = false, 
       results.push({ name, status: 'skipped', reason: '本地导入或自研，无上游' })
       continue
     }
-    const head = await remoteHead(entry.repo, entry.branch)
+    const head = await remoteHead(entry.repo, entry.branch, deps)
     if (!head.sha) {
       results.push({ name, status: 'skipped', reason: `上游不可达（${head.reason}）` })
       continue
@@ -187,20 +193,30 @@ export async function update({ root, store, names, confirmLocalChanges = false, 
       await withMaterializedSkillDir(payload, entry.path_in_repo ?? undefined, true, async ({ tmp }) => {
         await atomicSwapDir(dest, (stage) => copyTree(tmp, stage))
       })
-
+    } catch (error) {
+      // 单条失败不中断批次：status='failed' 与「不适用」的 skipped 显式区分。
+      results.push({ name, status: 'failed', reason: error instanceof Error ? error.message : String(error) })
+      continue
+    }
+    try {
       await store.putSkill(name, {
         ...entry,
         commit: head.sha,
         installed_at: nowIso(),
         content_hash: await hashDir(hash, dest, true),
       })
-      changed = true
-
-      results.push({ name, status: 'updated', commit: head.sha, via: head.via })
     } catch (error) {
-      // 单条失败不中断批次，失败原因进该条 reason。
-      results.push({ name, status: 'skipped', reason: error instanceof Error ? error.message : String(error) })
+      // 换装已成功、登记失败：现场已是新 commit 而台账仍是旧值，漂移必须显式。
+      results.push({
+        name,
+        status: 'failed',
+        reason: `目录已换装至 ${head.sha.slice(0, 7)} 但登记失败（现场与台账可能不一致）：${error instanceof Error ? error.message : String(error)}`,
+        registrationFailed: true,
+      })
+      continue
     }
+    changed = true
+    results.push({ name, status: 'updated', commit: head.sha, via: head.via })
   }
   let sync = null
   if (changed) {

@@ -33,7 +33,9 @@ export function SkillManagerCard({ scope, uiWorkspace }) {
   }, [scope])
 
   // 首次 Host 应答前不渲染「未配置」，也不允许写入（避免读前写）。
-  const ready = Boolean(snap) && snap.status !== 'loading'
+  // 就绪判据与 section.jsx 统一：仅 'ready' 为就绪（第三态出现时两处结论一致）。
+  // snap 由 useState 初始化器保证非空，无需空值守卫。
+  const ready = snap.status === 'ready'
   const section = snap.value && typeof snap.value === 'object' ? snap.value : {}
   const current = typeof section.skillsDir === 'string' ? section.skillsDir : ''
   const overridden = Boolean(snap && snap.user && typeof snap.user === 'object' && 'skillsDir' in snap.user)

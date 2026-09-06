@@ -60,7 +60,6 @@ export const S = {
   row: { display: 'flex', alignItems: 'center', gap: '8px', padding: '9px 12px', border: `1px solid ${T.borderL1}`, borderRadius: 12, marginBottom: 8, fontSize: 13 },
   select: { padding: '4px 8px', borderRadius: 6, border: `1px solid ${T.borderL1}`, background: T.bgBase, color: T.labelPrimary, fontSize: 12 },
   panel: { padding: '10px 12px' },
-  error: { color: T.error, fontSize: 12, padding: '6px 8px' },
   muted: { color: T.labelSecondary, fontSize: 12 },
   guide: { padding: '24px 16px', textAlign: 'center', color: T.labelSecondary, fontSize: 13 },
   dangerText: { color: T.error },

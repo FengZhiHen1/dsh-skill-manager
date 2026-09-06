@@ -1,29 +1,54 @@
 // 修复提示词 facts（DSR-018/R-17/AC-15）：稳定 code 全量登记 repair 模板、
 // buildRepair 组装形状、dispatch 端到端携带（operation=端点名、动态 facts
-// 不被吞）。Client 统一模板（P6）消费此形状。
+// 不被吞）。Client 统一模板消费此形状。
+//
+// 码表维护是机械交叉而非手抄清单：从 src 源码提取全部抛出码
+// （new SkillManagerError / new GhError / buildRepair 字面量），与
+// REPAIR_META 键做双向集合相等——漏登或表外抛码两边都红。
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readdir, readFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { REPAIR_META, SkillManagerError, buildRepair } from '../src/core/base/errors.js'
 import { createDispatch } from '../src/core/service.js'
 
-// 与源码 `new SkillManagerError('code'…)` 及 net.js GhError kind 同步维护的
-// 稳定码全集（漏登 = 本测试红）。
-const STABLE_CODES = [
-  'skilldir-unconfigured', 'skilldir-missing', 'workspace-unavailable',
-  'bad-name', 'bad-path', 'bad-repo', 'bad-group-name', 'bad-zipball',
-  'name-conflict', 'needs-selection', 'no-skill-md', 'not-found',
-  'not-removable', 'already-installed', 'path-stale', 'remote-unreachable',
-  'target-occupied', 'wrong-target', 'write-failed', 'backup-meta-invalid',
-  'local-changes-confirmation-required',
-  'not_found', 'http_error', 'rate_limited', 'unreachable',
-  'unknown-endpoint',
-]
+const SRC_CORE = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'core')
 
-test('REPAIR_META：全部稳定码登记在案且模板齐形', () => {
-  for (const code of STABLE_CODES) {
-    const meta = REPAIR_META[code]
-    assert.ok(meta, `稳定码 ${code} 缺 repair 模板`)
+/** 递归收集 src/core 下全部 .js 文件。 */
+async function collectJs(dir) {
+  const out = []
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    const p = join(dir, entry.name)
+    if (entry.isDirectory()) out.push(...await collectJs(p))
+    else if (entry.name.endsWith('.js')) out.push(p)
+  }
+  return out
+}
+
+/** 从源码提取稳定错误码全集（抛出点 + buildRepair 字面量，'internal' 走通用模板不在表内）。 */
+async function extractThrownCodes() {
+  const codes = new Set()
+  for (const file of await collectJs(SRC_CORE)) {
+    const text = await readFile(file, 'utf8')
+    for (const re of [/new SkillManagerError\(\s*'([^']+)'/g, /new GhError\(\s*'([^']+)'/g, /buildRepair\(\s*'([^']+)'/g]) {
+      for (const m of text.matchAll(re)) {
+        if (m[1] !== 'internal') codes.add(m[1])
+      }
+    }
+  }
+  return codes
+}
+
+test('码表机械交叉：抛出码全集与 REPAIR_META 键双向相等（漏登/表外抛码都红）', async () => {
+  const thrown = await extractThrownCodes()
+  const tabled = new Set(Object.keys(REPAIR_META))
+  assert.deepEqual([...tabled].sort(), [...thrown].sort(), 'REPAIR_META 键集与源码抛出码集不一致（双向核对）')
+})
+
+test('REPAIR_META：全部模板齐形（summary 一句 + 非空 recommendation）', () => {
+  for (const [code, meta] of Object.entries(REPAIR_META)) {
     assert.ok(typeof meta.summary === 'string' && meta.summary.length > 8, `${code} summary 无效`)
     assert.ok(Array.isArray(meta.recommendation) && meta.recommendation.length > 0, `${code} recommendation 缺失`)
     assert.ok(meta.recommendation.every((s) => typeof s === 'string' && s !== ''), `${code} recommendation 含空串`)

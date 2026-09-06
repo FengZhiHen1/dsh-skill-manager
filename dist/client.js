@@ -37,6 +37,222 @@ __export(index_exports, {
 });
 module.exports = __toCommonJS(index_exports);
 
+// src/core/model/contract.js
+var ContractError = class extends Error {
+  /**
+   * @param {string} path 失配字段路径（如 value.lib.skills[2].dir）
+   * @param {string} expect 期望形状描述
+   * @param {unknown} actual 实际值
+   */
+  constructor(path, expect, actual) {
+    const got = actual === null ? "null" : Array.isArray(actual) ? "array" : typeof actual;
+    super(`RPC \u8F7D\u8377\u5951\u7EA6\u8FDD\u4F8B @${path}\uFF1A\u671F\u671B ${expect}\uFF0C\u5B9E\u9645 ${got}`);
+    this.name = "ContractError";
+    this.path = path;
+  }
+};
+function need(cond, path, expect, actual) {
+  if (!cond) throw new ContractError(path, expect, actual);
+}
+function needObj(v, path) {
+  need(v !== null && typeof v === "object" && !Array.isArray(v), path, "object", v);
+}
+function needStr(v, path) {
+  need(typeof v === "string", path, "string", v);
+}
+function needBool(v, path) {
+  need(typeof v === "boolean", path, "boolean", v);
+}
+function needNum(v, path) {
+  need(typeof v === "number" && Number.isFinite(v), path, "number", v);
+}
+function needStrOrNull(v, path) {
+  need(v === null || typeof v === "string", path, "string|null", v);
+}
+function needBoolOrNull(v, path) {
+  need(v === null || typeof v === "boolean", path, "boolean|null", v);
+}
+function needArr(v, path) {
+  need(Array.isArray(v), path, "array", v);
+  return v;
+}
+function needOneOf(v, path, allowed) {
+  need(allowed.includes(v), path, allowed.join(" | "), v);
+}
+function opt(v, path, check) {
+  if (v !== void 0) check(v, path);
+}
+function checkRecordShape(r, path) {
+  needObj(r, path);
+  needStr(r.checked_at, `${path}.checked_at`);
+  needStr(r.repo, `${path}.repo`);
+  needStrOrNull(r.branch, `${path}.branch`);
+  needStrOrNull(r.current, `${path}.current`);
+  needStrOrNull(r.latest, `${path}.latest`);
+  needStr(r.status, `${path}.status`);
+  needStrOrNull(r.reason, `${path}.reason`);
+  needStrOrNull(r.via, `${path}.via`);
+  needBool(r.updatable, `${path}.updatable`);
+  needBool(r.reachable, `${path}.reachable`);
+  needBoolOrNull(r.locally_modified, `${path}.locally_modified`);
+  needBool(r.baseline_missing, `${path}.baseline_missing`);
+  needBool(r.missing, `${path}.missing`);
+}
+function mountRowShape(row, path) {
+  needObj(row, path);
+  needStr(row.target, `${path}.target`);
+  needStr(row.path, `${path}.path`);
+  needStr(row.issue, `${path}.issue`);
+}
+function skillItemShape(it, path) {
+  needObj(it, path);
+  needStr(it.name, `${path}.name`);
+  needStr(it.dir, `${path}.dir`);
+  needStr(it.description, `${path}.description`);
+  needOneOf(it.origin, `${path}.origin`, ["github", "local", "self"]);
+  needBool(it.hasSkillMd, `${path}.hasSkillMd`);
+  needStrOrNull(it.commit, `${path}.commit`);
+  needBool(it.missing, `${path}.missing`);
+  needBool(it.disabled, `${path}.disabled`);
+  needStr(it.group, `${path}.group`);
+  needBool(it.nameVisible, `${path}.nameVisible`);
+  needArr(it.targets, `${path}.targets`).forEach((t, i) => needStr(t, `${path}.targets[${i}]`));
+  needArr(it.mount, `${path}.mount`).forEach((row, i) => mountRowShape(row, `${path}.mount[${i}]`));
+  if (it.upstream !== null) checkRecordShape(it.upstream, `${path}.upstream`);
+}
+function workspaceShape(ws, path) {
+  needObj(ws, path);
+  needStr(ws.workspaceId, `${path}.workspaceId`);
+  needStr(ws.title, `${path}.title`);
+  needStr(ws.path, `${path}.path`);
+  needNum(ws.mountCount, `${path}.mountCount`);
+}
+function syncResultShape(s, path) {
+  needObj(s, path);
+  needArr(s.results, `${path}.results`).forEach((r, i) => needObj(r, `${path}.results[${i}]`));
+  needArr(s.warnings, `${path}.warnings`).forEach((w, i) => needStr(w, `${path}.warnings[${i}]`));
+  needArr(s.errors, `${path}.errors`).forEach((e, i) => needObj(e, `${path}.errors[${i}]`));
+}
+function checkItemShape(r, path) {
+  needObj(r, path);
+  needStr(r.name, `${path}.name`);
+  needOneOf(r.status, `${path}.status`, ["skipped", "updatable", "up_to_date", "check_failed"]);
+  needStrOrNull(r.reason ?? null, `${path}.reason`);
+  if (r.status === "skipped") return;
+  needStr(r.repo, `${path}.repo`);
+  needStrOrNull(r.branch, `${path}.branch`);
+  needStrOrNull(r.current, `${path}.current`);
+  needStrOrNull(r.latest, `${path}.latest`);
+  needStrOrNull(r.via, `${path}.via`);
+  needBool(r.updatable, `${path}.updatable`);
+  needBool(r.reachable, `${path}.reachable`);
+  needBoolOrNull(r.locally_modified, `${path}.locally_modified`);
+  needBool(r.baseline_missing, `${path}.baseline_missing`);
+  needBool(r.missing, `${path}.missing`);
+}
+function updateItemShape(r, path) {
+  needObj(r, path);
+  needStr(r.name, `${path}.name`);
+  needOneOf(r.status, `${path}.status`, ["skipped", "updated", "failed"]);
+  opt(r.reason, `${path}.reason`, needStr);
+  opt(r.commit, `${path}.commit`, needStr);
+  opt(r.via, `${path}.via`, needStrOrNull);
+  opt(r.upToDate, `${path}.upToDate`, needBool);
+  opt(r.registrationFailed, `${path}.registrationFailed`, needBool);
+}
+var PARSERS = {
+  overview(v, path) {
+    needObj(v, path);
+    needStr(v.root, `${path}.root`);
+    needObj(v.lib, `${path}.lib`);
+    needArr(v.lib.skills, `${path}.lib.skills`).forEach((it, i) => skillItemShape(it, `${path}.lib.skills[${i}]`));
+    needArr(v.lib.warnings, `${path}.lib.warnings`).forEach((w, i) => needStr(w, `${path}.lib.warnings[${i}]`));
+    needStrOrNull(v.lib.checkedAt, `${path}.lib.checkedAt`);
+    needObj(v.health, `${path}.health`);
+    needArr(v.health.issues, `${path}.health.issues`).forEach((issue, i) => {
+      needObj(issue, `${path}.health.issues[${i}]`);
+      needStr(issue.name, `${path}.health.issues[${i}].name`);
+      needStr(issue.target, `${path}.health.issues[${i}].target`);
+      needStr(issue.issue, `${path}.health.issues[${i}].issue`);
+    });
+    needArr(v.workspaces, `${path}.workspaces`).forEach((ws, i) => workspaceShape(ws, `${path}.workspaces[${i}]`));
+  },
+  warm(v, path) {
+    needObj(v, path);
+    needBool(v.ok, `${path}.ok`);
+  },
+  backups(v, path) {
+    needArr(v, path).forEach((b, i) => {
+      needObj(b, `${path}[${i}]`);
+      needStr(b.id, `${path}[${i}].id`);
+      needStr(b.name, `${path}[${i}].name`);
+      needStr(b.time, `${path}[${i}].time`);
+      needBool(b.has_meta, `${path}[${i}].has_meta`);
+      needBool(b.meta_corrupt, `${path}[${i}].meta_corrupt`);
+    });
+  },
+  search(v, path) {
+    needObj(v, path);
+    needStr(v.query, `${path}.query`);
+    needNum(v.count, `${path}.count`);
+    needArr(v.skills, `${path}.skills`).forEach((s, i) => {
+      needObj(s, `${path}.skills[${i}]`);
+      needStr(s.key, `${path}.skills[${i}].key`);
+      needStr(s.name, `${path}.skills[${i}].name`);
+      needStr(s.directory, `${path}.skills[${i}].directory`);
+      needStr(s.repo, `${path}.skills[${i}].repo`);
+      needNum(s.installs, `${path}.skills[${i}].installs`);
+      needStr(s.url, `${path}.skills[${i}].url`);
+    });
+  },
+  "repo-skills"(v, path) {
+    needObj(v, path);
+    needStr(v.repo, `${path}.repo`);
+    needStr(v.branch, `${path}.branch`);
+    needStr(v.commit, `${path}.commit`);
+    needOneOf(v.via, `${path}.via`, ["api", "zipball"]);
+    needArr(v.candidates, `${path}.candidates`).forEach((c, i) => {
+      needObj(c, `${path}.candidates[${i}]`);
+      needStr(c.path, `${path}.candidates[${i}].path`);
+      needStr(c.name, `${path}.candidates[${i}].name`);
+    });
+  },
+  add(v, path) {
+    needObj(v, path);
+    needStr(v.name, `${path}.name`);
+    needStr(v.repo, `${path}.repo`);
+    needStr(v.branch, `${path}.branch`);
+    needStr(v.commit, `${path}.commit`);
+    syncResultShape(v.sync, `${path}.sync`);
+  },
+  check(v, path) {
+    needArr(v, path).forEach((r, i) => checkItemShape(r, `${path}[${i}]`));
+  },
+  update(v, path) {
+    needObj(v, path);
+    needArr(v.results, `${path}.results`).forEach((r, i) => updateItemShape(r, `${path}.results[${i}]`));
+    if (v.sync !== null) syncResultShape(v.sync, `${path}.sync`);
+  },
+  remove(v, path) {
+    needObj(v, path);
+    needStr(v.name, `${path}.name`);
+    needStrOrNull(v.backup, `${path}.backup`);
+    needArr(v.detached, `${path}.detached`).forEach((d, i) => needStr(d, `${path}.detached[${i}]`));
+  },
+  restore(v, path) {
+    needObj(v, path);
+    needStr(v.name, `${path}.name`);
+    if (v.sync !== null) syncResultShape(v.sync, `${path}.sync`);
+  },
+  sync: syncResultShape
+};
+function parseEndpointPayload(endpoint, value) {
+  const parse = PARSERS[endpoint];
+  if (!parse) throw new ContractError("value", "\u5DF2\u767B\u8BB0\u7AEF\u70B9", endpoint);
+  parse(value, "value");
+  return value;
+}
+
 // src/client/api.js
 var CHANNEL = "/skill-manager";
 var API_TIMEOUT_MS = 15e3;
@@ -59,8 +275,8 @@ var RpcError = class extends Error {
 };
 function toTransportError(error, endpoint, budgetMs = API_TIMEOUT_MS) {
   if (error instanceof RpcError) return error;
-  const aborted = error instanceof DOMException ? error.name === "AbortError" : Boolean(error && error.name === "AbortError");
-  const message = aborted ? `\u8C03\u7528 ${endpoint} \u8D85\u65F6\uFF08${budgetMs / 1e3}s\uFF09\uFF1AHost \u53EF\u80FD\u6B63\u5FD9\u6216\u5DF2\u5931\u8054\u3002` : `\u4E0E Host \u7684 RPC \u901A\u9053\u5931\u8D25\uFF08${endpoint}\uFF09\uFF1A${error && error.message ? error.message : String(error)}`;
+  const aborted = Boolean(error && (error.name === "AbortError" || error.name === "TimeoutError"));
+  const message = aborted ? `\u8C03\u7528 ${endpoint} \u8D85\u65F6\uFF08${budgetMs / 1e3}s\uFF09\uFF1A\u7ED3\u679C\u672A\u77E5\u2014\u2014signal \u4E0D\u900F\u4F20\uFF0CHost \u5199\u64CD\u4F5C\u4E0D\u88AB\u5BA2\u6237\u7AEF\u53D6\u6D88\u6253\u65AD\uFF0C\u8BF7\u5237\u65B0\u6838\u5BF9\u73B0\u573A\u540E\u518D\u51B3\u5B9A\u662F\u5426\u91CD\u8BD5\u3002` : `\u4E0E Host \u7684 RPC \u901A\u9053\u5931\u8D25\uFF08${endpoint}\uFF09\uFF1A${error && error.message ? error.message : String(error)}`;
   const err = new RpcError(message, { code: "transport", retryable: true, repair: null });
   return err;
 }
@@ -77,7 +293,16 @@ function createCall(ctx) {
     } finally {
       clearTimeout(timer);
     }
-    if (result && typeof result === "object" && result.ok === true) return result.value;
+    if (result && typeof result === "object" && result.ok === true) {
+      try {
+        return parseEndpointPayload(endpoint, result.value);
+      } catch (error) {
+        if (error instanceof ContractError) {
+          throw new RpcError(error.message, { code: "contract-violation", retryable: false, repair: null });
+        }
+        throw error;
+      }
+    }
     const failure = result && typeof result === "object" && result.error ? result.error : {};
     const details = failure.details && typeof failure.details === "object" ? failure.details : {};
     throw new RpcError(failure.message || "\u8BF7\u6C42\u5931\u8D25", {
@@ -132,7 +357,6 @@ var S = {
   row: { display: "flex", alignItems: "center", gap: "8px", padding: "9px 12px", border: `1px solid ${T.borderL1}`, borderRadius: 12, marginBottom: 8, fontSize: 13 },
   select: { padding: "4px 8px", borderRadius: 6, border: `1px solid ${T.borderL1}`, background: T.bgBase, color: T.labelPrimary, fontSize: 12 },
   panel: { padding: "10px 12px" },
-  error: { color: T.error, fontSize: 12, padding: "6px 8px" },
   muted: { color: T.labelSecondary, fontSize: 12 },
   guide: { padding: "24px 16px", textAlign: "center", color: T.labelSecondary, fontSize: 13 },
   dangerText: { color: T.error },
@@ -414,12 +638,30 @@ async function copyText(text) {
   return fallback();
 }
 function fallbackRepair({ operation = "unknown", code = "internal", message = "" } = {}) {
-  const transport = code === "transport";
+  const LOCAL_META = {
+    transport: {
+      // 措辞诚实化：signal 不透传，Host 写操作不被客户端取消打断——超时后结果未知，不谎称「未送达」
+      summary: "\u4E0E Host \u7684 RPC \u901A\u9053\u4E2D\u65AD\uFF1A\u8BF7\u6C42\u662F\u5426\u5230\u8FBE\u5E76\u751F\u6548\u4E0D\u53EF\u77E5\uFF08\u5BA2\u6237\u7AEF\u53D6\u6D88/\u8D85\u65F6\u4E0D\u6253\u65AD Host \u4FA7\u5DF2\u5F00\u59CB\u7684\u5199\u64CD\u4F5C\uFF09\u3002",
+      recommendation: [
+        "\u5148\u5237\u65B0\u9875\u9762\u6838\u5BF9\u73B0\u573A\uFF08\u6280\u80FD\u5217\u8868\u4E0E\u76EE\u5F55\u662F\u5426\u5DF2\u53D8\u5316\uFF09\uFF0C\u518D\u51B3\u5B9A\u662F\u5426\u91CD\u8BD5\u2014\u2014\u975E\u5E42\u7B49\u64CD\u4F5C\u76F4\u63A5\u91CD\u8BD5\u53EF\u80FD\u91CD\u590D\u6267\u884C",
+        "\u786E\u8BA4 DSH \u5B9E\u4F8B\u4ECD\u5728\u8FD0\u884C\u4E14\u672C\u63D2\u4EF6\u5DF2\u52A0\u8F7D",
+        "\u628A\u672C\u63D0\u793A\u8BCD\u4EA4\u7ED9\u672C\u5730 Agent\uFF1A\u53EA\u8BFB\u68C0\u67E5\u63D2\u4EF6\u52A0\u8F7D\u65E5\u5FD7\u4E0E settings.yaml \u7684 skill-manager \u6BB5"
+      ]
+    },
+    "contract-violation": {
+      summary: "Host \u8FD4\u56DE\u7684\u6570\u636E\u5F62\u72B6\u4E0E\u5951\u7EA6\u4E0D\u7B26\uFF08Host \u4E0E Client \u7248\u672C\u4E0D\u5339\u914D\uFF0C\u6216 Host \u7AEF Bug\uFF09\u3002",
+      recommendation: ["\u5237\u65B0\u9875\u9762\u91CD\u8F7D\u5BA2\u6237\u7AEF", "\u4ECD\u590D\u73B0\u65F6\u6838\u5BF9 Host \u4E0E\u63D2\u4EF6\u5305\u7248\u672C\u4E00\u81F4", "\u628A\u672C\u63D0\u793A\u8BCD\u4EA4\u7ED9\u672C\u5730 Agent\uFF1A\u53EA\u8BFB\u6838\u5BF9 contract.js \u58F0\u660E\u4E0E\u5B9E\u9645\u8FD4\u56DE"]
+    }
+  };
+  const meta = LOCAL_META[code] ?? {
+    summary: `\u64CD\u4F5C\u5931\u8D25\uFF08${code}\uFF09\u3002`,
+    recommendation: ["\u5148\u539F\u6837\u91CD\u8BD5\u4E00\u6B21\uFF08\u5076\u53D1\u5931\u8D25\u53EF\u80FD\u81EA\u884C\u6062\u590D\uFF09", "\u4ECD\u5931\u8D25\u65F6\u628A\u672C\u63D0\u793A\u8BCD\u4EA4\u7ED9\u672C\u5730 Agent\uFF1A\u53EA\u8BFB\u6392\u67E5\u4E0A\u4E0B\u6587\u6D89\u53CA\u7684\u8DEF\u5F84\u4E0E\u914D\u7F6E\uFF1B\u4EFB\u4F55\u5199\u64CD\u4F5C\u987B\u5148\u5411\u7528\u6237\u786E\u8BA4"]
+  };
   return {
     operation,
-    summary: transport ? "\u4E0E Host \u7684 RPC \u901A\u9053\u5931\u8D25\uFF1A\u8BF7\u6C42\u672A\u80FD\u9001\u8FBE\u6216\u5E94\u7B54\u65E0\u6CD5\u89E3\u6790\uFF08\u53EF\u80FD\u672A\u8BA4\u8BC1\u3001\u88AB\u56F4\u680F\u62D2\u7EDD\u6216\u5B9E\u4F8B\u5931\u8054\uFF09\u3002" : `\u64CD\u4F5C\u5931\u8D25\uFF08${code}\uFF09\u3002`,
+    summary: meta.summary,
     facts: message ? [{ label: "\u901A\u9053\u9519\u8BEF", value: message }] : [],
-    recommendation: transport ? ["\u5237\u65B0\u9875\u9762\u540E\u91CD\u8BD5\u4E00\u6B21\uFF08\u5BA2\u6237\u7AEF\u4E0E Host \u7248\u672C\u53EF\u80FD\u4E0D\u4E00\u81F4\uFF09", "\u786E\u8BA4 DSH \u5B9E\u4F8B\u4ECD\u5728\u8FD0\u884C\u4E14\u672C\u63D2\u4EF6\u5DF2\u52A0\u8F7D", "\u628A\u672C\u63D0\u793A\u8BCD\u4EA4\u7ED9\u672C\u5730 Agent\uFF1A\u53EA\u8BFB\u68C0\u67E5\u63D2\u4EF6\u52A0\u8F7D\u65E5\u5FD7\u4E0E settings.yaml \u7684 skill-manager \u6BB5"] : ["\u5148\u539F\u6837\u91CD\u8BD5\u4E00\u6B21\uFF08\u5076\u53D1\u5931\u8D25\u53EF\u80FD\u81EA\u884C\u6062\u590D\uFF09", "\u4ECD\u5931\u8D25\u65F6\u628A\u672C\u63D0\u793A\u8BCD\u4EA4\u7ED9\u672C\u5730 Agent\uFF1A\u53EA\u8BFB\u6392\u67E5\u4E0A\u4E0B\u6587\u6D89\u53CA\u7684\u8DEF\u5F84\u4E0E\u914D\u7F6E\uFF1B\u4EFB\u4F55\u5199\u64CD\u4F5C\u987B\u5148\u5411\u7528\u6237\u786E\u8BA4"]
+    recommendation: meta.recommendation
   };
 }
 function buildRepairPrompt({ root, code, message, repair }) {
@@ -531,11 +773,8 @@ function ManageView({ call, data, config, reload }) {
   const [busy, setBusy] = (0, import_react3.useState)(false);
   const [error, setError] = (0, import_react3.useState)(null);
   const [notice, setNotice] = (0, import_react3.useState)(null);
-  const [pendingUpdate, setPendingUpdate] = (0, import_react3.useState)(null);
-  const [pendingRemove, setPendingRemove] = (0, import_react3.useState)(null);
-  const [pendingGroupDelete, setPendingGroupDelete] = (0, import_react3.useState)(null);
+  const [dialog, setDialog] = (0, import_react3.useState)(null);
   const [menuFor, setMenuFor] = (0, import_react3.useState)(null);
-  const [createOpen, setCreateOpen] = (0, import_react3.useState)(false);
   const [expandedMount, setExpandedMount] = (0, import_react3.useState)(null);
   const { groups, skillsIntent, setSkillDisabled, moveSkill, renameGroup, deleteGroup } = config;
   const displaySkills = (0, import_react3.useMemo)(() => data.lib.skills.map((it) => {
@@ -549,7 +788,7 @@ function ManageView({ call, data, config, reload }) {
   const groupNames = Object.keys(groups);
   const countForGroup = (group) => displaySkills.filter((item) => item.group === group).length;
   const warningLines = [];
-  for (const w of data.lib.warnings || []) {
+  for (const w of data.lib.warnings) {
     warningLines.push({
       key: `w-${warningLines.length}`,
       text: String(w),
@@ -561,7 +800,7 @@ function ManageView({ call, data, config, reload }) {
       })
     });
   }
-  for (const issue of (data.health || []).filter((i) => i.issue === "orphan-link")) {
+  for (const issue of data.health.filter((i) => i.issue === "orphan-link")) {
     warningLines.push({
       key: `o-${issue.name}-${issue.target}`,
       text: `\u5B64\u513F\u94FE\u63A5\uFF1A${issue.name} @ ${issue.target}`,
@@ -578,7 +817,7 @@ function ManageView({ call, data, config, reload }) {
       return;
     }
     if (action === "remove" && payload.confirmed !== true) {
-      setPendingRemove({ name });
+      setDialog({ kind: "remove", name });
       return;
     }
     setBusy(true);
@@ -588,9 +827,10 @@ function ManageView({ call, data, config, reload }) {
       if (action === "update") {
         if (payload.confirmLocalChanges !== true) {
           const checks = await call("check", { names: [name] });
-          const check = (checks || []).find((item) => item.name === name);
+          const check = checks.find((item) => item.name === name);
           if (check?.locally_modified || check?.baseline_missing) {
-            setPendingUpdate({
+            setDialog({
+              kind: "update",
               name,
               detail: `\u5F53\u524D ${check.current ? check.current.slice(0, 7) : "\u672A\u77E5"} \u2192 \u4E0A\u6E38 ${check.latest ? check.latest.slice(0, 7) : "\u5F85\u68C0\u67E5"}\u3002`
             });
@@ -598,7 +838,7 @@ function ManageView({ call, data, config, reload }) {
           }
         }
         const r = await call("update", { names: [name], confirmLocalChanges: payload.confirmLocalChanges === true });
-        const it = (r.results || []).find((item) => item.name === name);
+        const it = r.results.find((item) => item.name === name);
         if (it?.status === "updated") setNotice({ tone: "ok", text: `${name} \u5DF2\u66F4\u65B0\u81F3 ${String(it.commit || "").slice(0, 7)}\uFF08${it.via === "ls-remote" ? "git" : "API"} \u901A\u9053\uFF09` });
         else if (it) setNotice({ tone: "warn", text: `${name} \u66F4\u65B0\u672A\u5B8C\u6210\uFF08${it.status}\uFF09\uFF1A${it.reason || it.error || "\u672A\u8FD4\u56DE\u539F\u56E0"}` });
         else setNotice({ tone: "warn", text: `${name}\uFF1A\u66F4\u65B0\u7ED3\u679C\u672A\u542B\u8BE5\u6761\u76EE\uFF0C\u8BF7\u70B9\u300C\u21BB \u5237\u65B0\u300D\u6838\u5BF9\u884C\u72B6\u6001` });
@@ -609,7 +849,7 @@ function ManageView({ call, data, config, reload }) {
       reload();
     } catch (e) {
       if (action === "update" && e?.code === "local-changes-confirmation-required" && payload.confirmLocalChanges !== true) {
-        setPendingUpdate({ name, detail: e.message || "\u68C0\u6D4B\u5230\u672C\u5730\u4FEE\u6539\u3002" });
+        setDialog({ kind: "update", name, detail: e.message || "\u68C0\u6D4B\u5230\u672C\u5730\u4FEE\u6539\u3002" });
       } else {
         setError(e);
       }
@@ -622,24 +862,30 @@ function ManageView({ call, data, config, reload }) {
     setError(null);
     setNotice(null);
     try {
+      const failures = [];
       let checkFailed = -1;
       try {
         const r = await call("check", {});
-        checkFailed = (r || []).filter((it) => it.status === "check_failed").length;
+        checkFailed = r.filter((it) => it.status === "check_failed").length;
       } catch (e) {
-        setError(e);
+        failures.push(`\u4E0A\u6E38\u68C0\u67E5\u5931\u8D25\uFF1A${e?.message ?? String(e)}`);
       }
       let syncProblems = -1;
       try {
         const s = await call("sync", {});
-        syncProblems = (s?.errors || []).length + (s?.warnings || []).length;
+        syncProblems = s.errors.length + s.warnings.length;
       } catch (e) {
-        setError(e);
+        failures.push(`\u73B0\u573A\u5BF9\u8D26\u5931\u8D25\uFF1A${e?.message ?? String(e)}`);
       }
       const parts = [];
       if (checkFailed > 0) parts.push(`${checkFailed} \u4E2A\u4E0A\u6E38\u4E0D\u53EF\u8FBE`);
       if (syncProblems > 0) parts.push(`${syncProblems} \u9879\u73B0\u573A\u9700\u8981\u5173\u6CE8\uFF08\u89C1\u884C\u72B6\u6001/\u8B66\u544A\u6761\uFF09`);
-      setNotice(parts.length > 0 ? { tone: "warn", text: `\u5237\u65B0\u5B8C\u6210\uFF1A${parts.join("\uFF1B")}` } : { tone: "ok", text: "\u5237\u65B0\u5B8C\u6210\uFF1A\u73B0\u573A\u4E00\u81F4" });
+      if (failures.length > 0) {
+        setError(new Error(failures.join("\uFF1B")));
+        setNotice({ tone: "warn", text: parts.length > 0 ? `\u5237\u65B0\u90E8\u5206\u5B8C\u6210\uFF1A${parts.join("\uFF1B")}` : "\u5237\u65B0\u672A\u5168\u90E8\u5B8C\u6210\uFF0C\u8BE6\u89C1\u9519\u8BEF\u6761" });
+      } else {
+        setNotice(parts.length > 0 ? { tone: "warn", text: `\u5237\u65B0\u5B8C\u6210\uFF1A${parts.join("\uFF1B")}` } : { tone: "ok", text: "\u5237\u65B0\u5B8C\u6210\uFF1A\u73B0\u573A\u4E00\u81F4" });
+      }
       reload();
     } finally {
       setBusy(false);
@@ -653,25 +899,22 @@ function ManageView({ call, data, config, reload }) {
   };
   const groupOp = (action, name, newName) => {
     if (action === "delete") {
-      setPendingGroupDelete(name);
+      setDialog({ kind: "group-delete", name });
     } else if (action === "rename") {
       renameGroup(name, newName);
       if (groupFilter === name && newName) setGroupFilter(newName);
     }
   };
   const confirmDeleteGroup = () => {
-    const name = pendingGroupDelete;
-    setPendingGroupDelete(null);
+    const name = dialog?.kind === "group-delete" ? dialog.name : null;
+    setDialog(null);
     if (!name) return;
     deleteGroup(name);
     if (groupFilter === name) setGroupFilter("\u9ED8\u8BA4");
   };
   const doCreateGroup = (name) => {
-    if (!config.createGroup(name)) {
-      setCreateOpen(false);
-      return;
-    }
-    setCreateOpen(false);
+    setDialog(null);
+    if (!config.createGroup(name)) return;
     setGroupFilter(name);
     setNotice({ tone: "ok", text: `\u5DF2\u521B\u5EFA\u5206\u7EC4\u300C${name}\u300D` });
   };
@@ -685,7 +928,7 @@ function ManageView({ call, data, config, reload }) {
         /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_dsh_client_ui_primitives3.Pill, { active: groupFilter === "", onClick: () => setGroupFilter(""), children: `\u5168\u90E8 \xB7 ${data.lib.skills.length}` }),
         /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_dsh_client_ui_primitives3.Pill, { active: groupFilter === "\u9ED8\u8BA4", onClick: () => setGroupFilter("\u9ED8\u8BA4"), children: `\u9ED8\u8BA4 \xB7 ${countForGroup("\u9ED8\u8BA4")}` }),
         groupNames.filter((group) => group !== "\u9ED8\u8BA4").map((group) => /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_dsh_client_ui_primitives3.Pill, { active: groupFilter === group, onClick: () => setGroupFilter(group), children: `${group} \xB7 ${countForGroup(group)}` }, group)),
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_dsh_client_ui_primitives3.Pill, { active: false, onClick: () => setCreateOpen(true), children: "\uFF0B \u65B0\u5EFA\u5206\u7EC4" })
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_dsh_client_ui_primitives3.Pill, { active: false, onClick: () => setDialog({ kind: "create" }), children: "\uFF0B \u65B0\u5EFA\u5206\u7EC4" })
       ] }),
       groupFilter === "" ? /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { ...cardStyle, padding: "12px 14px" }, children: [
         /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: cardTitle, children: "\u5F53\u524D\u67E5\u770B\uFF1A\u5168\u90E8\u6280\u80FD" }),
@@ -714,15 +957,15 @@ function ManageView({ call, data, config, reload }) {
     notice ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(NoticeBar, { notice }) : null,
     error ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(ErrorLine, { error }) : null,
     list.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { ...S.muted, padding: 12 }, children: "\u5E93\u4E3A\u7A7A\uFF08\u65E0\u5339\u914D skill\uFF09" }) : list.map((it) => {
-      const mountIssues = (it.mount || []).filter((row) => row.issue && row.issue !== "ok");
+      const mountIssues = it.mount.filter((row) => row.issue && row.issue !== "ok");
       return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { position: "relative" }, children: [
         /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: S.row, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { flex: 1, minWidth: 0 }, title: it.description || "", children: [
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { flex: 1, minWidth: 0 }, title: it.description, children: [
             /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { fontWeight: 600, color: T.labelPrimary }, children: it.name }),
             /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: noteText, children: [
               ORIGIN_LABEL[it.origin] || it.origin,
               it.group,
-              (it.targets || []).length > 0 ? (it.targets || []).map((t) => targetLabel(t, data.workspaces)).join(" / ") : null,
+              it.targets.length > 0 ? it.targets.map((t) => targetLabel(t, data.workspaces)).join(" / ") : null,
               it.commit ? it.commit.slice(0, 7) : null
             ].filter(Boolean).join(" \xB7 ") })
           ] }),
@@ -783,45 +1026,45 @@ function ManageView({ call, data, config, reload }) {
         }) })
       ] }, it.dir);
     }),
-    createOpen && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(CreateGroupDialog, { onCancel: () => setCreateOpen(false), onCreate: doCreateGroup }),
-    pendingUpdate && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+    dialog?.kind === "create" && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(CreateGroupDialog, { onCancel: () => setDialog(null), onCreate: doCreateGroup }),
+    dialog?.kind === "update" && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
       UpdateConfirmationDialog,
       {
-        name: pendingUpdate.name,
-        detail: pendingUpdate.detail,
+        name: dialog.name,
+        detail: dialog.detail,
         busy,
-        onCancel: () => setPendingUpdate(null),
+        onCancel: () => setDialog(null),
         onConfirm: () => {
-          const name = pendingUpdate.name;
-          setPendingUpdate(null);
+          const name = dialog.name;
+          setDialog(null);
           rowAction(name, "update", { confirmLocalChanges: true });
         }
       }
     ),
-    pendingRemove && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+    dialog?.kind === "remove" && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
       ConfirmDialog,
       {
-        title: `\u51FA\u5E93\u300C${pendingRemove.name}\u300D\uFF1F`,
+        title: `\u51FA\u5E93\u300C${dialog.name}\u300D\uFF1F`,
         body: "\u4EC5 GitHub \u6765\u6E90\u7684 Skill \u53EF\u51FA\u5E93\uFF08\u81EA\u7814/\u672C\u5730\u76EE\u5F55\u65E0\u5220\u9664\u5165\u53E3\uFF0C\u5728\u6280\u80FD\u76EE\u5F55\u5185\u81EA\u7BA1\uFF09\u3002",
         warning: "\u6267\u884C\u987A\u5E8F\uFF1A\u5148\u628A\u6574\u76EE\u5F55\u81EA\u52A8\u5907\u4EFD\u5230 DSH HOME \u5907\u4EFD\u533A \u2192 \u6458\u9664\u5168\u90E8\u6302\u8F7D\u94FE\u63A5 \u2192 \u5220\u9664\u5E93\u5185\u76EE\u5F55 \u2192 \u6E05\u7406\u767B\u8BB0\u4E0E\u68C0\u67E5\u7F13\u5B58\u3002settings \u91CC\u7684\u5206\u7EC4\u5F52\u5C5E\u4E0D\u968F\u51FA\u5E93\u6D88\u5931\uFF0C\u91CD\u65B0\u5165\u5E93\u81EA\u7136\u843D\u56DE\u539F\u7EC4\u3002",
         confirmLabel: "\u786E\u8BA4\u51FA\u5E93",
         busy,
-        onCancel: () => setPendingRemove(null),
+        onCancel: () => setDialog(null),
         onConfirm: () => {
-          const name = pendingRemove.name;
-          setPendingRemove(null);
+          const name = dialog.name;
+          setDialog(null);
           rowAction(name, "remove", { confirmed: true });
         }
       }
     ),
-    pendingGroupDelete && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+    dialog?.kind === "group-delete" && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
       ConfirmDialog,
       {
-        title: `\u5220\u9664\u5206\u7EC4\u300C${pendingGroupDelete}\u300D\uFF1F`,
-        body: `\u8BE5\u7EC4\u5F53\u524D ${countForGroup(pendingGroupDelete)} \u4E2A\u6210\u5458\uFF0C\u5220\u9664\u540E\u6210\u5458\u56DE\u843D\u300C\u9ED8\u8BA4\u300D\u7EC4\u3002`,
+        title: `\u5220\u9664\u5206\u7EC4\u300C${dialog.name}\u300D\uFF1F`,
+        body: `\u8BE5\u7EC4\u5F53\u524D ${countForGroup(dialog.name)} \u4E2A\u6210\u5458\uFF0C\u5220\u9664\u540E\u6210\u5458\u56DE\u843D\u300C\u9ED8\u8BA4\u300D\u7EC4\u3002`,
         warning: "\u4E0D\u5220\u9664\u4EFB\u4F55 Skill \u6587\u4EF6\uFF1B\u4F46\u8BE5\u7EC4\u7684\u6302\u8F7D\u89C4\u5219\u968F\u4E4B\u79FB\u9664\uFF0C\u6309\u6B64\u89C4\u5219\u6302\u51FA\u53BB\u7684\u94FE\u63A5\u4F1A\u5728\u5BF9\u8D26\u65F6\u88AB\u6458\u9664\uFF08\u56DE\u843D\u300C\u9ED8\u8BA4\u300D\u7EC4\u7684\u89C4\u5219\uFF09\u3002",
         confirmLabel: "\u786E\u8BA4\u5220\u9664\u5206\u7EC4",
-        onCancel: () => setPendingGroupDelete(null),
+        onCancel: () => setDialog(null),
         onConfirm: confirmDeleteGroup
       }
     )
@@ -891,7 +1134,7 @@ function GroupScopePanel({ config, group, workspaces, skills, onGroupOp }) {
   };
   const linksOnTarget = (scopeKind, workspaceId) => {
     const key = scopeKind === "global" ? "global|global" : `project|${workspaceId}`;
-    return skills.filter((s) => effectiveGroup(s) === group && (s.targets || []).includes(key)).length;
+    return skills.filter((s) => effectiveGroup(s) === group && s.targets.includes(key)).length;
   };
   const toggle = (scopeKind, workspaceId, checked) => {
     if (!checked) {
@@ -996,7 +1239,10 @@ function SearchView({ call, reload }) {
     setNotice(null);
     setError(null);
   };
+  const inFlight = (0, import_react4.useRef)(false);
   const doSearch = async () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
     setError(null);
     try {
@@ -1006,16 +1252,19 @@ function SearchView({ call, reload }) {
     } catch (e) {
       setError(e);
     } finally {
+      inFlight.current = false;
       setBusy(false);
     }
   };
-  const addFrom = async (repo, dir) => {
+  const probeAndAdd = async (repo, ref, dir) => {
+    if (inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
     setError(null);
     try {
-      const r = await call("repo-skills", { repo, ref: "main" });
+      const r = await call("repo-skills", { repo, ref });
       if (r.candidates.length <= 1) {
-        await call("add", { repo, dir: r.candidates[0] && r.candidates[0].path ? r.candidates[0].path : dir, ref: r.branch });
+        await call("add", { repo, dir: r.candidates[0] ? r.candidates[0].path : dir, ref: r.branch });
         setNotice({ tone: "ok", text: `\u5DF2\u5165\u5E93 ${repo}` });
         reload();
       } else {
@@ -1024,12 +1273,14 @@ function SearchView({ call, reload }) {
     } catch (e) {
       setError(e);
     } finally {
+      inFlight.current = false;
       setBusy(false);
     }
   };
   const suggestName = (c) => c.path ? c.path.split("/").pop() : candidates.repo.split("/")[1] || candidates.repo;
   const addSelected = async () => {
-    if (!candidates || selected.size === 0) return;
+    if (!candidates || selected.size === 0 || inFlight.current) return;
+    inFlight.current = true;
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -1054,6 +1305,7 @@ function SearchView({ call, reload }) {
       }
       setNotice(failures.length > 0 ? { tone: "warn", text: `\u5DF2\u5165\u5E93 ${done} \u4E2A\uFF0C\u5931\u8D25 ${failures.length} \u4E2A\uFF08\u9010\u6761\u539F\u56E0\u89C1\u4E0B\u65B9\u7EA2\u5B57\uFF09` } : { tone: "ok", text: `\u5DF2\u5165\u5E93 ${done} \u4E2A` });
     } finally {
+      inFlight.current = false;
       setBusy(false);
     }
   };
@@ -1074,7 +1326,7 @@ function SearchView({ call, reload }) {
       ),
       /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(PrimaryBtn, { onClick: doSearch, disabled: busy || !query.trim(), children: busy ? "\u641C\u7D22\u4E2D\u2026" : "\u641C\u7D22" })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(DirectAdd, { call, reload, busy, setBusy, setError, onCandidates: showCandidates, onAdded: () => setNotice({ tone: "ok", text: "\u5DF2\u5165\u5E93" }) }),
+    /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(DirectAdd, { busy, onProbeAdd: probeAndAdd }),
     error ? /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(ErrorLine, { error }) : null,
     notice ? /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(NoticeBar, { notice }) : null,
     candidates && /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { style: { marginBottom: 10 }, children: [
@@ -1131,39 +1383,46 @@ function SearchView({ call, reload }) {
           /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { style: { fontWeight: 600, color: T.labelPrimary }, children: s.name }),
           /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { style: noteText, children: `${s.repo}${s.directory ? " / " + s.directory : ""} \xB7 \u5B89\u88C5 ${s.installs}` })
         ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(OutlineBtn, { onClick: () => addFrom(s.repo, s.directory), disabled: busy, children: "\u5165\u5E93" })
+        /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(OutlineBtn, { onClick: () => probeAndAdd(s.repo, "main", s.directory), disabled: busy, children: "\u5165\u5E93" })
       ] }, s.key))
     ] }) : null
   ] });
 }
-function DirectAdd({ call, reload, busy, setBusy, setError, onCandidates, onAdded }) {
+function DirectAdd({ busy, onProbeAdd }) {
   const [repo, setRepo] = (0, import_react4.useState)("");
   const [branch, setBranch] = (0, import_react4.useState)("");
-  const add = async () => {
+  const submit = () => {
     if (!repo.trim()) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const r = await call("repo-skills", { repo: repo.trim(), ref: branch.trim() || "main" });
-      if (r.candidates.length <= 1) {
-        await call("add", { repo: repo.trim(), dir: r.candidates[0] && r.candidates[0].path ? r.candidates[0].path : void 0, ref: r.branch });
-        if (onAdded) onAdded();
-        reload();
-      } else {
-        onCandidates({ repo: repo.trim(), branch: r.branch, list: r.candidates });
-      }
-    } catch (e) {
-      setError(e);
-    } finally {
-      setBusy(false);
-    }
+    onProbeAdd(repo.trim(), branch.trim() || "main", void 0);
   };
   return /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { style: { ...cardStyle, padding: "12px 14px", marginBottom: 14 }, children: [
     /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { style: { ...cardTitle, marginBottom: 10 }, children: "\u4ECE GitHub \u4ED3\u5E93\u6DFB\u52A0" }),
     /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { style: { display: "flex", gap: 8, alignItems: "center" }, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(import_dsh_client_ui_primitives4.Input, { style: { flex: 1 }, placeholder: "owner/repo", value: repo, onChange: (e) => setRepo(e.target.value) }),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(import_dsh_client_ui_primitives4.Input, { style: { width: 110 }, placeholder: "\u5206\u652F\uFF08\u53EF\u9009\uFF09", value: branch, onChange: (e) => setBranch(e.target.value) }),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(OutlineBtn, { onClick: add, disabled: busy || !repo.trim(), children: "\u63A2\u6D4B\u4ED3\u5E93" })
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
+        import_dsh_client_ui_primitives4.Input,
+        {
+          style: { flex: 1 },
+          placeholder: "owner/repo",
+          value: repo,
+          onChange: (e) => setRepo(e.target.value),
+          onKeyDown: (e) => {
+            if (e.key === "Enter") submit();
+          }
+        }
+      ),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(
+        import_dsh_client_ui_primitives4.Input,
+        {
+          style: { width: 110 },
+          placeholder: "\u5206\u652F\uFF08\u53EF\u9009\uFF09",
+          value: branch,
+          onChange: (e) => setBranch(e.target.value),
+          onKeyDown: (e) => {
+            if (e.key === "Enter") submit();
+          }
+        }
+      ),
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsx)(OutlineBtn, { onClick: submit, disabled: busy || !repo.trim(), children: "\u63A2\u6D4B\u4ED3\u5E93" })
     ] })
   ] });
 }
@@ -1271,17 +1530,21 @@ function SkillsSection({ call, workspaces, scope, subscribeSkillSettings }) {
     editConfig("skills", nextSkills);
   };
   const config = { groups, skillsIntent, intentOf, editConfig, setSkillDisabled, moveSkill, toggleMount, createGroup, renameGroup, deleteGroup };
+  const loadSeq = (0, import_react5.useRef)(0);
   const load = () => {
     setError(null);
+    const seq = ++loadSeq.current;
     return call("overview").then((r) => {
+      if (seq !== loadSeq.current) return;
       setConfigOverrideUnconfigured(false);
       setData({
         root: r.root,
         lib: r.lib,
-        health: r.health && r.health.issues || [],
-        workspaces: r.workspaces || []
+        health: r.health.issues,
+        workspaces: r.workspaces
       });
     }).catch((e) => {
+      if (seq !== loadSeq.current) return;
       if (e && e.code === "skilldir-unconfigured") setConfigOverrideUnconfigured(true);
       else setError(e);
     });
@@ -1364,7 +1627,7 @@ function SkillManagerCard({ scope, uiWorkspace }) {
       off();
     };
   }, [scope]);
-  const ready = Boolean(snap) && snap.status !== "loading";
+  const ready = snap.status === "ready";
   const section = snap.value && typeof snap.value === "object" ? snap.value : {};
   const current = typeof section.skillsDir === "string" ? section.skillsDir : "";
   const overridden = Boolean(snap && snap.user && typeof snap.user === "object" && "skillsDir" in snap.user);

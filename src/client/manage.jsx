@@ -37,11 +37,11 @@ export function ManageView({ call, data, config, reload }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
   const [notice, setNotice] = useState(null)
-  const [pendingUpdate, setPendingUpdate] = useState(null)
-  const [pendingRemove, setPendingRemove] = useState(null) // { name }：出库遮罩确认
-  const [pendingGroupDelete, setPendingGroupDelete] = useState(null) // 组名：删组遮罩确认
+  // 互斥模态收敛为单一判别状态（CORE-01）：同时至多一个对话框，非法组合不可表示。
+  const [dialog, setDialog] = useState(null)
+  // dialog 形状：{ kind:'update', name, detail } | { kind:'remove', name }
+  //   | { kind:'group-delete', name } | { kind:'create' }
   const [menuFor, setMenuFor] = useState(null)
-  const [createOpen, setCreateOpen] = useState(false)
   const [expandedMount, setExpandedMount] = useState(null)
 
   const { groups, skillsIntent, setSkillDisabled, moveSkill, renameGroup, deleteGroup } = config
@@ -67,7 +67,7 @@ export function ManageView({ call, data, config, reload }) {
 
   // 非行级警告条：未匹配工作区引用等推导警告与孤儿链接现场，逐条列出并附修复复制入口。
   const warningLines = []
-  for (const w of data.lib.warnings || []) {
+  for (const w of data.lib.warnings) {
     warningLines.push({
       key: `w-${warningLines.length}`,
       text: String(w),
@@ -79,7 +79,7 @@ export function ManageView({ call, data, config, reload }) {
       }),
     })
   }
-  for (const issue of (data.health || []).filter((i) => i.issue === 'orphan-link')) {
+  for (const issue of data.health.filter((i) => i.issue === 'orphan-link')) {
     warningLines.push({
       key: `o-${issue.name}-${issue.target}`,
       text: `孤儿链接：${issue.name} @ ${issue.target}`,
@@ -92,7 +92,7 @@ export function ManageView({ call, data, config, reload }) {
     if (action === 'disable') { setSkillDisabled(name, true); return }
     if (action === 'enable') { setSkillDisabled(name, false); return }
     // 出库先过遮罩确认（与更新/取消挂载同一对话框语言）；确认后带 confirmed 重入执行
-    if (action === 'remove' && payload.confirmed !== true) { setPendingRemove({ name }); return }
+    if (action === 'remove' && payload.confirmed !== true) { setDialog({ kind: 'remove', name }); return }
     setBusy(true)
     setError(null)
     setNotice(null)
@@ -100,9 +100,10 @@ export function ManageView({ call, data, config, reload }) {
       if (action === 'update') {
         if (payload.confirmLocalChanges !== true) {
           const checks = await call('check', { names: [name] })
-          const check = (checks || []).find((item) => item.name === name)
+          const check = checks.find((item) => item.name === name)
           if (check?.locally_modified || check?.baseline_missing) {
-            setPendingUpdate({
+            setDialog({
+              kind: 'update',
               name,
               detail: `当前 ${check.current ? check.current.slice(0, 7) : '未知'} → 上游 ${check.latest ? check.latest.slice(0, 7) : '待检查'}。`,
             })
@@ -110,9 +111,9 @@ export function ManageView({ call, data, config, reload }) {
           }
         }
         const r = await call('update', { names: [name], confirmLocalChanges: payload.confirmLocalChanges === true })
-        // 批量语义下单条失败不断批（ok:true + skipped 结果），结果必须按 tone 上屏。
-        // 否则用户确认后石沉大海：skipped 只进灰字等于无反馈。
-        const it = (r.results || []).find((item) => item.name === name)
+        // 批量语义下单条失败不断批（ok:true + failed/skipped 结果），结果必须按 tone 上屏。
+        // 否则用户确认后石沉大海：失败只进灰字等于无反馈。
+        const it = r.results.find((item) => item.name === name)
         if (it?.status === 'updated') setNotice({ tone: 'ok', text: `${name} 已更新至 ${String(it.commit || '').slice(0, 7)}（${it.via === 'ls-remote' ? 'git' : 'API'} 通道）` })
         else if (it) setNotice({ tone: 'warn', text: `${name} 更新未完成（${it.status}）：${it.reason || it.error || '未返回原因'}` })
         else setNotice({ tone: 'warn', text: `${name}：更新结果未含该条目，请点「↻ 刷新」核对行状态` })
@@ -123,7 +124,7 @@ export function ManageView({ call, data, config, reload }) {
       reload()
     } catch (e) {
       if (action === 'update' && e?.code === 'local-changes-confirmation-required' && payload.confirmLocalChanges !== true) {
-        setPendingUpdate({ name, detail: e.message || '检测到本地修改。' })
+        setDialog({ kind: 'update', name, detail: e.message || '检测到本地修改。' })
       } else {
         setError(e)
       }
@@ -135,31 +136,39 @@ export function ManageView({ call, data, config, reload }) {
   // ↻ 刷新：重查全部上游，执行一次安全对账，再重读列表。
   // 这是 Agent 按修复提示词修完现场后的收敛入口。check 与 sync 的结果合并为一条通知：
   // 分开回写会后写覆盖前写，丢掉上游不可达计数；有问题一律 warn 态。
+  // 错误同理：两阶段各失败各记（不允许后写覆盖前写），任一失败绝不出绿色「现场一致」。
   const refreshAll = async () => {
     setBusy(true)
     setError(null)
     setNotice(null)
     try {
+      const failures = []
       let checkFailed = -1
       try {
         const r = await call('check', {})
-        checkFailed = (r || []).filter((it) => it.status === 'check_failed').length
+        checkFailed = r.filter((it) => it.status === 'check_failed').length
       } catch (e) {
-        setError(e)
+        failures.push(`上游检查失败：${e?.message ?? String(e)}`)
       }
       let syncProblems = -1
       try {
         const s = await call('sync', {})
-        syncProblems = (s?.errors || []).length + (s?.warnings || []).length
+        syncProblems = s.errors.length + s.warnings.length
       } catch (e) {
-        setError(e)
+        failures.push(`现场对账失败：${e?.message ?? String(e)}`)
       }
       const parts = []
       if (checkFailed > 0) parts.push(`${checkFailed} 个上游不可达`)
       if (syncProblems > 0) parts.push(`${syncProblems} 项现场需要关注（见行状态/警告条）`)
-      setNotice(parts.length > 0
-        ? { tone: 'warn', text: `刷新完成：${parts.join('；')}` }
-        : { tone: 'ok', text: '刷新完成：现场一致' })
+      if (failures.length > 0) {
+        // 阶段级失败进错误条（含修复复制入口），部分结果另给 warn 通知
+        setError(new Error(failures.join('；')))
+        setNotice({ tone: 'warn', text: parts.length > 0 ? `刷新部分完成：${parts.join('；')}` : '刷新未全部完成，详见错误条' })
+      } else {
+        setNotice(parts.length > 0
+          ? { tone: 'warn', text: `刷新完成：${parts.join('；')}` }
+          : { tone: 'ok', text: '刷新完成：现场一致' })
+      }
       reload()
     } finally {
       setBusy(false)
@@ -174,23 +183,23 @@ export function ManageView({ call, data, config, reload }) {
   }
   const groupOp = (action, name, newName) => {
     if (action === 'delete') {
-      setPendingGroupDelete(name) // 删组波及成员归属与挂载规则，走遮罩确认（不用 window.confirm）
+      setDialog({ kind: 'group-delete', name }) // 删组波及成员归属与挂载规则，走遮罩确认（不用 window.confirm）
     } else if (action === 'rename') {
       renameGroup(name, newName)
       if (groupFilter === name && newName) setGroupFilter(newName)
     }
   }
   const confirmDeleteGroup = () => {
-    const name = pendingGroupDelete
-    setPendingGroupDelete(null)
+    const name = dialog?.kind === 'group-delete' ? dialog.name : null
+    setDialog(null)
     if (!name) return
     deleteGroup(name)
     if (groupFilter === name) setGroupFilter('默认')
   }
   // 新建成功后跳到新组，便于立即配置它的使用范围；拒绝（撞名）时错误条已上屏，不再假装成功。
   const doCreateGroup = (name) => {
-    if (!config.createGroup(name)) { setCreateOpen(false); return }
-    setCreateOpen(false)
+    setDialog(null)
+    if (!config.createGroup(name)) return
     setGroupFilter(name)
     setNotice({ tone: 'ok', text: `已创建分组「${name}」` })
   }
@@ -210,7 +219,7 @@ export function ManageView({ call, data, config, reload }) {
           {groupNames.filter((group) => group !== '默认').map((group) => (
             <Pill key={group} active={groupFilter === group} onClick={() => setGroupFilter(group)}>{`${group} · ${countForGroup(group)}`}</Pill>
           ))}
-          <Pill active={false} onClick={() => setCreateOpen(true)}>＋ 新建分组</Pill>
+          <Pill active={false} onClick={() => setDialog({ kind: 'create' })}>＋ 新建分组</Pill>
         </div>
         {groupFilter === ''
           ? (
@@ -253,17 +262,17 @@ export function ManageView({ call, data, config, reload }) {
       {list.length === 0
         ? <div style={{ ...S.muted, padding: 12 }}>库为空（无匹配 skill）</div>
         : list.map((it) => {
-            const mountIssues = (it.mount || []).filter((row) => row.issue && row.issue !== 'ok')
+            const mountIssues = it.mount.filter((row) => row.issue && row.issue !== 'ok')
             return (
               <div key={it.dir} style={{ position: 'relative' }}>
                 <div style={S.row}>
-                  <div style={{ flex: 1, minWidth: 0 }} title={it.description || ''}>
+                  <div style={{ flex: 1, minWidth: 0 }} title={it.description}>
                     <div style={{ fontWeight: 600, color: T.labelPrimary }}>{it.name}</div>
                     <div style={noteText}>
                       {[
                         ORIGIN_LABEL[it.origin] || it.origin,
                         it.group,
-                        (it.targets || []).length > 0 ? (it.targets || []).map((t) => targetLabel(t, data.workspaces)).join(' / ') : null,
+                        it.targets.length > 0 ? it.targets.map((t) => targetLabel(t, data.workspaces)).join(' / ') : null,
                         it.commit ? it.commit.slice(0, 7) : null,
                       ].filter(Boolean).join(' · ')}
                     </div>
@@ -330,42 +339,42 @@ export function ManageView({ call, data, config, reload }) {
             )
           })}
 
-      {createOpen && <CreateGroupDialog onCancel={() => setCreateOpen(false)} onCreate={doCreateGroup} />}
-      {pendingUpdate && (
+      {dialog?.kind === 'create' && <CreateGroupDialog onCancel={() => setDialog(null)} onCreate={doCreateGroup} />}
+      {dialog?.kind === 'update' && (
         <UpdateConfirmationDialog
-          name={pendingUpdate.name}
-          detail={pendingUpdate.detail}
+          name={dialog.name}
+          detail={dialog.detail}
           busy={busy}
-          onCancel={() => setPendingUpdate(null)}
+          onCancel={() => setDialog(null)}
           onConfirm={() => {
-            const name = pendingUpdate.name
-            setPendingUpdate(null)
+            const name = dialog.name
+            setDialog(null)
             rowAction(name, 'update', { confirmLocalChanges: true })
           }}
         />
       )}
-      {pendingRemove && (
+      {dialog?.kind === 'remove' && (
         <ConfirmDialog
-          title={`出库「${pendingRemove.name}」？`}
+          title={`出库「${dialog.name}」？`}
           body="仅 GitHub 来源的 Skill 可出库（自研/本地目录无删除入口，在技能目录内自管）。"
           warning="执行顺序：先把整目录自动备份到 DSH HOME 备份区 → 摘除全部挂载链接 → 删除库内目录 → 清理登记与检查缓存。settings 里的分组归属不随出库消失，重新入库自然落回原组。"
           confirmLabel="确认出库"
           busy={busy}
-          onCancel={() => setPendingRemove(null)}
+          onCancel={() => setDialog(null)}
           onConfirm={() => {
-            const name = pendingRemove.name
-            setPendingRemove(null)
+            const name = dialog.name
+            setDialog(null)
             rowAction(name, 'remove', { confirmed: true })
           }}
         />
       )}
-      {pendingGroupDelete && (
+      {dialog?.kind === 'group-delete' && (
         <ConfirmDialog
-          title={`删除分组「${pendingGroupDelete}」？`}
-          body={`该组当前 ${countForGroup(pendingGroupDelete)} 个成员，删除后成员回落「默认」组。`}
+          title={`删除分组「${dialog.name}」？`}
+          body={`该组当前 ${countForGroup(dialog.name)} 个成员，删除后成员回落「默认」组。`}
           warning="不删除任何 Skill 文件；但该组的挂载规则随之移除，按此规则挂出去的链接会在对账时被摘除（回落「默认」组的规则）。"
           confirmLabel="确认删除分组"
-          onCancel={() => setPendingGroupDelete(null)}
+          onCancel={() => setDialog(null)}
           onConfirm={confirmDeleteGroup}
         />
       )}
@@ -440,7 +449,7 @@ function GroupScopePanel({ config, group, workspaces, skills, onGroupOp }) {
   }
   const linksOnTarget = (scopeKind, workspaceId) => {
     const key = scopeKind === 'global' ? 'global|global' : `project|${workspaceId}`
-    return skills.filter((s) => effectiveGroup(s) === group && (s.targets || []).includes(key)).length
+    return skills.filter((s) => effectiveGroup(s) === group && s.targets.includes(key)).length
   }
   const toggle = (scopeKind, workspaceId, checked) => {
     if (!checked) {

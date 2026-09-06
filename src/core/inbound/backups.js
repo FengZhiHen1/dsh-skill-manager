@@ -7,12 +7,12 @@
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { SkillManagerError } from '../base/errors.js'
-import { atomicSwapDir, canonicalPath, pathsEqual, safePath } from '../base/fsys.js'
+import { atomicSwapDir, canonicalPath, pathExists, pathsEqual, safePath } from '../base/fsys.js'
 import { dirHash } from '../model/library.js'
 import { backupId } from '../model/store.js'
 import { scanMountLinks } from '../mount/inspect.js'
 import { removeLink } from '../mount/materialize.js'
-import { copyTree, nowIso, pathExists, validateInstallName } from './zipball.js'
+import { copyTree, nowIso, validateInstallName } from './zipball.js'
 
 /**
  * 出库：仅限 origin:"github" 的外部 skill。执行顺序不可交换：
@@ -134,6 +134,7 @@ export async function backups({ backupsRoot }) { // quality-floor: ignore docstr
  * @throws {SkillManagerError} backup-meta-invalid — 元数据存在但损坏/形状非法/不可读
  * @throws {SkillManagerError} name-conflict — 目标已占位
  * @throws {SkillManagerError} write-failed — 原子换装失败（fsys 层归类）
+ * @throws {SkillManagerError} registration-failed — 已恢复就位但登记写入失败（现场与台账不一致）
  */
 export async function restore({ root, store, id, backupsRoot, ctx }) { // quality-floor: ignore docstring-promise 函数体确有 throw SkillManagerError（not-found/backup-meta-invalid 等）；扫描器将参数解构花括号配误作函数体起点致漏看
   if (typeof id !== 'string' || id === '' || id.includes('/') || id.includes('\\') || id === '.' || id === '..') {
@@ -181,7 +182,15 @@ export async function restore({ root, store, id, backupsRoot, ctx }) { // qualit
   delete record?.group
   if (record && record.origin === 'github') {
     record.content_hash = record.content_hash ?? await dirHash(dest)
-    await store.putSkill(name, record)
+    // 换装已成功、登记失败不能静默：目录已回库而台账无记录，必须显式失败。
+    try {
+      await store.putSkill(name, record)
+    } catch (error) {
+      throw new SkillManagerError('registration-failed', `${name} 已从备份恢复但登记失败：${error instanceof Error ? error.message : String(error)}`, false, [
+        { label: '库内路径', value: dest },
+        { label: '备份 id', value: id },
+      ])
+    }
   }
 
   const sync = await ctx.reconcile()

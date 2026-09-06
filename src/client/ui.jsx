@@ -235,7 +235,8 @@ export function ModalShell({ title, width = 480, onMaskClick, children }) {
 }
 
 /** 覆盖本地修改的真实遮罩对话框；不用 window.confirm，确保风险与操作范围可见。 */
-export function UpdateConfirmationDialog({ name, detail, busy, onCancel, onConfirm }) {  const [acknowledged, setAcknowledged] = useState(false)
+export function UpdateConfirmationDialog({ name, detail, busy, onCancel, onConfirm }) {
+  const [acknowledged, setAcknowledged] = useState(false)
   return (
     <ModalShell title={`更新 ${name}？`} onMaskClick={onCancel}>
       <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>{`更新 ${name}？`}</div>

@@ -31,7 +31,7 @@ const TIMEOUT_MS = 15000
 const DOWNLOAD_TIMEOUT_MS = 90000
 
 /**
- * 网络错误分类：not_found / rate_limited / unreachable / http_error。
+ * 网络错误分类：repo-not-found / rate-limited / unreachable / repo-http-error。
  * kind 会被 toRpcFailure 直接当作稳定错误码。
  */
 export class GhError extends Error {
@@ -73,6 +73,9 @@ const TLS_CERT_CODES = new Set([
 /**
  * fetch 异常 → GhError 归类。
  * 证书类失败点破归因与对策，其余归 unreachable。
+ * why 超时归 unreachable：AbortSignal.timeout 的 AbortError 同样落到本函数；
+ * 本通道全是幂等 GET（探测/下载），超时重试无重复效果，显式按「可重试失败」处理。
+ * 呈现侧不得谎称「未送达」——Host 是否收到不可知（见 client repair.jsx 文案）。
  */
 export function classifyFetchError(error) {
   const code = error?.cause?.code
@@ -93,11 +96,11 @@ async function ghFetch(url, timeoutMs = TIMEOUT_MS) {
     throw classifyFetchError(error)
   }
   if (!response.ok) {
-    if (response.status === 404) throw new GhError('not_found', '仓库或分支不存在')
+    if (response.status === 404) throw new GhError('repo-not-found', '仓库或分支不存在')
     if (response.status === 403 && response.headers.get('X-RateLimit-Remaining') === '0') {
-      throw new GhError('rate_limited', 'GitHub API 限流（匿名 60 次/小时/IP）')
+      throw new GhError('rate-limited', 'GitHub API 限流（匿名 60 次/小时/IP）')
     }
-    throw new GhError('http_error', `GitHub 返回 HTTP ${response.status}`)
+    throw new GhError('repo-http-error', `GitHub 返回 HTTP ${response.status}`)
   }
   return response
 }
@@ -122,9 +125,14 @@ export async function ghDownload(url) {
 
 /**
  * 上游分支最新 sha：API 主路径，失败回退 git ls-remote。
- * @returns {{sha: string|null, status: 'ok'|'not_found'|'rate_limited'|'unreachable', via: 'api'|'ls-remote'|null, reason: string}}
+ * @param {string} repoSlug owner/repo
+ * @param {string} branch 分支名
+ * @param {{ lsRemote?: (repo: string, branch: string) => Promise<string|null> }} [deps]
+ *        测试注入点：替代 git 子进程回退通道
+ * @returns {{sha: string|null, status: 'ok'|'repo-not-found'|'rate-limited'|'unreachable', via: 'api'|'ls-remote'|null, reason: string}}
  */
-export async function remoteHead(repoSlug, branch) {
+export async function remoteHead(repoSlug, branch, deps = {}) {
+  const probeLsRemote = deps.lsRemote ?? lsRemote
   let kind = 'unreachable'
   let reason = ''
   try {
@@ -140,21 +148,24 @@ export async function remoteHead(repoSlug, branch) {
       reason = String(error)
     }
   }
-  const sha = await lsRemote(repoSlug, branch)
+  const sha = await probeLsRemote(repoSlug, branch)
   if (sha) return { sha, status: 'ok', via: 'ls-remote', reason: '' }
-  if (kind === 'rate_limited') return { sha: null, status: 'rate_limited', via: null, reason: `${reason}，稍后重试` }
-  if (kind === 'not_found') return { sha: null, status: 'not_found', via: null, reason: '仓库或分支不存在（上游改名/删除？）' }
+  if (kind === 'rate-limited') return { sha: null, status: 'rate-limited', via: null, reason: `${reason}，稍后重试` }
+  if (kind === 'repo-not-found') return { sha: null, status: 'repo-not-found', via: null, reason: '仓库或分支不存在（上游改名/删除？）' }
   return { sha: null, status: 'unreachable', via: null, reason: `${reason}；git 回退亦不可达` }
 }
 
 /**
  * 按 branch → main → master 回退解析远端 commit。
+ * @param {string} repoSlug owner/repo
+ * @param {string} branch 首选分支
+ * @param {{ lsRemote?: (repo: string, branch: string) => Promise<string|null> }} [deps] 测试注入点
  * @throws {SkillManagerError} remote-unreachable（可重试）— 三个候选分支均不可达
  */
-export async function resolveRemote(repoSlug, branch) {
+export async function resolveRemote(repoSlug, branch, deps = {}) { // quality-floor: ignore docstring-promise 函数体确有 throw SkillManagerError（remote-unreachable）；扫描器将参数默认值花括号误作函数体起点致漏看
   let lastReason = ''
   for (const candidate of [...new Set([branch, 'main', 'master'])]) {
-    const head = await remoteHead(repoSlug, candidate)
+    const head = await remoteHead(repoSlug, candidate, deps)
     if (head.sha) return { commit: head.sha, branch: candidate, via: head.via }
     lastReason = head.reason
   }
@@ -168,13 +179,20 @@ export async function resolveRemote(repoSlug, branch) {
 
 /**
  * 归一并校验仓库 slug，容忍 https 地址与 .git 后缀写法。
+ * why 逐段校验：GitHub 用户名只含字母数字与连字符；仓库名可含点（如 foo/bar.js），
+ * 但单独成段的 '.'/'..' 在 URL 路径里有归位语义，必须拒绝。
  * @throws {SkillManagerError} bad-repo — 归一后仍不满足 owner/repo 文法
  */
 export function normalizeRepoSlug(slug) {
   let out = String(slug ?? '').trim()
   out = out.replace(/\.git$/, '').replace(/\/+$/, '')
   out = out.replace(/^https?:\/\/github\.com\//, '')
-  if (!/^[\w.-]+\/[\w.-]+$/.test(out) || out.split('/').some((part) => part.includes('.'))) {
+  const parts = out.split('/')
+  const valid = parts.length === 2
+    && /^[A-Za-z0-9-]+$/.test(parts[0])
+    && /^[\w.-]+$/.test(parts[1])
+    && parts[1] !== '.' && parts[1] !== '..'
+  if (!valid) {
     throw new SkillManagerError('bad-repo', `无效的仓库标识: ${slug}（应为 owner/repo）`, false, [
       { label: '原始输入', value: String(slug ?? '') },
     ])
@@ -206,21 +224,29 @@ export async function searchSkillsSh(query, limit = 20, offset = 0) {
   }
   const data = await response.json()
   const results = []
+  // 第三方响应逐字段归一（CORE-04 数据边界）：缺 id 以 repo#目录合成稳定 key，
+  // 缺名字回落仓库名；保证下游契约（contract.js search 形状）不被上游脏数据击破。
   for (const s of data.skills ?? []) {
     const source = String(s.source ?? '')
     const parts = source.split('/', 2)
-    // 过滤非 GitHub 来源（两段均不含点）
-    if (parts.length !== 2 || parts[0].includes('.') || parts[1].includes('.')) continue
+    // 过滤非 GitHub 来源：两段式 owner/repo，文法与 normalizeRepoSlug 同源
+    // （owner 无点；repo 可含点但不得为 '.'/'..'；段内带点的首段是域名形态）。
+    if (parts.length !== 2 || !/^[A-Za-z0-9-]+$/.test(parts[0]) || !/^[\w.-]+$/.test(parts[1]) || parts[1] === '.' || parts[1] === '..') continue
+    const directory = typeof s.skillId === 'string' ? s.skillId : ''
     results.push({
-      key: s.id,
-      name: s.name,
-      directory: s.skillId,
+      key: typeof s.id === 'string' && s.id !== '' ? s.id : `${source}#${directory}`,
+      name: typeof s.name === 'string' && s.name !== '' ? s.name : source,
+      directory,
       repo: source,
-      installs: s.installs ?? 0,
+      installs: typeof s.installs === 'number' && Number.isFinite(s.installs) ? s.installs : 0,
       url: `https://github.com/${source}`,
     })
   }
-  return { query: data.query ?? query, count: data.count ?? 0, skills: results }
+  return {
+    query: typeof data.query === 'string' ? data.query : query,
+    count: typeof data.count === 'number' ? data.count : results.length,
+    skills: results,
+  }
 }
 
 /**

@@ -2,7 +2,7 @@
 //
 // 边界：配置渲染零网络（settings mirror 快照直读），数据读全部经 overview RPC。
 // 参考：插件运行时.md「配置即意图」「视图设计」；DSR-011、DSR-017、DSR-018。
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { T, S, badgeStyle } from './theme.js'
 import { ErrorLine, OutlineBtn, useTick } from './ui.jsx'
 import { buildRepairPrompt, RepairCopy, settingsRejectedRepair } from './repair.jsx'
@@ -134,19 +134,25 @@ export function SkillsSection({ call, workspaces, scope, subscribeSkillSettings 
   const config = { groups, skillsIntent, intentOf, editConfig, setSkillDisabled, moveSkill, toggleMount, createGroup, renameGroup, deleteGroup }
 
   // 单请求聚合读（低延迟路径）：overview 一次出库列表/行状态/警告/工作区投影。
+  // 序号守卫：reloadTick/settings 总线/首刷三源并发时，只有最新一次加载落地，
+  // 迟到的旧响应是恒等迁移（既不盖数据也不盖错误）。载荷形状由 createCall 契约保证。
+  const loadSeq = useRef(0)
   const load = () => {
     setError(null)
+    const seq = ++loadSeq.current
     return call('overview')
       .then((r) => {
+        if (seq !== loadSeq.current) return // 迟到响应不生效
         setConfigOverrideUnconfigured(false)
         setData({
           root: r.root,
           lib: r.lib,
-          health: (r.health && r.health.issues) || [],
-          workspaces: r.workspaces || [],
+          health: r.health.issues,
+          workspaces: r.workspaces,
         })
       })
       .catch((e) => {
+        if (seq !== loadSeq.current) return // 迟到的失败同理不覆盖
         // Host 报未配置而快照显示已配置：配置刚保存或外部修改、mirror 未同步，不停在"加载中"
         if (e && e.code === 'skilldir-unconfigured') setConfigOverrideUnconfigured(true)
         else setError(e)

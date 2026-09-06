@@ -63,9 +63,30 @@ test('迁移：无意图数据 → 跳过且不写配置', async () => {
   assert.equal(migrated, false)
 })
 
-test('迁移：旧域打开失败 → 跳过不拖垮启动', async () => {
+test('迁移：旧域打开失败 → 跳过不拖垮启动，且告警真实发出', async () => {
   const scope = { get: () => ({ intentMigrated: false }), update: async () => {} }
   const ctx = { storage: { domain: { open: async () => { throw new Error('版本不匹配') } } } }
-  const migrated = await migrateLegacyIntent(ctx, scope, { warn: () => {} })
+  const warnings = []
+  const migrated = await migrateLegacyIntent(ctx, scope, { warn: (msg) => warnings.push(msg) })
   assert.equal(migrated, false)
+  assert.equal(warnings.length, 1) // 「只告警不外抛」两半句都钉住
+  assert.match(warnings[0], /旧域读取失败/)
+})
+
+test('迁移：app≠dsh 的挂载规则过滤；local 记录迁移（只跳 self）；空组名回落默认', async () => {
+  const domain = fakeDomain()
+  await domain.table('mounts').put('默认|dsh|global|', { group: '默认', app: 'dsh', scope: 'global', project: null })
+  await domain.table('mounts').put('办公|vscode|global|', { group: '办公', app: 'vscode', scope: 'global', project: null }) // 非 dsh 不归集
+  await domain.table('skills').put('loc', skillRecord({ origin: 'local', origin_path: '/somewhere', group: '' })) // local 迁移，空组名回落默认
+  await domain.table('skills').put('me', skillRecord({ origin: 'self' })) // self 不迁移
+  let patch = null
+  const scope = {
+    get: () => ({ intentMigrated: false, groups: {}, skills: {} }),
+    update: async (p) => { patch = p },
+  }
+  const ctx = { storage: { domain: { open: async () => domain } } }
+  const migrated = await migrateLegacyIntent(ctx, scope, null)
+  assert.equal(migrated, true)
+  assert.deepEqual(patch.groups, { 默认: { mounts: [{ scope: 'global', project: null }] } }) // vscode 行未产生「办公」组
+  assert.deepEqual(patch.skills, { loc: { disabled: false, group: '默认' } }) // 空组名回落；self 不在列
 })

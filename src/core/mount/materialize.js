@@ -7,16 +7,12 @@
 import { lstat, mkdir, rm, stat, symlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import { SkillManagerError } from '../base/errors.js'
-import { canonicalPath, pathsEqual, readLinkTarget, safePath, withinRoot } from '../base/fsys.js'
+import { canonicalPath, pathsEqual, probePath, readLinkTarget, safePath, withinRoot } from '../base/fsys.js'
 import { targetDir } from './derive.js'
 
-/** 是否为链接（junction 在 lstat 下也是 symlink）。 */
+/** 是否为链接（junction 在 lstat 下也是 symlink；探针原语在 fsys.probePath）。 */
 export async function isLink(path) {
-  try {
-    return (await lstat(path)).isSymbolicLink()
-  } catch {
-    return false
-  }
+  return (await probePath(path)) === 'link'
 }
 
 /** 删除一个链接（本插件自有现场；非链接一律不走此函数——调用方先过归属判据）。 */
@@ -96,18 +92,10 @@ export async function detachLink({ root, skill, t, workspacesById, globalRootPat
   const parent = targetDir(t, { workspacesById, globalRootPath })
   if (parent === undefined) return 'kept' // 目标根不可用：不扫描不触碰
   const dst = join(parent, skill)
-  if (!(await isLink(dst))) return (await lstatExists(dst)) ? 'kept' : 'absent'
+  const probe = await probePath(dst)
+  if (probe !== 'link') return probe === 'absent' ? 'absent' : 'kept'
   const target = await readLinkTarget(dst)
   if (target === '' || !withinRoot(await canonicalPath(root), target)) return 'kept'
   await removeLink(dst)
   return 'removed'
-}
-
-async function lstatExists(path) {
-  try {
-    await lstat(path)
-    return true
-  } catch {
-    return false
-  }
 }

@@ -1,7 +1,8 @@
-// dsh-skill-manager — 测试公共件：内存假域 + 临时目录夹具。
-// 假域复刻 storage 域表契约：同步 get/entries/keys/size，异步 put/delete/update。
+// dsh-skill-manager — 测试公共件：内存假域 + 临时目录夹具 + 最小 ZIP 构造器。
+// 假域复刻 storage 域表契约：同步 get/entries/keys/size，异步 put/delete。
 
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
+import { deflateRawSync } from 'node:zlib'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import assert from 'node:assert/strict'
@@ -22,14 +23,6 @@ function fakeTable() {
     },
     async delete(key) {
       return map.delete(key)
-    },
-    async update(key, fn) {
-      if (!map.has(key)) {
-        const error = new Error('missing-key')
-        error.code = 'missing-key'
-        throw error
-      }
-      map.set(key, structuredClone(fn(structuredClone(map.get(key)))))
     },
   }
 }
@@ -113,4 +106,52 @@ export function assertThrowsCode(fn, code) {
     return error
   }
   assert.fail(`期望抛出错误码 ${code}，实际未抛`)
+}
+
+/** 构造最小 ZIP（中央目录为准；local 头尺寸置 0 模拟流式写入形态；CRC 不校验故置 0）。 */
+export function buildZip(entries) {
+  const localParts = []
+  const centralParts = []
+  let offset = 0
+  for (const e of entries) {
+    const nameBuf = Buffer.from(e.name, 'utf8')
+    const data = e.method === 8 ? deflateRawSync(e.data) : e.data
+    const local = Buffer.alloc(30)
+    local.writeUInt32LE(0x04034b50, 0)
+    local.writeUInt16LE(20, 4)
+    local.writeUInt16LE(0x0800, 6) // UTF-8 标志
+    local.writeUInt16LE(e.method, 8)
+    local.writeUInt32LE(0, 10)
+    local.writeUInt32LE(0, 14) // 流式形态：local 头尺寸为 0
+    local.writeUInt32LE(0, 18)
+    local.writeUInt16LE(nameBuf.length, 26)
+    local.writeUInt16LE(0, 28)
+    localParts.push(local, nameBuf, data)
+    const cen = Buffer.alloc(46)
+    cen.writeUInt32LE(0x02014b50, 0)
+    cen.writeUInt16LE(20, 4)
+    cen.writeUInt16LE(20, 6)
+    cen.writeUInt16LE(0x0800, 8)
+    cen.writeUInt16LE(e.method, 10)
+    cen.writeUInt32LE(0, 12)
+    cen.writeUInt32LE(e.data.length, 20)
+    cen.writeUInt32LE(data.length, 24)
+    cen.writeUInt16LE(nameBuf.length, 28)
+    cen.writeUInt16LE(0, 30)
+    cen.writeUInt16LE(0, 32)
+    cen.writeUInt16LE(0, 34)
+    cen.writeUInt16LE(0, 36)
+    cen.writeUInt32LE(0, 38)
+    cen.writeUInt32LE(offset, 42)
+    centralParts.push(cen, nameBuf)
+    offset += local.length + nameBuf.length + data.length
+  }
+  const cenBuf = Buffer.concat(centralParts)
+  const eocd = Buffer.alloc(22)
+  eocd.writeUInt32LE(0x06054b50, 0)
+  eocd.writeUInt16LE(entries.length, 8)
+  eocd.writeUInt16LE(entries.length, 10)
+  eocd.writeUInt32LE(cenBuf.length, 12)
+  eocd.writeUInt32LE(offset, 16)
+  return Buffer.concat([...localParts, cenBuf, eocd])
 }

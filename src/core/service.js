@@ -1,12 +1,14 @@
 // service — 应用服务层：UI/Host 的全部读写端点在此编排。
 //
 // 边界：配置不经过本层，UI 直读写 settings.yaml；本层绝不抛出越过 dispatch 的错误。
-// 队列：读请求不排队、文件写 FIFO 串行、网络慢操作独立队列。
+// 队列：读请求不入队但受写屏障对齐（写进行中读等写队列结算）；文件写 FIFO 串行；网络慢操作独立队列。
+// 出站载荷经 contract.js 校验（Host 侧回归闸），Client 侧同模块复验。
 // 参考：插件运行时.md「RPC 传输」「请求调度与缓存」；DSR-013/014/017。
 
 import { SkillManagerError, buildRepair } from './base/errors.js'
-import { requireDir, DEFAULT_GROUP, makeGroups } from './model/intent.js'
+import { requireDir, DEFAULT_GROUP } from './model/intent.js'
 import { createSharedCache, hashOf } from './base/cache.js'
+import { ContractError, parseEndpointPayload } from './model/contract.js'
 import { dirHash } from './model/library.js'
 import * as library from './model/library.js'
 import { readCheckCache } from './model/store.js'
@@ -113,7 +115,6 @@ export function createSession(scopeGetter, listWorkspaces, getStore, backupsRoot
         const g = intentSkills?.[dir]?.group
         return [dir, typeof g === 'string' && g !== '' && (g in configGroups || g === DEFAULT_GROUP) ? g : DEFAULT_GROUP]
       }))
-      const groupsDoc = makeGroups(configGroups, intentSkills, new Set(skills))
       const { desired, warnings } = deriveDesired({ memberships, mounts, workspacesById, globalRootPath })
       // 行状态走查与孤儿集共用同一次扫描，结果随 bundle 快照一起失效。
       const links = await scanMountLinks({ root, globalRootPath, workspacesById })
@@ -137,7 +138,6 @@ export function createSession(scopeGetter, listWorkspaces, getStore, backupsRoot
         skills,
         mounts,
         memberships,
-        groups: groupsDoc.groups,
         desired,
         warnings,
         workspacesById,
@@ -162,7 +162,7 @@ export function createSession(scopeGetter, listWorkspaces, getStore, backupsRoot
 }
 
 /** 方法表：所有方法在未配置门禁之后执行。getStore 在请求时解析，域未就绪抛错 → internal。 */
-export function buildApi(scopeGetter, { listWorkspaces = () => [], getStore, backupsRoot, globalRoot, cache } = {}) {
+export function buildApi(scopeGetter, { listWorkspaces = () => [], getStore, backupsRoot, globalRoot, cache, logger } = {}) {
   const shared = cache ?? createSharedCache()
   const session = () => createSession(scopeGetter, listWorkspaces, getStore, backupsRoot, globalRoot, shared)
   const hashOfDir = hashOf(shared, dirHash)
@@ -177,11 +177,16 @@ export function buildApi(scopeGetter, { listWorkspaces = () => [], getStore, bac
       return shared.bundle
     }
     if (shared.bundleInflight === null) {
+      const gen = shared.bundleGen
       shared.bundleInflight = session().bundle()
         .then((b) => {
-          shared.bundle = b
-          shared.bundleRoot = root
-          shared.bundleAt = Date.now()
+          // 代际守卫：冷扫在途期间发生写后刷新（gen 递进）→ 本快照已旧，
+          // 返回给本次调用方但不回写共享缓存（迟到响应不覆盖新快照）。
+          if (shared.bundleGen === gen) {
+            shared.bundle = b
+            shared.bundleRoot = root
+            shared.bundleAt = Date.now()
+          }
           return b
         })
         .finally(() => {
@@ -192,20 +197,22 @@ export function buildApi(scopeGetter, { listWorkspaces = () => [], getStore, bac
   }
 
   /**
-   * 写路径收尾：重算并预热 bundle 快照，同时清空哈希缓存。
-   * 于是写后的读请求（UI reload）直接命中热缓存。
-   * 失败不掩盖写结果：清缓存，让下次读走冷扫兜底。
+   * 写路径收尾：递进缓存代际（使在途旧冷扫的回写失效），重算并预热 bundle 快照，
+   * 同时清空哈希缓存。于是写后的读请求（UI reload）直接命中热缓存。
+   * 失败不掩盖写结果：清缓存，让下次读走冷扫兜底；诊断记 logger。
    */
   async function refreshCache() {
+    shared.bundleGen += 1
     try {
       const b = await session().bundle()
       shared.bundle = b
       shared.bundleRoot = b.root
       shared.bundleAt = Date.now()
-    } catch {
+    } catch (error) {
       shared.bundle = null
       shared.bundleRoot = null
       shared.bundleAt = 0
+      logger?.warn?.(`dsh-skill-manager: 写后缓存重建失败（下次读走冷扫兜底）：${error instanceof Error ? error.message : String(error)}`)
     } finally {
       shared.hashes.clear()
     }
@@ -251,15 +258,20 @@ export function buildApi(scopeGetter, { listWorkspaces = () => [], getStore, bac
       return { ok: true }
     },
 
-    /** skills.sh 搜索：网络队列端点，同样要求已配置目录。 */
+    /** skills.sh 搜索：网络队列端点。门禁只查目录配置（不依赖 storage 域就绪——搜索不碰台账）。 */
     async 'search'(payload) {
-      session() // 未配置门禁：search 也在门禁内
-      return acquire.search(payload.query, Number(payload.limit ?? 20), Number(payload.offset ?? 0))
+      requireDir(scopeGetter())
+      const limit = Number(payload.limit ?? 20)
+      const offset = Number(payload.offset ?? 0)
+      if (!Number.isInteger(limit) || limit < 1 || limit > 100 || !Number.isInteger(offset) || offset < 0) {
+        throw new SkillManagerError('bad-payload', `search 参数非法：limit=${String(payload.limit ?? 20)}（1–100 整数），offset=${String(payload.offset ?? 0)}（非负整数）`)
+      }
+      return acquire.search(String(payload.query ?? ''), limit, offset)
     },
 
-    /** 仓库探测：列出该仓库内含 SKILL.md 的候选目录。 */
+    /** 仓库探测：列出该仓库内含 SKILL.md 的候选目录（同 search 只挂目录门禁）。 */
     async 'repo-skills'(payload) {
-      session() // 未配置门禁
+      requireDir(scopeGetter())
       return acquire.repoSkills(String(payload.repo ?? ''), payload.ref ? String(payload.ref) : 'main')
     },
 
@@ -348,7 +360,8 @@ export function buildApi(scopeGetter, { listWorkspaces = () => [], getStore, bac
 /**
  * 任意错误 → RPC Result 失败侧，绝不外抛。
  * 外抛会让 handler 退化成平台 500 纯文本，客户端只剩 transport failure 兜底。
- * SkillManagerError 用自身 code/retryable/facts；GhError 的 kind 直通错误码。
+ * SkillManagerError 用自身 code/retryable/facts；GhError 的 kind 直通错误码；
+ * ContractError（出站校验违例）归 contract-violation，不可重试。
  * 其余一律归 internal 且不可重试。
  * repair 由 base/errors.js 的码表模板加动态 facts 组装。
  * @param {string} operation - 端点名，注入 repair.operation
@@ -364,9 +377,15 @@ export function toRpcFailure(error, operation) {
       },
     }
   }
+  if (error instanceof ContractError) {
+    return {
+      ok: false,
+      error: { code: 'contract-violation', message: error.message, details: { retryable: false, repair: buildRepair('contract-violation', { operation }) } },
+    }
+  }
   if (error && typeof error === 'object' && typeof error.kind === 'string') {
     const code = error.kind
-    const retryable = ['unreachable', 'rate_limited'].includes(code)
+    const retryable = ['unreachable', 'rate-limited'].includes(code)
     return {
       ok: false,
       error: { code, message: error.message ?? String(error), details: { retryable, repair: buildRepair(code, { operation }) } },
@@ -384,12 +403,13 @@ export function toRpcFailure(error, operation) {
 
 /**
  * connection.rpc 通道分发器：按方法表三路排队，结果与错误统一包成平台 Result。
- * READ 直返快照 / NET 走网络队列 / 其余走 WRITE FIFO。
+ * READ 直返快照（写屏障对齐）/ NET 走网络队列 / 其余走 WRITE FIFO。
+ * 出站载荷默认经 contract.js 校验（validate=false 仅供假 api 的队列语义测试关闭）。
  * signal 刻意不透传：写操作半途而废即半成品现场，断连也必须跑完。
  * 读与网络操作短平快，无取消价值。
  * @returns {(endpoint: string, payload: unknown) => Promise<{ok: boolean, value?: unknown, error?: object}>}
  */
-export function createDispatch(api, { writeQueue = createQueue(), netQueue = createQueue() } = {}) {
+export function createDispatch(api, { writeQueue = createQueue(), netQueue = createQueue(), validate = true } = {}) {
   return async function dispatch(endpoint, payload) {
     if (typeof endpoint !== 'string' || !Object.hasOwn(api, endpoint)) {
       return {
@@ -404,11 +424,13 @@ export function createDispatch(api, { writeQueue = createQueue(), netQueue = cre
     const input = payload && typeof payload === 'object' ? payload : {}
     try {
       const invoke = () => Promise.resolve(api[endpoint](input))
-      const value = READ_METHODS.has(endpoint)
+      const raw = READ_METHODS.has(endpoint)
         ? await (writeQueue.busy ? writeQueue.idle().then(invoke) : invoke())
         : NET_METHODS.has(endpoint)
           ? await netQueue.enqueue(invoke)
           : await writeQueue.enqueue(invoke)
+      // 出站校验：Host 自身回归在此拦截，脏载荷不出通道
+      const value = validate ? parseEndpointPayload(endpoint, raw) : raw
       return { ok: true, value }
     } catch (error) {
       return toRpcFailure(error, endpoint)

@@ -7,9 +7,9 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { SkillManagerError } from '../base/errors.js'
 import { fetchZipball, ghApi, normalizeRepoSlug, resolveRemote, searchSkillsSh } from '../base/net.js'
-import { atomicSwapDir, safePath } from '../base/fsys.js'
+import { atomicSwapDir, pathExists, safePath } from '../base/fsys.js'
 import { dirHash, parseSkillMd } from '../model/library.js'
-import { copyTree, explodeZipball, nowIso, pathExists, skillsFromFiles, validateInstallName, withMaterializedSkillDir } from './zipball.js'
+import { copyTree, explodeZipball, nowIso, skillsFromFiles, validateInstallName, withMaterializedSkillDir } from './zipball.js'
 
 /** skills.sh 搜索：net 层异常原样透传，本层不二次包装。 */
 export async function search(query, limit = 20, offset = 0) {
@@ -66,7 +66,7 @@ export async function repoSkills(repoSlugInput, branch = 'main') {
  * Side Effects: 原子换装写入 root 下新目录 → 登记 skills 表 → 触发对账。
  * @throws {SkillManagerError} 解析与网络：bad-repo / remote-unreachable / bad-zipball
  * @throws {SkillManagerError} 目录定位：no-skill-md / needs-selection
- * @throws {SkillManagerError} 落库：bad-name / already-installed / name-conflict / write-failed
+ * @throws {SkillManagerError} 落库：bad-name / already-installed / name-conflict / write-failed / registration-failed
  * @throws {GhError} 下载失败按 kind 归类，由 dispatch 直通为稳定错误码
  */
 export async function add({ root, store, repo: repoInput, dir, ref = 'main', as, ctx }) { // quality-floor: ignore docstring-promise 函数体确有 throw SkillManagerError（already-installed/name-conflict）；扫描器将参数解构花括号配误作函数体起点致漏看
@@ -114,16 +114,24 @@ export async function add({ root, store, repo: repoInput, dir, ref = 'main', as,
     await atomicSwapDir(dest, (stage) => copyTree(tmp, stage))
 
     // 入库元数据只投影版本事实；disabled/group 属 settings 意图，绝不写进登记表。
-    await store.putSkill(installName, {
-      origin: 'github',
-      repo: repoSlug,
-      branch: resolved.branch,
-      commit: resolved.commit,
-      path_in_repo: actualSubdir,
-      content_hash: await dirHash(dest),
-      origin_path: null,
-      installed_at: nowIso(),
-    })
+    // 换装已成功、登记失败不能静默：目录已在库内而台账无记录，必须显式失败让用户知情。
+    try {
+      await store.putSkill(installName, {
+        origin: 'github',
+        repo: repoSlug,
+        branch: resolved.branch,
+        commit: resolved.commit,
+        path_in_repo: actualSubdir,
+        content_hash: await dirHash(dest),
+        origin_path: null,
+        installed_at: nowIso(),
+      })
+    } catch (error) {
+      throw new SkillManagerError('registration-failed', `${installName} 内容已入库但登记失败：${error instanceof Error ? error.message : String(error)}`, false, [
+        { label: '库内路径', value: dest },
+        { label: '仓库', value: repoSlug },
+      ])
+    }
 
     const sync = await ctx.reconcile()
     return {

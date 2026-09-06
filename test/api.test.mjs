@@ -39,8 +39,10 @@ test('未配置门禁：所有方法统一 skilldir-unconfigured', async () => {
   }
 })
 
-test('已配置但目录缺失：统一 skilldir-missing（插件保持存活）', async () => {
-  const { api } = makeApi({ root: join(await mkTmp(), 'not-there') })
+test('已配置但目录缺失：统一 skilldir-missing（插件保持存活）', async (t) => {
+  const tmp = await mkTmp()
+  t.after(() => cleanup(tmp))
+  const { api } = makeApi({ root: join(tmp, 'not-there') })
   await assertRejectsCode(api.overview({}), 'skilldir-missing')
   await assertRejectsCode(api.sync({}), 'skilldir-missing')
 })
@@ -52,8 +54,8 @@ test('toRpcFailure：错误 → 平台 Result 失败侧（retryable 归 details�
     { ok: false, code: 'bad-name', message: '名字不对', retryable: false },
   )
   assert.ok(sme.error.details.repair.summary) // DSR-018：任何失败带 repair
-  assert.equal(toRpcFailure(new SkillManagerError('rate_limited', '稍后重试', true)).error.details.retryable, true)
-  // GhError 网络分类：kind 直通错误码，unreachable/rate_limited 可重试
+  assert.equal(toRpcFailure(new SkillManagerError('rate-limited', '稍后重试', true)).error.details.retryable, true)
+  // GhError 网络分类：kind 直通错误码，unreachable/rate-limited 可重试
   const gh = toRpcFailure(Object.assign(new Error('gh down'), { kind: 'unreachable' }), 'search')
   assert.equal(gh.error.code, 'unreachable')
   assert.equal(gh.error.details.retryable, true)
@@ -95,7 +97,8 @@ test('createDispatch：成功/失败 Result 包装、payload 兜底、未知端�
       throw new SkillManagerError('skilldir-missing', '目录缺失')
     },
   }
-  const dispatch = createDispatch(api)
+  // 假 api 只测队列/Result 语义，返回体不过契约：显式关闭出站校验
+  const dispatch = createDispatch(api, { validate: false })
   assert.deepEqual(await dispatch('backups', {}), { ok: true, value: { ok: true } })
   assert.deepEqual(await dispatch('sync', { a: 1 }), { ok: true, value: { a: 1 } })
   assert.deepEqual(await dispatch('sync'), { ok: true, value: {} }) // payload 缺失兜底
@@ -130,7 +133,8 @@ test('createDispatch：三路队列语义 — 读等写屏障、网络不等写�
       return 'w2'
     },
   }
-  const dispatch = createDispatch(api)
+  // 假 api 只测三路排队语义，返回体不过契约：显式关闭出站校验
+  const dispatch = createDispatch(api, { validate: false })
   const write = dispatch('sync', {})
   const write2 = dispatch('restore', {})
   const read = dispatch('overview', {})

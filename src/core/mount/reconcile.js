@@ -24,11 +24,16 @@ export async function reconcile({ root, memberships, mounts, workspacesById, glo
   const results = []
 
   // 1. 摘除 = 孤儿清扫（同一归属判据，无第二张台账）：owned 且不在期望集 → 删链接。
+  //    逐条隔离（与物化同构）：单条摘除失败进 results，不中断其余子项。
   const links = await scanMountLinks({ root, globalRootPath, workspacesById })
   const orphans = await findOrphanLinks({ root, desired, globalRootPath, workspacesById, links })
   for (const link of orphans) {
-    await removeLink(link.path)
-    results.push({ name: link.name, target: link.parent, action: 'removed', reason: '孤儿链接（归属本插件且不在期望集）' })
+    try {
+      await removeLink(link.path)
+      results.push({ name: link.name, target: link.parent, action: 'removed', reason: '孤儿链接（归属本插件且不在期望集）' })
+    } catch (error) {
+      results.push({ name: link.name, target: link.parent, action: 'error', error: error instanceof Error ? error.message : String(error), code: error.code })
+    }
   }
 
   // 2. 物化活动期望（junction-only）。
@@ -45,7 +50,7 @@ export async function reconcile({ root, memberships, mounts, workspacesById, glo
   }
 
   // 3. Git exclude 托管块（只更新有 project 级期望的活动工作区；非 Git 项目跳过）。
-  await updateGitExcludes({ desired, workspacesById })
+  await updateGitExcludes({ desired, workspacesById, results })
 
   const errors = results.filter((r) => r.action === 'error')
   return { results, warnings, errors }
@@ -62,8 +67,8 @@ function projectIdsWithDesired(desired) {
   return ids
 }
 
-/** 为活动工作区根写或清 .git/info/exclude 托管块。 */
-async function updateGitExcludes({ desired, workspacesById }) {
+/** 为活动工作区根写或清 .git/info/exclude 托管块；写失败进 results 单条错误，不中断整单。 */
+async function updateGitExcludes({ desired, workspacesById, results }) {
   const wanted = projectIdsWithDesired(desired)
   for (const [workspaceId, ws] of workspacesById) {
     const excludeFile = join(ws.path, '.git', 'info', 'exclude')
@@ -75,7 +80,12 @@ async function updateGitExcludes({ desired, workspacesById }) {
     }
     const stripped = stripExcludeBlock(text)
     const next = wanted.has(workspaceId) ? withExcludeBlock(stripped) : stripped
-    if (next !== text) await writeFile(excludeFile, next, 'utf8')
+    if (next === text) continue
+    try {
+      await writeFile(excludeFile, next, 'utf8')
+    } catch (error) {
+      results.push({ name: 'git-exclude', target: workspaceId, action: 'error', error: error instanceof Error ? error.message : String(error), code: 'write-failed' })
+    }
   }
 }
 

@@ -5,7 +5,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { parseSkillMd, dirHash, scanLibrary, skillDirExists } from '../src/core/model/library.js'
+import { parseSkillMd, dirHash, scanLibrary } from '../src/core/model/library.js'
 import { mkTmp, cleanup, writeSkill, fakeStore, skillRecord } from './helpers.mjs'
 
 test('parseSkillMd：单行 key: value 与引号剥离', () => {
@@ -104,17 +104,6 @@ test('scanLibrary：无 SKILL.md 的目录仍列出但 hasSkillMd=false；点开
     assert.equal(items.length, 1)
     assert.equal(items[0].dir, 'empty-one')
     assert.equal(items[0].hasSkillMd, false)
-  } finally {
-    await cleanup(root)
-  }
-})
-
-test('skillDirExists：平铺直查', async () => {
-  const root = await mkTmp()
-  try {
-    await writeSkill(root, 'x')
-    assert.equal(await skillDirExists(root, 'x'), true)
-    assert.equal(await skillDirExists(root, 'nope'), false)
   } finally {
     await cleanup(root)
   }

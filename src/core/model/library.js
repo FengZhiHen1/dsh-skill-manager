@@ -6,7 +6,6 @@
 import { createHash } from 'node:crypto'
 import { readFile, readdir, stat } from 'node:fs/promises'
 import { join } from 'node:path'
-import { existsDir } from '../base/fsys.js'
 
 /**
  * 解析 SKILL.md frontmatter；无 frontmatter 返回 {}。
@@ -173,9 +172,4 @@ export async function scanLibrary(root, store, opts = {}) {
   }
   items.sort((a, b) => a.dir.localeCompare(b.dir))
   return items
-}
-
-/** 目录是否真实存在（供 API 层判断 missing 现场的恢复动作）。 */
-export async function skillDirExists(root, name) {
-  return existsDir(join(root, name))
 }

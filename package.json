@@ -22,7 +22,7 @@
     "build": "node build-client.mjs",
     "test": "node --test test/*.test.mjs",
     "layering": "node ../../tools/plugin-layering-check.mjs .",
-    "check": "node build-client.mjs --check && node --check dist/client.js && node --check src/adapter/index.js && node --check src/adapter/settings.js && node --check src/adapter/storage.js && node --check src/adapter/migrate.js && node --check src/core/service.js && node --check src/core/base/errors.js && node --check src/core/base/fsys.js && node --check src/core/base/cache.js && node --check src/core/base/zip.js && node --check src/core/base/net.js && node --check src/core/model/intent.js && node --check src/core/model/store.js && node --check src/core/model/library.js && node --check src/core/mount/derive.js && node --check src/core/mount/materialize.js && node --check src/core/mount/inspect.js && node --check src/core/mount/reconcile.js && node --check src/core/inbound/zipball.js && node --check src/core/inbound/acquire.js && node --check src/core/inbound/upstream.js && node --check src/core/inbound/backups.js && npm run layering && node --test test/*.test.mjs"
+    "check": "node build-client.mjs --check && node check-syntax.mjs && npm run layering && node --test test/*.test.mjs"
   },
   "dependencies": {
     "schemastery": "^3.18.0",
