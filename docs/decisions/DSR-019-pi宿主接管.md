@@ -25,7 +25,7 @@
 
 1. **宿主维度**：挂载规则扩展为 `{ scope, project, hosts }`，`hosts ⊆ {dsh, pi}`；缺省/存量无 `hosts` 键的规则回落 `['dsh']`（schema default 承载，零迁移）。空 hosts 是死规则，settings 写路径拦截，对账容忍跳过。
 2. **目标映射**：`dsh` 侧不变（`$DSH_HOME/skills`、`<ws>/.dsh/skills`）；`pi` 侧全局 = `<piAgentDir>/skills`、项目级 = `<ws>/.pi/skills`。targetKey 变为 `host:scope|project`（如 `pi:project|<workspaceId>`）。
-3. **pi 目录固定默认路径，不可配**（2026-09-06 用户复核修正：路径输入项只保留 skills 目录一个）。接管开关是布尔配置项 `pi`（复选框，默认关）；开 = 探测 `PI_CODING_AGENT_DIR` 环境变量（pi 自身支持的覆盖）→ `<home>/.pi/agent`。探测/开关两语义分离：探测到即入对账扫描范围（与开关无关）——**关掉开关后 pi 侧残留的自有链接按孤儿判据摘除（干净退出）**；开关开才产 pi 期望目标。两语义为 null 时行为与单宿主逐字节一致。
+3. **pi 目录固定默认路径，不可配**（2026-09-06 用户复核修正：路径输入项只保留 skills 目录一个）。接管开关是布尔配置项 `pi`（复选框，默认关）；开 = 探测 `PI_CODING_AGENT_DIR` 环境变量（pi 自身支持的覆盖）→ `<home>/.pi/agent`。探测/开关/引用三语义分离（`service.js` 的 `piState` 单源）：期望根 = 开关开且探测到；**扫描根 = 开关开或存在引用 pi 的挂载规则**——开关关且无 pi 规则时 pi 完全不存在（不扫不报不碰，同日用户裁定），开关关但规则残留 pi 时残留链接按孤儿判据摘除（干净退出）。两语义为 null 时行为与单宿主逐字节一致。
 4. **不碰 pi 的任何配置文件**：`settings.json`（含用户既有 `skills` 数组）归用户自管，两条来源在 pi 内自然合并。
 5. **UI**：插件卡片为 skills 目录路径项 + 「接管宿主」复选框组（DSH 固定勾选不可关——本插件基本盘；pi 可选、即时写）；范围卡行保持主复选框（勾选 = 默认 DSH）；行勾选且 pi 可用时行尾出 `[DSH][pi]` 宿主 chips；关掉最后一个宿主等效取消整行挂载，走同一遮罩确认；确认计数跨双侧。
 6. **Git exclude 托管块**：按期望集涉及的宿主集合写一行或两行（`/.dsh/skills/`、`/.pi/skills/`）。

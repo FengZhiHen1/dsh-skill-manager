@@ -10,6 +10,7 @@ import { deriveDesired, projectWorkspaces, targetDir, targetKey } from '../src/c
 import { detachLink, isLink, materializeOne, removeLink } from '../src/core/mount/materialize.js'
 import { findOrphanLinks, scanMountLinks, walkMountState } from '../src/core/mount/inspect.js'
 import { reconcile } from '../src/core/mount/reconcile.js'
+import { piState } from '../src/core/service.js'
 import { mkTmp, cleanup, writeSkill } from './helpers.mjs'
 
 function workspaces(list = [{ id: 'w1', title: 'Ws1', path: 'P' }]) {
@@ -405,6 +406,17 @@ test('reconcile：pi 宿主接管——.pi/skills 双侧物化与摘除、exclud
   } finally {
     await cleanup(f.tmp)
   }
+})
+
+test('piState：扫描根 = 开关开或规则引用 pi；开关关且无引用 = pi 全不存在（不扫不报）', () => {
+  const offNoRef = piState({ pi: false, groups: { 默认: { mounts: [] } } }, 'PS')
+  assert.deepEqual(offNoRef, { piSkillsRoot: null, piScanRoot: null })
+  // 开关关但规则残留 pi：扫描根保留（干净退出语义），期望根仍 null
+  const offWithRef = piState({ pi: false, groups: { 默认: { mounts: [{ scope: 'global', project: null, hosts: ['dsh', 'pi'] }] } } }, 'PS')
+  assert.deepEqual(offWithRef, { piSkillsRoot: null, piScanRoot: 'PS' })
+  // 开关开：两根俱在；未探测到目录（probedRoot=null）一律 null
+  assert.deepEqual(piState({ pi: true, groups: {} }, 'PS'), { piSkillsRoot: 'PS', piScanRoot: 'PS' })
+  assert.deepEqual(piState({ pi: true, groups: {} }, null), { piSkillsRoot: null, piScanRoot: null })
 })
 
 test('reconcile：pi 开关关闭但目录探测在（期望根 null + 扫描根在）→ pi 残留链接按孤儿摘除（干净退出）', async () => {

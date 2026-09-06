@@ -724,7 +724,7 @@ function RepairCopy({ text, label = "\u590D\u5236\u4FEE\u590D\u63D0\u793A\u8BCD"
       size: "sm",
       variant: "outline",
       onClick: click,
-      style: { fontSize: 11, padding: "2px 8px", whiteSpace: "nowrap" },
+      style: { fontSize: 11, padding: "2px 8px", whiteSpace: "nowrap", flexShrink: 0 },
       children: result === "copied" ? "\u5DF2\u590D\u5236" : result === "failed" ? "\u590D\u5236\u5931\u8D25" : label
     }
   );
@@ -982,7 +982,7 @@ function ManageView({ call, data, config, reload }) {
         ] }) : /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(GroupScopePanel, { config, group: groupFilter, workspaces: data.workspaces, skills: data.lib.skills, onGroupOp: groupOp, piAvailable: data.agents?.pi?.available === true }),
         warningLines.map((w) => /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { ...badgeStyle(T.warn), borderRadius: 10, padding: "9px 12px", margin: "8px 0", fontSize: 12, display: "flex", alignItems: "center", gap: 8 }, children: [
           /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: dotStyle(T.warn) }),
-          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: { flex: 1 }, children: w.text }),
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: { flex: 1, minWidth: 0, wordBreak: "break-all" }, children: w.text }),
           /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(RepairCopy, { text: w.prompt })
         ] }, w.key)),
         /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { display: "flex", alignItems: "baseline", gap: 8, margin: "14px 0 10px" }, children: [
@@ -1811,7 +1811,7 @@ function SkillsSection({ call, workspaces, scope, subscribeSkillSettings }) {
     )) }),
     error ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(ErrorLineWrap, { error, root: data && data.root }) : null,
     editError ? /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { style: { ...badgeStyle(T.error), borderRadius: 10, padding: "8px 12px", margin: "8px 12px 0", fontSize: 12, display: "flex", alignItems: "center", gap: 8 }, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { style: { flex: 1 }, children: editError.message }),
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { style: { flex: 1, minWidth: 0, wordBreak: "break-all" }, children: editError.message }),
       editError.prompt ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(RepairCopy, { text: editError.prompt }) : null
     ] }) : null,
     tab === "manage" && /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(ManageView, { call, data, config, reload }),
@@ -1821,7 +1821,7 @@ function SkillsSection({ call, workspaces, scope, subscribeSkillSettings }) {
 function ErrorLineWrap({ error, root }) {
   if (!error) return null;
   return /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { style: { ...badgeStyle(T.error), borderRadius: 10, padding: "8px 12px", margin: "4px 12px 0", fontSize: 12, display: "flex", alignItems: "center", gap: 8 }, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { style: { flex: 1 }, children: error.message || String(error) }),
+    /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { style: { flex: 1, minWidth: 0, wordBreak: "break-all" }, children: error.message || String(error) }),
     /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(RepairCopy, { text: buildRepairPrompt({ root, code: error.code, message: error.message, repair: error.repair }) })
   ] });
 }

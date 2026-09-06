@@ -66,6 +66,22 @@ async function readWorkspaceProjection(listWorkspaces) {
 }
 
 /**
+ * pi 两语义现算（单源）：期望根 = 开关开且探测到；扫描根 = 开关开**或**存在引用 pi 的挂载规则。
+ * 开关关且无 pi 规则 = pi 完全不存在（不扫不报不碰，2026-09-06 用户裁定）；
+ * 开关关但规则残留 pi = 仍在扫描范围，残留链接按孤儿摘除（干净退出）。
+ */
+export function piState(config, probedRoot) {const enabled = config?.[PI_FIELD] === true
+  const groups = config?.groups && typeof config.groups === 'object' ? config.groups : {}
+  const referenced = Object.values(groups).some((g) => (
+    (Array.isArray(g?.mounts) ? g.mounts : []).some((m) => Array.isArray(m?.hosts) && m.hosts.includes('pi'))
+  ))
+  return {
+    piSkillsRoot: enabled ? probedRoot : null,
+    piScanRoot: probedRoot !== null && (enabled || referenced) ? probedRoot : null,
+  }
+}
+
+/**
  * 每请求会话：按当下配置解析 skills 目录根，组装只读 bundle 快照。
  * 无台账：期望集由 settings 意图与工作区投影现算，行状态由文件系统走查现算。
  * globalRootPath 由 Host 注入，本层不自行推导 DSH 根。
@@ -85,11 +101,12 @@ export function createSession(scopeGetter, listWorkspaces, getStore, backupsRoot
     store,
     backupsRoot,
     globalRootPath,
-    piScanRoot,
+    piScanRoot, // pi 探测根（probe 事实）；是否生效由 piState 按配置判定
     async bundle() {
       const config = scopeGetter().get()
-      // 期望语义：开关（pi 字段）开 + 探测到才产 pi 目标；关开关后残留链接按孤儿判据摘除（干净退出）。
-      const piSkillsRoot = config?.[PI_FIELD] === true ? piScanRoot : null
+      // pi 两语义现算：期望根要求开关开；扫描根要求开关开或规则引用 pi。
+      // 两者为 null 时下游全部按单宿主（dsh）回落，零行为变化。
+      const { piSkillsRoot, piScanRoot: piScanActive } = piState(config, piScanRoot)
       const configGroups = config?.groups && typeof config.groups === 'object' ? config.groups : {}
       const intentSkills = config?.skills && typeof config.skills === 'object' ? config.skills : {}
       const workspacesById = await readWorkspaceProjection(listWorkspaces)
@@ -128,9 +145,9 @@ export function createSession(scopeGetter, listWorkspaces, getStore, backupsRoot
         return [dir, typeof g === 'string' && g !== '' && (g in configGroups || g === DEFAULT_GROUP) ? g : DEFAULT_GROUP]
       }))
       const { desired, warnings } = deriveDesired({ memberships, mounts, workspacesById, globalRootPath, piSkillsRoot })
-      // 行状态走查与孤儿集共用同一次扫描（扫描语义用 piScanRoot：探测到就扫，与开关无关），
+      // 行状态走查与孤儿集共用同一次扫描（扫描语义：开关开或规则引用 pi 才扫 pi 根），
       // 结果随 bundle 快照一起失效。
-      const links = await scanMountLinks({ root, globalRootPath, workspacesById, piSkillsRoot: piScanRoot })
+      const links = await scanMountLinks({ root, globalRootPath, workspacesById, piSkillsRoot: piScanActive })
       const mountRows = await walkMountState({ root, desired, links, globalRootPath, workspacesById, piSkillsRoot })
       const orphans = await findOrphanLinks({ root, desired, globalRootPath, workspacesById, piSkillsRoot, links })
       const mountCount = new Map([...workspacesById.keys()].map((id) => [id, 0]))
@@ -159,7 +176,7 @@ export function createSession(scopeGetter, listWorkspaces, getStore, backupsRoot
         mountRows,
         orphans,
         piSkillsRoot,
-        piScanRoot,
+        piScanRoot: piScanActive,
       }
     },
     /** 全量对账：现算期望并收敛挂载，junction-only。 */
@@ -353,6 +370,8 @@ export function buildApi(scopeGetter, { listWorkspaces = () => [], getStore, bac
     async 'remove'(payload) {
       const s = session()
       const workspacesById = await readWorkspaceProjection(listWorkspaces)
+      // 摘除范围与对账同一扫描语义：pi 开关关且无 pi 规则时 pi 侧不扫不动
+      const { piScanRoot: removeScanRoot } = piState(scopeGetter().get(), s.piScanRoot)
       const result = await backupsMod.remove({
         root: s.root,
         store: s.store,
@@ -360,7 +379,7 @@ export function buildApi(scopeGetter, { listWorkspaces = () => [], getStore, bac
         backupsRoot: s.backupsRoot,
         workspacesById,
         globalRootPath: globalRoot,
-        piSkillsRoot: s.piScanRoot,
+        piSkillsRoot: removeScanRoot,
       })
       await refreshCache()
       return result

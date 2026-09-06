@@ -114,7 +114,7 @@ export function RepairCopy({ text, label = '复制修复提示词' }) {
       size="sm"
       variant="outline"
       onClick={click}
-      style={{ fontSize: 11, padding: '2px 8px', whiteSpace: 'nowrap' }}
+      style={{ fontSize: 11, padding: '2px 8px', whiteSpace: 'nowrap', flexShrink: 0 }}
     >
       {result === 'copied' ? '已复制' : result === 'failed' ? '复制失败' : label}
     </Button>

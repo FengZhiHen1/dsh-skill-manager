@@ -231,7 +231,7 @@ export function SkillsSection({ call, workspaces, scope, subscribeSkillSettings 
       {editError
         ? (
             <div style={{ ...badgeStyle(T.error), borderRadius: 10, padding: '8px 12px', margin: '8px 12px 0', fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ flex: 1 }}>{editError.message}</span>
+              <span style={{ flex: 1, minWidth: 0, wordBreak: 'break-all' }}>{editError.message}</span>
               {editError.prompt ? <RepairCopy text={editError.prompt} /> : null}
             </div>
           )
@@ -247,7 +247,7 @@ function ErrorLineWrap({ error, root }) {
   if (!error) return null
   return (
     <div style={{ ...badgeStyle(T.error), borderRadius: 10, padding: '8px 12px', margin: '4px 12px 0', fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
-      <span style={{ flex: 1 }}>{error.message || String(error)}</span>
+      <span style={{ flex: 1, minWidth: 0, wordBreak: 'break-all' }}>{error.message || String(error)}</span>
       <RepairCopy text={buildRepairPrompt({ root, code: error.code, message: error.message, repair: error.repair })} />
     </div>
   )

@@ -263,7 +263,8 @@ export function ManageView({ call, data, config, reload }) {
           {warningLines.map((w) => (
             <div key={w.key} style={{ ...badgeStyle(T.warn), borderRadius: 10, padding: '9px 12px', margin: '8px 0', fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={dotStyle(T.warn)} />
-              <span style={{ flex: 1 }}>{w.text}</span>
+              {/* 长路径是无空格长 token：minWidth:0 放开收缩 + break-all 允许断行，否则按钮被顶出面板 */}
+              <span style={{ flex: 1, minWidth: 0, wordBreak: 'break-all' }}>{w.text}</span>
               <RepairCopy text={w.prompt} />
             </div>
           ))}
