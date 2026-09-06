@@ -22,6 +22,10 @@ export function SkillManagerCard({ scope, uiWorkspace }) {
   const [busy, setBusy] = useState(false)
   const [failed, setFailed] = useState(null) // { message, prompt }
   const [focused, setFocused] = useState(false)
+  // 交互态对齐原生 PluginCard.module.css（knowledge client/15 §4.1）：
+  // 禁用 = opacity 0.4 + 默认光标；放弃 hover 加深；focus 给品牌色 outline（onFocus 近似 :focus-visible，鼠标点击也会短暂出现）。
+  const [hoverDiscard, setHoverDiscard] = useState(false)
+  const [focusEl, setFocusEl] = useState(null) // 'header' | 'discard' | 'save'
   // Host 权威快照：value=解析值、user=用户层；user 层含 skillsDir 即「已覆盖」。
   const [snap, setSnap] = useState(() => scope.getSnapshot())
 
@@ -161,7 +165,9 @@ export function SkillManagerCard({ scope, uiWorkspace }) {
         aria-expanded={open}
         aria-label={`${open ? '收起' : '展开'}: 技能管理`}
         onClick={() => setOpen(!open)}
-        style={{ width: '100%', appearance: 'none', border: 0, background: 'none', font: 'inherit', color: 'inherit', textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', borderRadius: 12 }}
+        onFocus={() => setFocusEl('header')}
+        onBlur={() => setFocusEl(null)}
+        style={{ width: '100%', appearance: 'none', border: 0, background: 'none', font: 'inherit', color: 'inherit', textAlign: 'left', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', borderRadius: 12, ...(focusEl === 'header' ? { outline: `2px solid ${T.brand}`, outlineOffset: -2 } : {}) }}
       >
         <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
           <span style={{ fontSize: 15, fontWeight: 600, lineHeight: 1.4, color: T.labelPrimary }}>技能管理</span>
@@ -218,7 +224,8 @@ export function SkillManagerCard({ scope, uiWorkspace }) {
             </label>
             <span style={{ fontSize: 12, lineHeight: 1.5, color: T.labelTertiary }}>pi 固定走默认路径（~/.pi/agent），保存后生效</span>
           </div>
-          {/* footer：失败提示（含修复复制入口）+ 放弃/保存（对齐 PluginCard footer） */}
+          {/* footer：失败提示（含修复复制入口）+ 放弃/保存（对齐 PluginCard footer；
+              交互态复刻 PluginCard.module.css：禁用 opacity .4、放弃 hover 加深、focus 品牌色 outline） */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, padding: '12px 0 4px', borderTop: `1px solid ${T.borderL2}` }}>
             {failed
               ? (
@@ -228,8 +235,36 @@ export function SkillManagerCard({ scope, uiWorkspace }) {
                   </>
                 )
               : null}
-            <button type="button" disabled={!dirty || busy || !ready} onClick={discard} style={{ appearance: 'none', border: `1px solid ${T.borderL2}`, borderRadius: 8, padding: '5px 14px', font: 'inherit', fontSize: 13, lineHeight: 1.5, cursor: 'pointer', background: 'none', color: T.labelSecondary }}>放弃</button>
-            <button type="button" disabled={!dirty || busy || !ready} onClick={save} style={{ appearance: 'none', border: '1px solid transparent', borderRadius: 8, padding: '5px 14px', font: 'inherit', fontSize: 13, lineHeight: 1.5, cursor: 'pointer', background: T.labelPrimary, color: T.bgLayer3 }}>{busy ? '保存中…' : '保存'}</button>
+            {(() => {
+              const blocked = !dirty || busy || !ready
+              const focusStyle = (el) => (focusEl === el ? { outline: `2px solid ${T.brand}`, outlineOffset: 1 } : {})
+              return (
+                <>
+                  <button
+                    type="button"
+                    disabled={blocked}
+                    onClick={discard}
+                    onMouseEnter={() => setHoverDiscard(true)}
+                    onMouseLeave={() => setHoverDiscard(false)}
+                    onFocus={() => setFocusEl('discard')}
+                    onBlur={() => setFocusEl(null)}
+                    style={{ appearance: 'none', border: `1px solid ${!blocked && hoverDiscard ? T.labelDimmed : T.borderL2}`, borderRadius: 8, padding: '5px 14px', font: 'inherit', fontSize: 13, lineHeight: 1.5, cursor: blocked ? 'default' : 'pointer', background: 'none', color: !blocked && hoverDiscard ? T.labelPrimary : T.labelSecondary, opacity: blocked ? 0.4 : 1, ...focusStyle('discard') }}
+                  >
+                    放弃
+                  </button>
+                  <button
+                    type="button"
+                    disabled={blocked}
+                    onClick={save}
+                    onFocus={() => setFocusEl('save')}
+                    onBlur={() => setFocusEl(null)}
+                    style={{ appearance: 'none', border: '1px solid transparent', borderRadius: 8, padding: '5px 14px', font: 'inherit', fontSize: 13, lineHeight: 1.5, cursor: blocked ? 'default' : 'pointer', background: T.labelPrimary, color: T.bgLayer3, opacity: blocked ? 0.4 : 1, ...focusStyle('save') }}
+                  >
+                    {busy ? '保存中…' : '保存'}
+                  </button>
+                </>
+              )
+            })()}
           </div>
         </div>
       ) : null}

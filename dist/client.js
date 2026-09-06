@@ -1836,6 +1836,8 @@ function SkillManagerCard({ scope, uiWorkspace }) {
   const [busy, setBusy] = (0, import_react6.useState)(false);
   const [failed, setFailed] = (0, import_react6.useState)(null);
   const [focused, setFocused] = (0, import_react6.useState)(false);
+  const [hoverDiscard, setHoverDiscard] = (0, import_react6.useState)(false);
+  const [focusEl, setFocusEl] = (0, import_react6.useState)(null);
   const [snap, setSnap] = (0, import_react6.useState)(() => scope.getSnapshot());
   (0, import_react6.useEffect)(() => {
     let alive = true;
@@ -1958,7 +1960,9 @@ function SkillManagerCard({ scope, uiWorkspace }) {
         "aria-expanded": open,
         "aria-label": `${open ? "\u6536\u8D77" : "\u5C55\u5F00"}: \u6280\u80FD\u7BA1\u7406`,
         onClick: () => setOpen(!open),
-        style: { width: "100%", appearance: "none", border: 0, background: "none", font: "inherit", color: "inherit", textAlign: "left", cursor: "pointer", display: "flex", alignItems: "center", gap: 12, padding: "14px 16px", borderRadius: 12 },
+        onFocus: () => setFocusEl("header"),
+        onBlur: () => setFocusEl(null),
+        style: { width: "100%", appearance: "none", border: 0, background: "none", font: "inherit", color: "inherit", textAlign: "left", cursor: "pointer", display: "flex", alignItems: "center", gap: 12, padding: "14px 16px", borderRadius: 12, ...focusEl === "header" ? { outline: `2px solid ${T.brand}`, outlineOffset: -2 } : {} },
         children: [
           /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("span", { style: { flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 4 }, children: [
             /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { style: { fontSize: 15, fontWeight: 600, lineHeight: 1.4, color: T.labelPrimary }, children: "\u6280\u80FD\u7BA1\u7406" }),
@@ -2020,8 +2024,38 @@ function SkillManagerCard({ scope, uiWorkspace }) {
           /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { style: { flex: 1, minWidth: 0, margin: 0, fontSize: 12, lineHeight: 1.5, color: T.error }, children: failed.message }),
           /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(RepairCopy, { text: failed.prompt })
         ] }) : null,
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("button", { type: "button", disabled: !dirty || busy || !ready, onClick: discard, style: { appearance: "none", border: `1px solid ${T.borderL2}`, borderRadius: 8, padding: "5px 14px", font: "inherit", fontSize: 13, lineHeight: 1.5, cursor: "pointer", background: "none", color: T.labelSecondary }, children: "\u653E\u5F03" }),
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("button", { type: "button", disabled: !dirty || busy || !ready, onClick: save, style: { appearance: "none", border: "1px solid transparent", borderRadius: 8, padding: "5px 14px", font: "inherit", fontSize: 13, lineHeight: 1.5, cursor: "pointer", background: T.labelPrimary, color: T.bgLayer3 }, children: busy ? "\u4FDD\u5B58\u4E2D\u2026" : "\u4FDD\u5B58" })
+        (() => {
+          const blocked = !dirty || busy || !ready;
+          const focusStyle = (el) => focusEl === el ? { outline: `2px solid ${T.brand}`, outlineOffset: 1 } : {};
+          return /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)(import_jsx_runtime6.Fragment, { children: [
+            /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+              "button",
+              {
+                type: "button",
+                disabled: blocked,
+                onClick: discard,
+                onMouseEnter: () => setHoverDiscard(true),
+                onMouseLeave: () => setHoverDiscard(false),
+                onFocus: () => setFocusEl("discard"),
+                onBlur: () => setFocusEl(null),
+                style: { appearance: "none", border: `1px solid ${!blocked && hoverDiscard ? T.labelDimmed : T.borderL2}`, borderRadius: 8, padding: "5px 14px", font: "inherit", fontSize: 13, lineHeight: 1.5, cursor: blocked ? "default" : "pointer", background: "none", color: !blocked && hoverDiscard ? T.labelPrimary : T.labelSecondary, opacity: blocked ? 0.4 : 1, ...focusStyle("discard") },
+                children: "\u653E\u5F03"
+              }
+            ),
+            /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+              "button",
+              {
+                type: "button",
+                disabled: blocked,
+                onClick: save,
+                onFocus: () => setFocusEl("save"),
+                onBlur: () => setFocusEl(null),
+                style: { appearance: "none", border: "1px solid transparent", borderRadius: 8, padding: "5px 14px", font: "inherit", fontSize: 13, lineHeight: 1.5, cursor: blocked ? "default" : "pointer", background: T.labelPrimary, color: T.bgLayer3, opacity: blocked ? 0.4 : 1, ...focusStyle("save") },
+                children: busy ? "\u4FDD\u5B58\u4E2D\u2026" : "\u4FDD\u5B58"
+              }
+            )
+          ] });
+        })()
       ] })
     ] }) : null
   ] });
