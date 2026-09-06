@@ -355,10 +355,11 @@ var statusPillStyle = (kind) => {
 };
 var S = {
   row: { display: "flex", alignItems: "center", gap: "8px", padding: "9px 12px", border: `1px solid ${T.borderL1}`, borderRadius: 12, marginBottom: 8, fontSize: 13 },
-  select: { padding: "4px 8px", borderRadius: 6, border: `1px solid ${T.borderL1}`, background: T.bgBase, color: T.labelPrimary, fontSize: 12 },
   panel: { padding: "10px 12px" },
   /** 高密度列表行（容器卡 + 分隔线用法）：比 S.row 描边卡轻，行内不再带边框。 */
   listRow: { display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", fontSize: 13 },
+  /** 筛选器触发钮（宿主 Menu 的 anchor）：浅底小圆角，与工具条输入框同高。 */
+  filterTrigger: { display: "inline-flex", alignItems: "center", gap: 4, border: "none", background: T.bgModulePlatform, borderRadius: 8, padding: "5px 10px", font: "inherit", fontSize: 12, color: T.labelPrimary, cursor: "pointer" },
   muted: { color: T.labelSecondary, fontSize: 12 },
   guide: { padding: "24px 16px", textAlign: "center", color: T.labelSecondary, fontSize: 13 },
   dangerText: { color: T.error },
@@ -500,6 +501,10 @@ function RowMenu({ it, groupNames, flags = [], busy, onAction, onMove, onClose, 
     /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { ref: menuRef, style: menuStyle, children: [
       flags.length > 0 && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
         /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: { padding: "5px 12px", fontSize: 11, color: T.labelSecondary, whiteSpace: "nowrap" }, children: flags.join(" \xB7 ") }),
+        menuDivider
+      ] }),
+      it.missing && /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(import_jsx_runtime.Fragment, { children: [
+        /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: { padding: "6px 12px", fontSize: 11, lineHeight: 1.55, color: T.labelSecondary, maxWidth: 240 }, children: "\u5E93\u76EE\u5F55\u4E0D\u5B58\u5728\uFF08\u5982\u88AB\u624B\u52A8\u8FC1\u8D70\uFF09\uFF0C\u5165\u5E93\u8BB0\u5F55\u4ECD\u4FDD\u7559\uFF1A\u300C\u6062\u590D\u300D\u6309\u4E0A\u6E38\u91CD\u65B0\u4E0B\u8F7D\u56DE\u5E93\uFF1B\u300C\u5220\u9664\u300D\u6E05\u9664\u8BB0\u5F55\u4E0E\u7F13\u5B58\uFF0C\u4E0D\u5F71\u54CD\u4F60\u5DF2\u8FC1\u51FA\u7684\u526F\u672C\u3002" }),
         menuDivider
       ] }),
       it.missing ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)(MenuItem, { label: "\u6062\u590D", disabled: busy, onClick: () => {
@@ -767,6 +772,11 @@ var import_react3 = require("react");
 var import_dsh_client_ui_primitives3 = require("@deepseek-ai/dsh-client-ui-primitives");
 var import_jsx_runtime3 = require("react/jsx-runtime");
 var ORIGIN_LABEL = { github: "GitHub", local: "\u672C\u5730", self: "\u81EA\u7814" };
+var ORIGIN_OPTIONS = [
+  { id: "", label: "\u5168\u90E8\u6765\u6E90" },
+  { id: "github", label: "GitHub" },
+  { id: "self", label: "\u81EA\u7814/\u672C\u5730" }
+];
 function targetLabel(target, workspaces) {
   if (typeof target !== "string") return String(target ?? "\u2014");
   if (target.startsWith("global|")) return "DSH \u5168\u5C40";
@@ -792,6 +802,7 @@ function secondaryFlags(it) {
 }
 function ManageView({ call, data, config, reload }) {
   const [origin, setOrigin] = (0, import_react3.useState)("");
+  const [originOpen, setOriginOpen] = (0, import_react3.useState)(false);
   const [groupFilter, setGroupFilter] = (0, import_react3.useState)("\u9ED8\u8BA4");
   const [q, setQ] = (0, import_react3.useState)("");
   const [busy, setBusy] = (0, import_react3.useState)(false);
@@ -972,11 +983,25 @@ function ManageView({ call, data, config, reload }) {
         ] }),
         /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { ...S.toolbar, marginBottom: 12 }, children: [
           /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_dsh_client_ui_primitives3.Input, { style: { flex: 1, minWidth: 140 }, placeholder: "\u641C\u7D22\u540D\u79F0 / \u63CF\u8FF0\u2026", value: q, onChange: (e) => setQ(e.target.value) }),
-          /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("select", { style: { ...S.select, border: "none", background: T.bgModulePlatform, borderRadius: 8, padding: "5px 10px" }, value: origin, onChange: (e) => setOrigin(e.target.value), children: [
-            /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "", children: "\u5168\u90E8\u6765\u6E90" }),
-            /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "github", children: "GitHub" }),
-            /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("option", { value: "self", children: "\u81EA\u7814/\u672C\u5730" })
-          ] }),
+          /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+            import_dsh_client_ui_primitives3.Menu,
+            {
+              open: originOpen,
+              portal: true,
+              compact: true,
+              anchor: /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("button", { type: "button", disabled: busy, onClick: () => setOriginOpen((v) => !v), style: S.filterTrigger, children: [
+                ORIGIN_OPTIONS.find((o) => o.id === origin)?.label ?? "\u5168\u90E8\u6765\u6E90",
+                ChevronIcon ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(ChevronIcon, { style: { color: T.labelSecondary, transition: "transform .16s", transform: originOpen ? "rotate(180deg)" : void 0 } }) : /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: { color: T.labelSecondary, fontSize: 10 }, children: originOpen ? "\u25B4" : "\u25BE" })
+              ] }),
+              items: ORIGIN_OPTIONS,
+              selectedId: origin,
+              onSelect: (id) => {
+                setOrigin(id);
+                setOriginOpen(false);
+              },
+              onClose: () => setOriginOpen(false)
+            }
+          ),
           /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(GhostBtn, { onClick: refreshAll, disabled: busy, title: "\u91CD\u65B0\u68C0\u67E5\u5168\u90E8\u4E0A\u6E38\u3001\u6267\u884C\u4E00\u6B21\u5B89\u5168\u5BF9\u8D26\u5E76\u5237\u65B0\u5217\u8868", children: "\u21BB \u5237\u65B0" })
         ] }),
         notice ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(NoticeBar, { notice }) : null,
@@ -1128,6 +1153,23 @@ function GroupNav({ groups, selected, total, countForGroup, onSelect, onCreate }
     ] })
   ] });
 }
+function ScopeRow({ checked, title, hint, count, onToggle }) {
+  const [hover, setHover] = (0, import_react3.useState)(false);
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(
+    "label",
+    {
+      style: { display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", borderRadius: 8, fontSize: 12, cursor: "pointer", background: checked ? `color-mix(in srgb, ${T.brand} 8%, transparent)` : hover ? T.bgModulePlatform : "transparent" },
+      onMouseEnter: () => setHover(true),
+      onMouseLeave: () => setHover(false),
+      children: [
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("input", { type: "checkbox", checked, onChange: (event) => onToggle(event.target.checked), style: { accentColor: T.brand, width: 13, height: 13, margin: 0, flex: "none" } }),
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: { fontWeight: 500, color: T.labelPrimary, flex: "none" }, children: title }),
+        hint ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: { ...noteText, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: hint, children: hint }) : /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: { flex: 1 } }),
+        count > 0 ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: { ...pillBase, flex: "none" }, children: `${count} \u4E2A\u7EC4\u4F7F\u7528` }) : null
+      ]
+    }
+  );
+}
 function CreateGroupDialog({ onCancel, onCreate }) {
   const [name, setName] = (0, import_react3.useState)("");
   const [error, setError] = (0, import_react3.useState)(null);
@@ -1217,12 +1259,6 @@ function GroupScopePanel({ config, group, workspaces, skills, onGroupOp }) {
   const filtering = wsFilter.trim() !== "";
   const visibleWs = filtering ? workspaces.filter((w) => `${w.title}
 ${w.path}`.toLowerCase().includes(wsFilter.trim().toLowerCase())) : showAllWs ? workspaces : enabledWs;
-  const wsRow = (workspace) => /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("label", { style: { display: "flex", alignItems: "center", gap: 8, padding: "7px 0", fontSize: 12, cursor: "pointer" }, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("input", { type: "checkbox", checked: wsChecked(workspace), onChange: (event) => toggle("project", workspace.workspaceId, event.target.checked) }),
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: { fontWeight: 500, color: T.labelPrimary, flex: "none" }, children: workspace.title }),
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: { ...noteText, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }, title: workspace.path, children: workspace.path }),
-    workspace.mountCount > 0 ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: { ...noteText, flex: "none" }, children: `${workspace.mountCount} \u4E2A\u7EC4\u4F7F\u7528` }) : null
-  ] }, workspace.workspaceId);
   return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { ...cardStyle, padding: "12px 14px" }, children: [
     renaming ? /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }, children: [
       /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
@@ -1272,27 +1308,35 @@ ${w.path}`.toLowerCase().includes(wsFilter.trim().toLowerCase())) : showAllWs ? 
     ] }),
     renaming && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { ...noteText, marginBottom: 8 }, children: "\u6539\u540D\u7ACB\u5373\u751F\u6548\uFF1A\u5206\u7EC4\u6210\u5458\u4E0E\u6302\u8F7D\u89C4\u5219\u540C\u6B65\u6539\u540D\uFF0CSkill \u672C\u4F53\u4E0D\u53D7\u5F71\u54CD\u3002" }),
     /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: dividerStyle }),
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("label", { style: { display: "flex", alignItems: "center", gap: 8, padding: "9px 0", fontSize: 12, cursor: "pointer" }, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("input", { type: "checkbox", checked: enabled("global"), onChange: (event) => toggle("global", null, event.target.checked) }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: { fontWeight: 500, color: T.labelPrimary }, children: "DSH \u5168\u5C40" }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: noteText, children: "\u5BF9\u6240\u6709 DSH \u9879\u76EE\u751F\u6548" })
-    ] }),
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { padding: "4px 0" }, children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(ScopeRow, { checked: enabled("global"), title: "DSH \u5168\u5C40", hint: "\u5BF9\u6240\u6709 DSH \u9879\u76EE\u751F\u6548", count: 0, onToggle: (checked) => toggle("global", null, checked) }) }),
     /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: dividerStyle }),
     workspaces.length === 0 ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { ...S.muted, padding: "8px 0" }, children: "\u5F53\u524D\u6CA1\u6709 DSH \u5DE5\u4F5C\u533A\uFF1B\u8BF7\u5728 DSH \u539F\u751F\u5DE5\u4F5C\u533A\u754C\u9762\u521B\u5EFA\u6216\u6253\u5F00\u9879\u76EE\u3002" }) : /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(import_jsx_runtime3.Fragment, { children: [
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { display: "flex", alignItems: "baseline", gap: 8, padding: "7px 0 1px" }, children: [
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: { fontSize: 10, color: T.labelTertiary }, children: "\u5DE5\u4F5C\u533A\u9879\u76EE" }),
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { display: "flex", alignItems: "center", gap: 8, padding: "8px 2px 6px" }, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: { fontSize: 11, fontWeight: 600, color: T.labelSecondary }, children: "\u5DE5\u4F5C\u533A\u9879\u76EE" }),
         /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: { flex: 1 } }),
-        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: { fontSize: 10, color: T.labelTertiary }, children: `\u5DF2\u542F\u7528 ${enabledWs.length} \xB7 \u5171 ${workspaces.length}` })
+        /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: pillBase, children: `\u5DF2\u542F\u7528 ${enabledWs.length} \xB7 \u5171 ${workspaces.length}` })
       ] }),
-      workspaces.length > 8 && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_dsh_client_ui_primitives3.Input, { style: { margin: "6px 0 2px" }, placeholder: "\u8FC7\u6EE4\u5DE5\u4F5C\u533A\u2026", value: wsFilter, onChange: (e) => setWsFilter(e.target.value) }),
-      visibleWs.map(wsRow),
-      filtering && visibleWs.length === 0 && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { ...S.muted, padding: "6px 0" }, children: "\u65E0\u5339\u914D\u5DE5\u4F5C\u533A" }),
+      workspaces.length > 8 && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { marginBottom: 8 }, children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_dsh_client_ui_primitives3.Input, { placeholder: "\u8FC7\u6EE4\u5DE5\u4F5C\u533A\u2026", value: wsFilter, onChange: (e) => setWsFilter(e.target.value) }) }),
+      (visibleWs.length > 0 || filtering) && /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { border: `1px solid ${T.borderL1}`, borderRadius: 10, padding: 2, maxHeight: 208, overflowY: "auto", scrollbarWidth: "thin" }, children: [
+        visibleWs.map((workspace) => /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
+          ScopeRow,
+          {
+            checked: wsChecked(workspace),
+            title: workspace.title,
+            hint: workspace.path,
+            count: workspace.mountCount,
+            onToggle: (checked) => toggle("project", workspace.workspaceId, checked)
+          },
+          workspace.workspaceId
+        )),
+        filtering && visibleWs.length === 0 && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { ...S.muted, padding: "8px 10px" }, children: "\u65E0\u5339\u914D\u5DE5\u4F5C\u533A" })
+      ] }),
       !filtering && restCount > 0 && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
         "button",
         {
           type: "button",
           onClick: () => setShowAllWs((v) => !v),
-          style: { display: "block", width: "100%", border: "none", background: T.bgModulePlatform, borderRadius: 8, padding: "6px 10px", margin: "4px 0 2px", font: "inherit", fontSize: 12, color: T.labelSecondary, cursor: "pointer", textAlign: "left" },
+          style: { display: "block", width: "100%", border: `1px dashed ${T.borderL2}`, background: "transparent", borderRadius: 8, padding: "6px 10px", marginTop: 6, font: "inherit", fontSize: 11, color: T.labelSecondary, cursor: "pointer", textAlign: "center" },
           children: showAllWs ? "\u25BE \u6536\u8D77\u5176\u4ED6\u5DE5\u4F5C\u533A" : `\u25B8 \u5C55\u5F00\u5176\u4ED6 ${restCount} \u4E2A\u5DE5\u4F5C\u533A\uFF08\u52FE\u9009\u5373\u542F\u7528\uFF09`
         }
       )
@@ -1870,7 +1914,10 @@ function SkillManagerCard({ scope, uiWorkspace }) {
 }
 
 // src/client/nav-icon.js
-var NAV_STAR_PATH = "M8 1.6 L9.85 6.15 L14.4 8 L9.85 9.85 L8 14.4 L6.15 9.85 L1.6 8 L6.15 6.15 Z";
+var SKILL_ICON_PATHS = [
+  "M12.5113 15.4067C12.4395 15.6249 12.1308 15.6249 12.059 15.4067L11.643 14.1416C11.454 13.567 11.0033 13.1164 10.4288 12.9274L9.16369 12.5113C8.94544 12.4395 8.94544 12.1308 9.16369 12.059L10.4288 11.643C11.0033 11.454 11.454 11.0033 11.643 10.4288L12.059 9.16369C12.1308 8.94544 12.4395 8.94544 12.5113 9.16369L12.9274 10.4288C13.1164 11.0033 13.567 11.454 14.1416 11.643L15.4067 12.059C15.6249 12.1308 15.6249 12.4395 15.4067 12.5113L14.1416 12.9274C13.567 13.1164 13.1164 13.567 12.9274 14.1416L12.5113 15.4067Z",
+  "M9.02246 0.546878C9.9822 0.546878 10.7564 0.545403 11.374 0.612307C12.0042 0.680586 12.5515 0.826244 13.0273 1.17188C13.3052 1.37376 13.5501 1.61868 13.752 1.89649C14.0975 2.37225 14.2432 2.91984 14.3115 3.54981C14.3784 4.16727 14.377 4.94206 14.377 5.90137V8.51367C13.9611 8.29533 13.5071 8.13985 13.0273 8.06055V5.90137C13.0273 4.9121 13.0259 4.22322 12.9688 3.69532C12.9129 3.18044 12.8098 2.89782 12.6592 2.69043C12.5406 2.52724 12.3966 2.38326 12.2334 2.26465C12.026 2.11404 11.7437 2.0109 11.2285 1.95508C10.7005 1.89789 10.0122 1.89649 9.02246 1.89649H6.55371C5.56395 1.89649 4.87569 1.89787 4.34766 1.95508C3.83242 2.01092 3.55022 2.11398 3.34278 2.26465C3.17953 2.38329 3.03564 2.52719 2.91699 2.69043C2.76642 2.89782 2.66325 3.18042 2.60742 3.69532C2.55027 4.22322 2.54883 4.9121 2.54883 5.90137V10.0986C2.54883 11.0878 2.55031 11.7768 2.60742 12.3047C2.66326 12.8196 2.76642 13.1032 2.91699 13.3105C3.03558 13.4736 3.17966 13.6178 3.34278 13.7363C3.5502 13.8869 3.83265 13.9901 4.34766 14.0459C4.87568 14.1031 5.56398 14.1035 6.55371 14.1035H8.08399C8.27443 14.6025 8.55077 15.0585 8.89551 15.4541H6.55371C5.59402 15.4541 4.81976 15.4546 4.20215 15.3877C3.57204 15.3194 3.02468 15.1738 2.54883 14.8281C2.27111 14.6263 2.02606 14.3813 1.82422 14.1035C1.47883 13.6278 1.33293 13.08 1.26465 12.4502C1.19783 11.8327 1.19922 11.0579 1.19922 10.0986V5.90137C1.19922 4.94206 1.1978 4.16727 1.26465 3.54981C1.33295 2.91984 1.47867 2.37225 1.82422 1.89649C2.02613 1.61864 2.27098 1.37379 2.54883 1.17188C3.02472 0.826181 3.57197 0.6806 4.20215 0.612307C4.81976 0.545393 5.594 0.546877 6.55371 0.546878H9.02246ZM9.19629 9.14649H4.5459V7.84571H9.19629V9.14649ZM11.0303 6.10645H4.5459V4.80567H11.0303V6.10645Z"
+];
 function patchSkillsNavIcon() {
   for (const label of document.querySelectorAll('span[class*="navLabel"]')) {
     if (label.textContent !== "\u6280\u80FD") continue;
@@ -1878,12 +1925,14 @@ function patchSkillsNavIcon() {
     const svg = cell ? cell.querySelector("svg") : null;
     if (!svg) continue;
     const first = svg.firstElementChild;
-    if (first && first.tagName === "path" && first.getAttribute("d") === NAV_STAR_PATH) continue;
+    if (first && first.tagName === "path" && first.getAttribute("d") === SKILL_ICON_PATHS[0]) continue;
     while (svg.firstChild) svg.removeChild(svg.firstChild);
-    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
-    path.setAttribute("d", NAV_STAR_PATH);
-    path.setAttribute("fill", "currentColor");
-    svg.appendChild(path);
+    for (const d of SKILL_ICON_PATHS) {
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("d", d);
+      path.setAttribute("fill", "currentColor");
+      svg.appendChild(path);
+    }
   }
 }
 function observeSkillsNavIcon() {

@@ -97,7 +97,7 @@ export const menuDivider = <div style={{ height: 1, margin: '5px 6px', backgroun
 /**
  * 行操作 ⋯ 菜单，条目按 skill 来源分化：
  * - github 行：立即更新 / 禁用|启用 / 移动到分组 ▸ / 删除（红色）；
- * - github 缺失行：恢复 / 删除（红色）；
+ * - github 缺失行：恢复 / 删除（红色），顶部附处置说明（目录缺失、记录仍在的两条路）；
  * - self/local 行：禁用|启用 / 移动到分组 ▸，无更新（无上游）、无删除（只读红线）。
  * flags 为行次要标记（本地有修改/无 SKILL.md 等），在菜单顶部状态区只读展示，不抢行内主徽章。
  * 浮层几何：主/子菜单一律 position:fixed，锚定触发按钮的 rect。
@@ -167,6 +167,15 @@ export function RowMenu({ it, groupNames, flags = [], busy, onAction, onMove, on
         {flags.length > 0 && (
           <>
             <div style={{ padding: '5px 12px', fontSize: 11, color: T.labelSecondary, whiteSpace: 'nowrap' }}>{flags.join(' · ')}</div>
+            {menuDivider}
+          </>
+        )}
+        {/* 缺失行处置心智：目录没了记录还在，两条路先讲清楚再列动作 */}
+        {it.missing && (
+          <>
+            <div style={{ padding: '6px 12px', fontSize: 11, lineHeight: 1.55, color: T.labelSecondary, maxWidth: 240 }}>
+              库目录不存在（如被手动迁走），入库记录仍保留：「恢复」按上游重新下载回库；「删除」清除记录与缓存，不影响你已迁出的副本。
+            </div>
             {menuDivider}
           </>
         )}
