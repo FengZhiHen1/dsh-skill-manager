@@ -7,7 +7,7 @@
 import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { SkillManagerError } from '../base/errors.js'
-import { atomicSwapDir, canonicalPath, pathExists, pathsEqual, safePath } from '../base/fsys.js'
+import { atomicSwapDirAudited, canonicalPath, pathExists, pathsEqual, safePath } from '../base/fsys.js'
 import { dirHash } from '../model/library.js'
 import { backupId } from '../model/store.js'
 import { scanMountLinks } from '../mount/inspect.js'
@@ -26,7 +26,11 @@ import { copyTree, nowIso, validateInstallName } from './zipball.js'
  * 任一步失败不回滚已完成步骤，错误消息携带已完成动作供展示。
  * @throws {SkillManagerError} not-removable — 非 github 登记（本地/自研无删除入口）
  */
-export async function remove({ root, userRoot = null, store, name, backupsRoot, workspacesById, globalRootPath, piSkillsRoot = null }) { // quality-floor: ignore docstring-promise 函数体确有 throw SkillManagerError（not-removable 等）；扫描器将参数解构花括号配误作函数体起点致漏看
+export async function remove({ root, userRoot = null, store, name, backupsRoot, workspacesById, globalRootPath, piSkillsRoot = null, ctx = null }) {
+  // 台账上下文：出库的四步（备份 / 摘链 / 删库内目录 / 清表）记在同一条因果链上。
+  const audit = ctx?.audit ?? null
+  const actor = ctx?.actor ?? null
+  const configGen = ctx?.configGen ?? null // quality-floor: ignore docstring-promise 函数体确有 throw SkillManagerError（not-removable 等）；扫描器将参数解构花括号配误作函数体起点致漏看
   const record = store.getSkill(name) ?? null
   if (!record || record.origin !== 'github') {
     throw new SkillManagerError('not-removable', `「${name}」不是外部 skill（本地与自研目录无删除入口，请在文件系统自管）`, false, [
@@ -42,6 +46,9 @@ export async function remove({ root, userRoot = null, store, name, backupsRoot, 
   if (present) {
     const id = backupId(name)
     backup = join(backupsRoot, id)
+    // op 边界 = 备份目录建立到元数据落定（_backup_meta.json 是恢复与名字/时间的事实源，
+    // 属用户可见现场，折进同一条记录而非逐文件成条）；回滚 rm 落在 fail 的 result 里。
+    const op = audit === null ? null : await audit.begin({ op: 'backup-create', actor, skill: name, path: backup, reason: '出库前自动备份', configGen })
     await mkdir(backup, { recursive: true })
     try {
       await copyTree(src, backup)
@@ -52,8 +59,10 @@ export async function remove({ root, userRoot = null, store, name, backupsRoot, 
       )
     } catch (error) {
       await rm(backup, { recursive: true, force: true })
+      await op?.fail(error, { result: 'rolled-back' })
       throw error
     }
+    await op?.done({ result: 'created' })
   }
 
   // 2. 摘除全部物化链接：与对账同一归属判据，owned 链接中 realpath
@@ -62,13 +71,22 @@ export async function remove({ root, userRoot = null, store, name, backupsRoot, 
   const srcCanonical = await canonicalPath(src)
   for (const link of await scanMountLinks({ root: userRoot ?? root, globalRootPath, workspacesById, piSkillsRoot, libraryRoot: root })) {
     if (link.owned && pathsEqual(link.target, srcCanonical)) {
-      await removeLink(link.path)
+      await removeLink({ path: link.path, audit, actor, skill: name, target: link.target, srcRoot: userRoot ?? root, reason: '出库摘链', configGen })
       detached.push(link.path)
     }
   }
 
   // 3. 删除库内目录（插件自行下载的外部 skill，属 C-03 允许的可写范围）。
-  if (present) await rm(src, { recursive: true, force: true, maxRetries: 3 })
+  if (present) {
+    const op = audit === null ? null : await audit.begin({ op: 'library-remove', actor, skill: name, path: src, srcRoot: root, reason: '出库删除库内目录（已自动备份）', configGen })
+    try {
+      await rm(src, { recursive: true, force: true, maxRetries: 3 })
+    } catch (error) {
+      await op?.fail(error)
+      throw error
+    }
+    await op?.done({ result: 'removed' })
+  }
 
   // 4. 两表清理。
   await store.deleteSkill(name)
@@ -173,9 +191,16 @@ export async function restore({ root, store, id, backupsRoot, ctx }) { // qualit
   }
 
   // 原子换装恢复：备份内容在同卷临时位置就位（剥元数据）后 rename 到目标。
-  await atomicSwapDir(dest, async (stage) => {
+  await atomicSwapDirAudited(dest, async (stage) => {
     await copyTree(src, stage)
     await rm(join(stage, '_backup_meta.json'), { force: true })
+  }, {
+    audit: ctx?.audit ?? null,
+    actor: ctx?.actor ?? null,
+    skill: name,
+    srcRoot: root,
+    reason: `从备份恢复（id=${id}）`,
+    configGen: ctx?.configGen ?? null,
   })
 
   const record = meta.record && typeof meta.record === 'object' ? { ...meta.record } : null

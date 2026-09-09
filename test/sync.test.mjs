@@ -153,7 +153,7 @@ test('materializeOne：库外链接不夺取（wrong-target）；库内他处链
     await assert.rejects(call(), (e) => e.code === 'wrong-target')
     assert.ok(await isLink(dst))
     // 指向库内他处（改名后旧链接）：摘除重建
-    await removeLink(dst)
+    await removeLink({ path: dst })
     await symlink(join(f.root, 'pdf-old'), dst, 'junction')
     assert.equal((await call()).action, 'mounted')
     assert.ok(await isLink(dst))

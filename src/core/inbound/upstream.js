@@ -5,7 +5,7 @@
 
 import { SkillManagerError } from '../base/errors.js'
 import { fetchZipball, remoteHead } from '../base/net.js'
-import { atomicSwapDir, pathExists, safePath } from '../base/fsys.js'
+import { atomicSwapDirAudited, pathExists, safePath } from '../base/fsys.js'
 import { dirHash } from '../model/library.js'
 import { copyTree, nowIso, withMaterializedSkillDir } from './zipball.js'
 
@@ -191,7 +191,14 @@ export async function update({ root, store, names, confirmLocalChanges = false, 
       // strict=true：记录的 path_in_repo 在上游失效时报 path-stale 并附候选目录。
       // 临时目录由 withMaterializedSkillDir 的 finally 清理，失败也不漏 tmp。
       await withMaterializedSkillDir(payload, entry.path_in_repo ?? undefined, true, async ({ tmp }) => {
-        await atomicSwapDir(dest, (stage) => copyTree(tmp, stage))
+        await atomicSwapDirAudited(dest, (stage) => copyTree(tmp, stage), {
+          audit: ctx?.audit ?? null,
+          actor: ctx?.actor ?? null,
+          skill: name,
+          srcRoot: root,
+          reason: `上游覆盖更新（${entry.repo}）`,
+          configGen: ctx?.configGen ?? null,
+        })
       })
     } catch (error) {
       // 单条失败不中断批次：status='failed' 与「不适用」的 skipped 显式区分。

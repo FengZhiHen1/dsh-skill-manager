@@ -203,6 +203,28 @@ export async function atomicSwapDir(dest, buildFn) {
   }
 }
 
+/**
+ * 带台账的原子换装（DSR-022 第 4 条：换装是库目录变更的唯一 op 边界）。
+ * 内部 copyTree 的逐文件 mkdir/cp **不**分别成条——一次换装一条记录，
+ * 否则一次更新会淹出上百条无意义行（评审确立的聚合粒度）。
+ * 失败即回滚：终态 phase='failed' 且错误消息自带旧版保留位置，与成功换装可区分。
+ * @param {string} dest - 目标目录
+ * @param {(stage: string) => Promise<void>} buildFn - 在临时目录内构建内容
+ * @param {{audit?: object|null, actor?: object|null, skill?: string|null, reason?: string|null, srcRoot?: string|null, configGen?: number|null}} [ctx] - 台账上下文，缺省不记
+ */
+export async function atomicSwapDirAudited(dest, buildFn, { audit = null, actor = null, skill = null, reason = null, srcRoot = null, configGen = null } = {}) {
+  const op = audit === null
+    ? null
+    : await audit.begin({ op: 'library-swap', actor, skill, path: dest, srcRoot, reason, configGen })
+  try {
+    await atomicSwapDir(dest, buildFn)
+  } catch (error) {
+    await op?.fail(error)
+    throw error
+  }
+  await op?.done({ result: 'swapped' })
+}
+
 async function swapDirInner(dest, buildFn) {
   const parent = dirname(dest)
   await mkdir(parent, { recursive: true })

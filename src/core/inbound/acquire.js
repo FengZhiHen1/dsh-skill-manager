@@ -7,7 +7,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { SkillManagerError } from '../base/errors.js'
 import { fetchZipball, ghApi, normalizeRepoSlug, resolveRemote, searchSkillsSh } from '../base/net.js'
-import { atomicSwapDir, pathExists, safePath } from '../base/fsys.js'
+import { atomicSwapDirAudited, pathExists, safePath } from '../base/fsys.js'
 import { dirHash, parseSkillMd } from '../model/library.js'
 import { copyTree, explodeZipball, nowIso, skillsFromFiles, validateInstallName, withMaterializedSkillDir } from './zipball.js'
 
@@ -119,7 +119,14 @@ export async function add({ root, userRoot = null, store, repo: repoInput, dir, 
     // 入库走原子换装：同卷临时目录构建后 rename 就位，杜绝半写目录暴露给 DSH。
     // add 目标此处必不存在（上方 name-conflict 已拦截），换装退化为直达 rename。
     // tmp 清理由 withMaterializedSkillDir 的 finally 保证。
-    await atomicSwapDir(dest, (stage) => copyTree(tmp, stage))
+    await atomicSwapDirAudited(dest, (stage) => copyTree(tmp, stage), {
+      audit: ctx?.audit ?? null,
+      actor: ctx?.actor ?? null,
+      skill: installName,
+      srcRoot: root,
+      reason: `入库（${repoSlug}）：zipball 换装就位`,
+      configGen: ctx?.configGen ?? null,
+    })
 
     // 入库元数据只投影版本事实；disabled/group 属 settings 意图，绝不写进登记表。
     // 换装已成功、登记失败不能静默：目录已在库内而台账无记录，必须显式失败让用户知情。

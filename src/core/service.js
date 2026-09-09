@@ -87,9 +87,13 @@ export function piState(config, probedRoot) {const enabled = config?.[PI_FIELD] 
  * globalRootPath 由 Host 注入，本层不自行推导 DSH 根。
  * @param {() => SettingsScope} scopeGetter - settings 句柄取器，命名空间注册见 adapter/settings.js
  */
-export function createSession(scopeGetter, listWorkspaces, getStore, backupsRoot, globalRootPath, shared, libraryRoot = null) {
+export function createSession(scopeGetter, listWorkspaces, getStore, backupsRoot, globalRootPath, shared, libraryRoot = null, ctxOpts = {}) {
   const root = requireDir(scopeGetter())
   const store = getStore()
+  // 台账上下文（DSR-022）：由 buildApi 按请求注入。inbound 各流程经 ctx.audit/ctx.actor 复用同一上下文，
+  // 于是「入库/更新/恢复/出库」本身与它顺带触发的对账记在同一条因果链上（同 entry/method）。
+  const audit = ctxOpts.audit ?? null
+  const actor = ctxOpts.actor ?? null
   // pi 探测每会话一次（statSync 便宜）：piScanRoot 是扫描语义——探测到即非空，与开关无关；
   // 期望语义（piSkillsRoot）在 bundle 内按当下配置叠加开关判定。两者为 null 时下游全按单宿主回落。
   const piScanRoot = (() => {
@@ -103,6 +107,12 @@ export function createSession(scopeGetter, listWorkspaces, getStore, backupsRoot
     globalRootPath,
     piScanRoot, // pi 探测根（probe 事实）；是否生效由 piState 按配置判定
     libraryRoot, // 插件库根（github 外部 skill 专属，DSR-020）
+    audit, // 台账写入器（null = 本次不记）
+    actor, // 归因入口 { entry, method }
+    /** 配置代次：实时取 shared.bundleGen（写后递进），对账与台账按同一代次归因。 */
+    get configGen() {
+      return shared.bundleGen
+    },
     async bundle() {
       const config = scopeGetter().get()
       // pi 两语义现算：期望根要求开关开；扫描根要求开关开或规则引用 pi。
@@ -188,10 +198,13 @@ export function createSession(scopeGetter, listWorkspaces, getStore, backupsRoot
         srcRootOf,
       }
     },
-    /** 全量对账：现算期望并收敛挂载，junction-only。 */
+    /** 全量对账：现算期望并收敛挂载，junction-only；沿会话的台账上下文记录每次真实变更。 */
     async reconcile() {
       const b = await this.bundle()
       return reconcileMod.reconcile({
+        audit,
+        actor,
+        configGen: shared.bundleGen,
         root,
         memberships: b.memberships,
         mounts: b.mounts,
@@ -206,10 +219,23 @@ export function createSession(scopeGetter, listWorkspaces, getStore, backupsRoot
   }
 }
 
-/** 方法表：所有方法在未配置门禁之后执行。getStore 在请求时解析，域未就绪抛错 → internal。 */
-export function buildApi(scopeGetter, { listWorkspaces = () => [], getStore, backupsRoot, globalRoot, libraryRoot = null, cache, logger } = {}) {
+/**
+ * 方法表：所有方法在未配置门禁之后执行。getStore 在请求时解析，域未就绪抛错 → internal。
+ * 写方法统一收第二参 meta（{entry, method}）：RPC 由 createDispatch 注入、后台对账由装配层注入，
+ * 用于台账归因（DSR-022）；读方法忽略它。
+ */
+/**
+ * 归一调用方上下文：RPC 分发传 {entry:'rpc',method}，装配层传 {entry:'watch',…}，
+ * 测试与程序内直调用缺省 {entry:'direct'}——台账里「谁干的」永不为空。
+ */
+function actorOf(meta) {
+  if (meta === null || typeof meta !== 'object') return { entry: 'direct', method: null }
+  return { entry: typeof meta.entry === 'string' ? meta.entry : 'direct', method: typeof meta.method === 'string' ? meta.method : null }
+}
+
+export function buildApi(scopeGetter, { listWorkspaces = () => [], getStore, backupsRoot, globalRoot, libraryRoot = null, cache, logger, audit = null } = {}) {
   const shared = cache ?? createSharedCache()
-  const session = () => createSession(scopeGetter, listWorkspaces, getStore, backupsRoot, globalRoot, shared, libraryRoot)
+  const session = (meta) => createSession(scopeGetter, listWorkspaces, getStore, backupsRoot, globalRoot, shared, libraryRoot, { audit, actor: actorOf(meta) })
   const hashOfDir = hashOf(shared, dirHash)
 
   /**
@@ -322,8 +348,8 @@ export function buildApi(scopeGetter, { listWorkspaces = () => [], getStore, bac
     },
 
     /** 入库：zipball 落地为原子换装（插件库根，DSR-020），随后登记并触发对账。 */
-    async 'add'(payload) {
-      const s = session()
+    async 'add'(payload, meta) {
+      const s = session(meta)
       const result = await acquire.add({
         root: s.libraryRoot,
         userRoot: s.root,
@@ -350,8 +376,8 @@ export function buildApi(scopeGetter, { listWorkspaces = () => [], getStore, bac
     },
 
     /** 覆盖更新：检出本地修改时必须带显式确认。GitHub 条目在插件库根（DSR-020）。 */
-    async 'update'(payload) {
-      const s = session()
+    async 'update'(payload, meta) {
+      const s = session(meta)
       const result = await upstream.update({
         root: s.libraryRoot,
         store: s.store,
@@ -371,16 +397,16 @@ export function buildApi(scopeGetter, { listWorkspaces = () => [], getStore, bac
     },
 
     /** 从备份恢复：目标占位则拒绝，就位走原子换装（插件库根，DSR-020）。 */
-    async 'restore'(payload) {
-      const s = session()
+    async 'restore'(payload, meta) {
+      const s = session(meta)
       const result = await backupsMod.restore({ root: s.libraryRoot, store: s.store, id: String(payload.id ?? ''), backupsRoot: s.backupsRoot, ctx: s })
       await refreshCache()
       return result
     },
 
     /** 出库：仅限 github 来源登记，先自动备份再摘链与删目录。 */
-    async 'remove'(payload) {
-      const s = session()
+    async 'remove'(payload, meta) {
+      const s = session(meta)
       const workspacesById = await readWorkspaceProjection(listWorkspaces)
       // 摘除范围与对账同一扫描语义：pi 开关关且无 pi 规则时 pi 侧不扫不动
       const { piScanRoot: removeScanRoot } = piState(scopeGetter().get(), s.piScanRoot)
@@ -393,14 +419,15 @@ export function buildApi(scopeGetter, { listWorkspaces = () => [], getStore, bac
         workspacesById,
         globalRootPath: globalRoot,
         piSkillsRoot: removeScanRoot,
+        ctx: s,
       })
       await refreshCache()
       return result
     },
 
     /** 全量对账端点：自身幂等收敛，收敛后预热读缓存。 */
-    async 'sync'() {
-      const s = session()
+    async 'sync'(payload, meta) {
+      const s = session(meta)
       const result = await s.reconcile()
       await refreshCache()
       return result
@@ -474,7 +501,8 @@ export function createDispatch(api, { writeQueue = createQueue(), netQueue = cre
     }
     const input = payload && typeof payload === 'object' ? payload : {}
     try {
-      const invoke = () => Promise.resolve(api[endpoint](input))
+      // 第二参是调用方上下文（非负载）：台账据此记「谁干的」。
+      const invoke = () => Promise.resolve(api[endpoint](input, { entry: 'rpc', method: endpoint }))
       const raw = READ_METHODS.has(endpoint)
         ? await (writeQueue.busy ? writeQueue.idle().then(invoke) : invoke())
         : NET_METHODS.has(endpoint)
