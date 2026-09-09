@@ -4,8 +4,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readdir, stat } from 'node:fs/promises'
-import { explodeZipball, locateSkillDir, skillsFromFiles, validateInstallName, withMaterializedSkillDir } from '../src/core/inbound/zipball.js'
-import { buildZip, assertThrowsCode } from './helpers.mjs'
+import { join } from 'node:path'
+import { extractSkillDir, explodeZipball, locateSkillDir, skillsFromFiles, validateInstallName, withMaterializedSkillDir } from '../src/core/inbound/zipball.js'
+import { buildZip, assertThrowsCode, cleanup, mkTmp } from './helpers.mjs'
 
 /** 单顶层目录 zipball 的标准形态（GitHub zipball 必带顶层 sha 目录）。 */
 function skillZip(files, top = 'repo-abc123') {
@@ -64,6 +65,23 @@ test('validateInstallName：C-01 文法双边（小写/数字/连字符）', () 
   assert.doesNotThrow(() => validateInstallName('a'))
   for (const bad of ['', 'PDF', 'pdf_tools', 'pdf tools', '-pdf', 'pdf-', 'pdf--x']) {
     assertThrowsCode(() => validateInstallName(bad), 'bad-name')
+  }
+})
+
+test('extractSkillDir：直接解进指定目录；定位失败先抛且不建目录（收口第 3 项：更新不经 os.tmpdir）', async () => {
+  const into = await mkTmp()
+  const payload = skillZip([['SKILL.md', '---\nname: pdf\n---'], ['sub/a.md', 'a'], ['foo/__pycache__/x.pyc', 'x']])
+  try {
+    const dir = await extractSkillDir(payload, undefined, false, into)
+    assert.equal(dir, '')
+    assert.deepEqual((await readdir(into)).sort(), ['SKILL.md', 'sub'])
+    // strict + 记录的路径在上游已失效 → path-stale，且不得留下半成品目录
+    const stale = await mkTmp()
+    await assert.rejects(() => extractSkillDir(payload, 'gone', true, join(stale, 'stage')), (e) => e.code === 'path-stale')
+    await assert.rejects(() => readdir(join(stale, 'stage')), (e) => e.code === 'ENOENT')
+    await cleanup(stale)
+  } finally {
+    await cleanup(into)
   }
 })
 

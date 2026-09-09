@@ -8,8 +8,9 @@
 //   截断后仍是可 grep 的 .jsonl。缺省键写 null 而非省略，保证逐行同构。
 // 参考：DSR-022「最终决定」1-9 条；docs/technical-details/挂载与同步.md「审计台账」。
 
-import { appendFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
-import { dirname, join, resolve } from 'node:path'
+import { appendFile, mkdir, readFile } from 'node:fs/promises'
+import { dirname, resolve } from 'node:path'
+import { writeFileAtomic } from './fsys.js'
 
 /** 台账行格式版本；键名或键序变更必须 +1 并在 DSR-022 登记（接口变更）。 */
 export const AUDIT_SCHEMA = 1
@@ -26,11 +27,17 @@ export const AUDIT_KEYS = Object.freeze([
 
 const KEYS = AUDIT_KEYS
 
-/** 操作类型全集；新增必须同步 DSR-022 第 4 条咽喉点清单与本枚举。 */
+/**
+ * 操作类型全集：只收**实现里真会发射**的 op（test/audit.test.mjs 双向对闸，多一个少一个都红）。
+ * 新增必须同步 DSR-022 第 4 条咽喉点清单与本枚举。
+ * 曾收录后删除的四个值（2026-09-09 复评）：`backup-restore`（实际发射为 library-swap + reason）、
+ * `backup-remove`（无发射点）、`audit-degraded`（走 results 的 action，不是台账 op）、
+ * `adopt`（B 案前向声明；随 DSR-022 第 11 条实现时再加）。
+ */
 export const AUDIT_OPS = Object.freeze([
   'link-create', 'link-remove', 'mount-dir-create', 'exclude-write',
-  'library-swap', 'library-remove', 'backup-create', 'backup-restore', 'backup-remove',
-  'batch', 'rotate', 'adopt', 'audit-degraded',
+  'library-swap', 'library-remove', 'backup-create',
+  'batch', 'rotate',
 ])
 
 const DEFAULT_MAX_LINES = 5000
@@ -139,7 +146,7 @@ export function createAudit({ file, profile = null, logger = null, maxLines = DE
    */
   function note({ op, actor = {}, result = 'ok', reason = null, configGen = null, ...rest } = {}) {
     seq += 1
-    const phase = op === 'rotate' ? 'rotate' : op === 'adopt' ? 'adopt' : 'summary'
+    const phase = op === 'rotate' ? 'rotate' : 'summary'
     return append(serialize({ ...identity(actor), opId: opIdOf(pid, seq), op, result, reason, configGen }, {
       seq,
       ts: new Date(now()).toISOString(),
@@ -178,10 +185,8 @@ export function createAudit({ file, profile = null, logger = null, maxLines = DE
     const kept = byAge.length > cap ? byAge.slice(-cap) : byAge
     lines = kept.length
     if (kept.length === all.length) return { truncated: false, dropped: 0, kept: kept.length }
-    const tmp = join(dirname(auditFile), `.dsh-sm-audit-${pid}-${Date.now()}.tmp`)
     try {
-      await writeFile(tmp, `${kept.join('\n')}\n`, 'utf8')
-      await rename(tmp, auditFile)
+      await writeFileAtomic(auditFile, `${kept.join('\n')}\n`)
     } catch (error) {
       failures += 1
       logger?.warn?.(`dsh-skill-manager: 审计台账截断失败（保留原文件，未丢弃任何记录）：${error instanceof Error ? error.message : String(error)}`)

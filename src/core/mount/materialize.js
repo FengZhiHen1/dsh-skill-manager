@@ -148,21 +148,3 @@ export async function materializeOne({ root, skill, t, workspacesById, globalRoo
   return { action: 'mounted' }
 }
 
-/**
- * 摘除一个 (skill, target) 的物化链接：仅当 dst 是链接且按归属判据
- * （realpath/readlink 目标落在库内并集：用户根 ∪ libraryRoot）属于本插件时删除；
- * 真实目录与库外链接一律不动。返回 'removed' | 'absent' | 'kept'。
- */
-export async function detachLink({ root, skill, t, workspacesById, globalRootPath, piSkillsRoot = null, libraryRoot = null, audit = null, actor = null, configGen = null }) {
-  const parent = targetDir(t, { workspacesById, globalRootPath, piSkillsRoot })
-  if (parent === undefined) return 'kept' // 目标根不可用：不扫描不触碰
-  const dst = join(parent, skill)
-  const probe = await probePath(dst)
-  if (probe !== 'link') return probe === 'absent' ? 'absent' : 'kept'
-  const target = await readLinkTarget(dst)
-  const owned = target !== '' && (withinRoot(await canonicalPath(root), target)
-    || (libraryRoot !== null && withinRoot(await canonicalPath(libraryRoot), target)))
-  if (!owned) return 'kept'
-  await removeLink({ path: dst, audit, actor, skill, target, srcRoot: root, reason: '显式摘除（detachLink）', configGen })
-  return 'removed'
-}

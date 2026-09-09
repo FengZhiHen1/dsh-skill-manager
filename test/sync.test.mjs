@@ -7,7 +7,7 @@ import assert from 'node:assert/strict'
 import { mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { deriveDesired, projectWorkspaces, targetDir, targetKey } from '../src/core/mount/derive.js'
-import { detachLink, isLink, materializeOne, removeLink } from '../src/core/mount/materialize.js'
+import { isLink, materializeOne, removeLink } from '../src/core/mount/materialize.js'
 import { findOrphanLinks, scanMountLinks, walkMountState } from '../src/core/mount/inspect.js'
 import { reconcile } from '../src/core/mount/reconcile.js'
 import { piState } from '../src/core/service.js'
@@ -163,28 +163,10 @@ test('materializeOne：库外链接不夺取（wrong-target）；库内他处链
   }
 })
 
-test('detachLink：owned 链接摘除；真实目录与库外链接 kept；不存在 absent', async () => {
-  const f = await fixture()
-  try {
-    const t = { scope: 'global', project: null }
-    const args = () => ({ root: f.root, skill: 'pdf', t, workspacesById: f.workspacesById, globalRootPath: f.globalRootPath })
-    assert.equal(await detachLink(args()), 'absent')
-    await writeSkill(f.root, 'pdf')
-    await materializeOne(args())
-    assert.equal(await detachLink(args()), 'removed')
-    const dst = join(f.globalRootPath, 'pdf')
-    await mkdir(dst, { recursive: true })
-    assert.equal(await detachLink(args()), 'kept')
-    await rm(dst, { recursive: true, force: true })
-    const outside = join(f.tmp, 'out')
-    await mkdir(outside, { recursive: true })
-    await symlink(outside, dst, 'junction')
-    assert.equal(await detachLink(args()), 'kept')
-    assert.ok(await isLink(dst))
-  } finally {
-    await cleanup(f.tmp)
-  }
-})
+// 原「detachLink：owned 摘除 / 真实目录与库外链接 kept / absent」用例随该导出删除（2026-09-09 收口第 5 项）：
+// 它在 src/ 内零生产调用方，摘除判定实际发生在 findOrphanLinks + removeLink，
+// 同一张判定表由本文件 materializeOne 的 wrong-target / target-occupied 分支与
+// inspect.test 的归属并集用例覆盖。B 案落地时该表将改由 managed_links 登记授予。
 
 // ---- 归属判据（inspect.js 单源） ----
 

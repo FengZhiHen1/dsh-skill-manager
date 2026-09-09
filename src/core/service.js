@@ -123,6 +123,7 @@ export function createSession(scopeGetter, listWorkspaces, getStore, backupsRoot
       const workspacesById = await readWorkspaceProjection(listWorkspaces)
       // 库扫描（双根：用户根自研/本地 + 插件库根 github）；意图字段由 settings 叠加（本地 skill 无登记）。
       const { items, conflicts } = await library.scanLibrary(root, store, { meta: shared?.meta, libraryRoot })
+      const residues = await library.findSwapResidue(libraryRoot)
       const viewItems = items.map((it) => {
         const intent = intentSkills[it.dir]
         return intent
@@ -162,6 +163,12 @@ export function createSession(scopeGetter, listWorkspaces, getStore, backupsRoot
       // 同名冲突（用户根与 github 登记撞名，本地目录被遮蔽）入警告条
       for (const c of conflicts) {
         warnings.push(`同名冲突：「${c}」在本地目录与插件库（GitHub 登记）中同时存在，以 GitHub 登记为准，本地目录中的同名目录已被遮蔽`)
+      }
+      // 换装残骸（DSR-022 收口第 4 项）：点开头目录被库扫描跳过 → 页面上原本不可见，
+      // 其中 .dsh-sm-old-* 更是失败路径刻意保留的唯一旧版副本，必须报出来给人处置。
+      if (residues.length > 0) {
+        const shown = residues.slice(0, 5).join('、')
+        warnings.push(`插件库根有 ${residues.length} 个换装残留目录（${shown}${residues.length > 5 ? ' 等' : ''}）：不影响 skill 加载，但内含旧版内容且不会自动清理，确认后可手工删除`)
       }
       // 行状态走查与孤儿集共用同一次扫描（扫描语义：开关开或规则引用 pi 才扫 pi 根），
       // 结果随 bundle 快照一起失效。归属判据为双根并集（用户根 ∪ 插件库根）。

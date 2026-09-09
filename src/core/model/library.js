@@ -190,6 +190,28 @@ export async function scanLibrary(root, store, opts = {}) {
   return { items, conflicts }
 }
 
+/**
+ * 换装残骸名（DSR-022 第 4 条咽喉点的失败路径产物）：
+ * `.dsh-sm-swap-*` = 被 finally 漏掉的暂存（进程被杀），`.dsh-sm-old-*` = 换装失败刻意保留的旧版。
+ * 二者都以 `.` 开头 → 被 scanLibrary 跳过、永不成为 skill、**页面上完全不可见**，
+ * 却能长期占盘且装着旧内容。本函数是它们唯一的报告出口（台账能解释，现场必须可见）。
+ * @param {string|null|undefined} dir 插件库根
+ * @returns {Promise<string[]>} 残骸目录名（按名排序；根不存在或读不了 → 空集，不抛）
+ */
+export async function findSwapResidue(dir) {
+  if (typeof dir !== 'string' || dir === '') return []
+  let entries
+  try {
+    entries = await readdir(dir, { withFileTypes: true })
+  } catch {
+    return [] // 探针语义：读不到按无残骸报，残骸本身不该制造新错误
+  }
+  return entries
+    .filter((e) => e.isDirectory() && /^\.dsh-sm-(swap|old)-/.test(e.name))
+    .map((e) => e.name)
+    .sort()
+}
+
 /** 目录存在性探针（库扫描内部用；不存在/非目录/不可读 → false）。 */
 async function existsDir(p) {
   try {

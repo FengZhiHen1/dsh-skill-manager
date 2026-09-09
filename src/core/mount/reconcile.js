@@ -7,8 +7,9 @@
 //   audit 缺省 = 不记（供无台账上下文复用）。
 // 参考：挂载与同步.md「对账流程」「审计台账」；DSR-015/017/022。
 
-import { readFile, writeFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { writeFileAtomic } from '../base/fsys.js'
 import { deriveDesired, targetKey } from './derive.js'
 import { findOrphanLinks, scanMountLinks } from './inspect.js'
 import { materializeOne, removeLink } from './materialize.js'
@@ -116,7 +117,8 @@ async function updateGitExcludes({ desired, workspacesById, results, audit = nul
       ? null
       : await audit.begin({ op: 'exclude-write', actor, path: excludeFile, skill: null, target: null, srcRoot: null, reason: wanted.has(workspaceId) ? `托管块登记宿主：${[...wanted.get(workspaceId)].join(',')}` : '托管块清空（该工作区已无 project 级期望）', configGen })
     try {
-      await writeFile(excludeFile, next, 'utf8')
+      // 原子写：这是本插件唯一直接改用户仓库内文件的动作，半截写入会毁掉用户的 exclude 全文。
+      await writeFileAtomic(excludeFile, next)
     } catch (error) {
       await op?.fail(error)
       results.push({ name: 'git-exclude', target: workspaceId, action: 'error', error: error instanceof Error ? error.message : String(error), code: 'write-failed' })

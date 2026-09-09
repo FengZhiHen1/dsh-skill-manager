@@ -5,7 +5,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { parseSkillMd, dirHash, scanLibrary } from '../src/core/model/library.js'
+import { findSwapResidue, parseSkillMd, dirHash, scanLibrary } from '../src/core/model/library.js'
 import { mkTmp, cleanup, writeSkill, fakeStore, skillRecord } from './helpers.mjs'
 
 test('parseSkillMd：单行 key: value 与引号剥离', () => {
@@ -131,5 +131,21 @@ test('scanLibrary：无 SKILL.md 的目录仍列出但 hasSkillMd=false；点开
     assert.equal(items[0].hasSkillMd, false)
   } finally {
     await cleanup(root)
+  }
+})
+
+test('findSwapResidue：只认换装残骸前缀，普通点目录与 skill 目录不报（收口第 4 项的出口）', async () => {
+  const lib = await mkTmp()
+  try {
+    await mkdir(join(lib, '.dsh-sm-swap-pdf-abc'), { recursive: true })
+    await mkdir(join(lib, '.dsh-sm-old-pdf-123-zz'), { recursive: true })
+    await mkdir(join(lib, '.dsh-sm-unrelated-xyz'), { recursive: true }) // 非本原语产物：不报
+    await mkdir(join(lib, '.hidden'), { recursive: true })
+    await writeSkill(lib, 'real-skill')
+    assert.deepEqual(await findSwapResidue(lib), ['.dsh-sm-old-pdf-123-zz', '.dsh-sm-swap-pdf-abc'])
+    assert.deepEqual(await findSwapResidue(join(lib, 'no-such-root')), [], '根读不到按无残骸报，不抛')
+    assert.deepEqual(await findSwapResidue(null), [])
+  } finally {
+    await cleanup(lib)
   }
 })

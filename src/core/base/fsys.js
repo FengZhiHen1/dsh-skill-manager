@@ -76,17 +76,25 @@ export function normalizeRel(rel) {
 }
 
 /**
- * 原子写 JSON：同目录临时文件 + rename 落位。
- * @throws {SkillManagerError} bad-path — rel 越出 root，由 safePath 透传
- * @throws {SkillManagerError} write-failed — 临时文件或 rename 失败，携目标路径 facts
+ * 原子写文本：同目录临时文件 + rename 落位；失败清理临时文件并抛 write-failed。
+ * 全包唯一的「受管文件持久写」出口——含用户侧文件（`.git/info/exclude`）与台账截断，
+ * 一律不许再各写一份裸 writeFile（半截写入对不可恢复的文件不可接受）。
+ * @param {string} file 目标文件绝对路径
+ * @param {string} text 完整新内容（整体替换，不追加）
+ * @throws {SkillManagerError} bad-path — file 非绝对路径
+ * @throws {SkillManagerError} write-failed — 临时文件写入或 rename 失败，携目标路径 facts
  */
-export async function writeJson(root, rel, data) {
-  const file = safePath(root, rel)
+export async function writeFileAtomic(file, text) {
+  if (!isAbsolute(file)) {
+    throw new SkillManagerError('bad-path', `原子写要求绝对路径，拒绝相对路径：${file}`, false, [
+      { label: '目标文件', value: String(file) },
+    ])
+  }
   const dir = dirname(file)
   await mkdir(dir, { recursive: true })
   const tmp = join(dir, `.dsh-sm-tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`)
   try {
-    await writeFile(tmp, JSON.stringify(data, null, 2), 'utf8')
+    await writeFile(tmp, text, 'utf8')
     try {
       await rename(tmp, file)
     } catch (error) {
@@ -100,7 +108,7 @@ export async function writeJson(root, rel, data) {
     }
   } catch (error) {
     await rm(tmp, { force: true })
-    throw new SkillManagerError('write-failed', `写入 ${rel} 失败：${error instanceof Error ? error.message : String(error)}`, false, [
+    throw new SkillManagerError('write-failed', `写入 ${file} 失败：${error instanceof Error ? error.message : String(error)}`, false, [
       { label: '目标文件', value: String(file) },
     ])
   }

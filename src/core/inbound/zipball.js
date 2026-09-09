@@ -97,24 +97,50 @@ export function locateSkillDir(files, subdir, strict = false) {
 }
 
 /**
+ * 把已解包的 files 映射里某个 skill 目录的内容写入 dest（2026-09-09 收口：解包循环单源）。
+ * 定位失败必须在建目录之前抛出，故 locate 不进本函数。
+ */
+async function writeSkillFiles(files, dir, dest) {
+  const prefix = dir === '' ? '' : `${dir}/`
+  for (const [rel, data] of Object.entries(files)) {
+    if (!rel.startsWith(prefix)) continue
+    const target = join(dest, rel.slice(prefix.length))
+    // 与 copyTree 同源：按路径段精确跳过 __pycache__（子串匹配会误伤 foo__pycache__.md）
+    if (rel.split('/').includes('__pycache__')) continue
+    await mkdir(join(target, '..'), { recursive: true })
+    await writeFile(target, data)
+  }
+}
+
+/**
+ * 把 zipball 内一个 skill 目录**直接解到调用方指定的目录**（通常是 atomicSwapDir 的 stage）。
+ * 用途：更新路径的目标位置已知，无需先解到 os.tmpdir 再整树复制一遍——省掉一次跨卷复制，
+ * 且暂存与落位同卷（stage 由 swapDirInner 建在 dest 同父目录）。
+ * 目录生命周期归调用方（swap 的 finally 负责清 stage），本函数不建也不删临时目录。
+ * @returns {Promise<string>} 命中的仓内相对目录（'' = 仓库根即 skill）
+ * @throws {SkillManagerError} path-stale / no-skill-md 由 locateSkillDir 透传（先定位后建目录，失败不留残骸）
+ */
+export async function extractSkillDir(payload, subdir, strict, into) {
+  const { files } = explodeZipball(payload)
+  const dir = locateSkillDir(files, subdir, strict)
+  await mkdir(into, { recursive: true })
+  await writeSkillFiles(files, dir, into)
+  return dir
+}
+
+/**
  * 把 zipball 内一个 skill 目录物化到临时目录，返回 {tmp, dir}（dir 相对路径）。
  * 私有原语——tmp 生命周期只由 {@link withMaterializedSkillDir} 持有，外部不再
  * 直接调用（防旁路漏清理）。
+ * 为何 add 仍走 os.tmpdir：装到哪里（installName）取决于**解包后**读到的 SKILL.md
+ * 名字，dest 未知 → stage 也无从建起（2026-09-09 收口时评估过合并，结论是不成立）。
  * Side Effects: 在 os.tmpdir() 建目录。
  */
 async function materializeSkillDir(payload, subdir, strict = false) {
   const { files } = explodeZipball(payload)
   const dir = locateSkillDir(files, subdir, strict)
   const tmp = await mkdtemp(join(tmpdir(), 'dsh-sm-'))
-  const prefix = dir === '' ? '' : `${dir}/`
-  for (const [rel, data] of Object.entries(files)) {
-    if (!rel.startsWith(prefix)) continue
-    const target = join(tmp, rel.slice(prefix.length))
-    // 与 copyTree 同源：按路径段精确跳过 __pycache__（子串匹配会误伤 foo__pycache__.md）
-    if (rel.split('/').includes('__pycache__')) continue
-    await mkdir(join(target, '..'), { recursive: true })
-    await writeFile(target, data)
-  }
+  await writeSkillFiles(files, dir, tmp)
   return { tmp, dir }
 }
 
@@ -125,7 +151,7 @@ async function materializeSkillDir(payload, subdir, strict = false) {
  * @param {Buffer} payload zipball 字节
  * @param {string|undefined} subdir 仓内子目录（可空 = 自动探测）
  * @param {boolean} strict 传给 locateSkillDir 的严格模式
- * @param {(env: {tmp: string, dir: string}) => Promise<unknown>} fn 消费回调
+ * @param {(env: {tmp: string, dir: string}) => Promise<unknown>} fn 消费回调（tmp 只在本回调内有效）
  * @returns fn 的返回值
  */
 export async function withMaterializedSkillDir(payload, subdir, strict, fn) {

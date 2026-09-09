@@ -7,7 +7,7 @@ import { SkillManagerError } from '../base/errors.js'
 import { fetchZipball, remoteHead } from '../base/net.js'
 import { atomicSwapDirAudited, pathExists, safePath } from '../base/fsys.js'
 import { dirHash } from '../model/library.js'
-import { copyTree, nowIso, withMaterializedSkillDir } from './zipball.js'
+import { extractSkillDir, nowIso } from './zipball.js'
 
 /**
  * 目录哈希门面：按入参三态分流。
@@ -189,16 +189,16 @@ export async function update({ root, store, names, confirmLocalChanges = false, 
       // 覆盖走原子换装：新版在临时位置构建并校验完成后才整体替换旧目录。
       // 因此不存在"先删旧再重写"的半写窗口。
       // strict=true：记录的 path_in_repo 在上游失效时报 path-stale 并附候选目录。
-      // 临时目录由 withMaterializedSkillDir 的 finally 清理，失败也不漏 tmp。
-      await withMaterializedSkillDir(payload, entry.path_in_repo ?? undefined, true, async ({ tmp }) => {
-        await atomicSwapDirAudited(dest, (stage) => copyTree(tmp, stage), {
-          audit: ctx?.audit ?? null,
-          actor: ctx?.actor ?? null,
-          skill: name,
-          srcRoot: root,
-          reason: `上游覆盖更新（${entry.repo}）`,
-          configGen: ctx?.configGen ?? null,
-        })
+      // 新版直接解进 swap 的 stage（同父目录、同卷）：不再经 os.tmpdir 整树复制一遍
+      // （2026-09-09 收口第 3 项）；stage 由 swapDirInner 的 finally 清理，失败不漏残骸。
+      // path-stale 是 SkillManagerError，atomicSwapDir 原样透传，不会被裹成 write-failed。
+      await atomicSwapDirAudited(dest, (stage) => extractSkillDir(payload, entry.path_in_repo ?? undefined, true, stage), {
+        audit: ctx?.audit ?? null,
+        actor: ctx?.actor ?? null,
+        skill: name,
+        srcRoot: root,
+        reason: `上游覆盖更新（${entry.repo}）`,
+        configGen: ctx?.configGen ?? null,
       })
     } catch (error) {
       // 单条失败不中断批次：status='failed' 与「不适用」的 skipped 显式区分。

@@ -4,8 +4,9 @@
 // 格式与崩溃面走 audit 单元面（symlink 失败在 tmp 夹具里无法自然注入，不为造错而 stub fs 原语）。
 
 import test from 'node:test'
-import { lstat, readFile, writeFile } from 'node:fs/promises'
+import { lstat, readdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import assert from 'node:assert/strict'
 import { AUDIT_KEYS, AUDIT_OPS, AUDIT_SCHEMA, createAudit } from '../src/core/base/audit.js'
 import { buildApi } from '../src/core/service.js'
@@ -275,15 +276,26 @@ test('台账写失败：业务照常完成，results 追加 audit-degraded 行�
   }
 })
 
-test('操作枚举闭合：AUDIT_OPS 覆盖实现里用到的全部 op，未知 op 不落条', async () => {
+test('操作枚举双向闭合：src 实际发射的 op 集合 === AUDIT_OPS（死值与漏记都红）', async () => {
   const tmp = await mkTmp()
   try {
+    // 静态扫 src：/op:\s*'...'/ 命中的字面量即「实现真会发射的 op」。
+    // 单向断言（发射 ⊆ 声明）测不出声明里的死值——2026-09-09 复评正是靠这条抓到四个。
+    const emitted = new Set()
+    const walk = async (dir) => {
+      for (const e of await readdir(dir, { withFileTypes: true })) {
+        const full = join(dir, e.name)
+        if (e.isDirectory()) { await walk(full); continue }
+        if (!e.name.endsWith('.js')) continue
+        const src = await readFile(full, 'utf8')
+        for (const m of src.matchAll(/\bop:\s*'([a-z-]+)'/g)) emitted.add(m[1])
+      }
+    }
+    await walk(fileURLToPath(new URL('../src/core', import.meta.url)))
+    assert.ok(emitted.size >= 8, `静态扫描未取到发射集（扫到 ${emitted.size} 个）`)
+    assert.deepEqual([...AUDIT_OPS].sort(), [...emitted].sort(), 'AUDIT_OPS 必须与实现发射集精确相等')
     const file = join(tmp, 'audit.jsonl')
     const audit = createAudit({ file })
-    for (const op of ['link-create', 'link-remove', 'mount-dir-create', 'exclude-write', 'library-swap', 'library-remove', 'backup-create', 'batch', 'rotate', 'adopt', 'audit-degraded']) {
-      assert.ok(AUDIT_OPS.includes(op), `实现用到的 op 必须在枚举内：${op}`)
-    }
-    assert.equal(AUDIT_OPS.filter((op) => !AUDIT_KEYS.includes('op') && op).length, 0)
     const op = await audit.begin({ op: 'link-create', path: 'X:/a' })
     await op.done()
     await audit.endBatch()

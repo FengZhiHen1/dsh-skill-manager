@@ -8,7 +8,7 @@ import {
   CONFIG_NS, SKILLS_DIR_FIELD, PI_FIELD, DEFAULT_GROUP, configSchema, requireDir, probePiAgentDir,
 } from '../src/core/model/intent.js'
 import { registerConfig } from '../src/adapter/settings.js'
-import { atomicSwapDir, safePath, existsDir, writeJson } from '../src/core/base/fsys.js'
+import { atomicSwapDir, safePath, existsDir, writeFileAtomic } from '../src/core/base/fsys.js'
 import { mkTmp, cleanup, assertRejectsCode, assertThrowsCode } from './helpers.mjs'
 
 test('registerConfig：命名空间与 schema 正确（意图字段齐备）', () => {
@@ -99,14 +99,16 @@ test('safePath：拒绝越界路径与根自身', async () => {
   }
 })
 
-test('writeJson：原子写入且无临时文件残留', async () => {
+test('writeFileAtomic：原子写入、可覆盖、无临时文件残留、拒绝相对路径', async () => {
   const root = await mkTmp()
+  const file = join(root, 'sub', 'data.txt')
   try {
-    await writeJson(root, 'sub/data.json', { a: 1 })
-    assert.deepEqual(JSON.parse(await readFile(join(root, 'sub', 'data.json'), 'utf8')), { a: 1 })
-    await writeJson(root, 'sub/data.json', { a: 2 }) // 覆盖（Windows rename 语义）
-    assert.deepEqual(JSON.parse(await readFile(join(root, 'sub', 'data.json'), 'utf8')), { a: 2 })
-    assert.deepEqual(await readdir(join(root, 'sub')), ['data.json'])
+    await writeFileAtomic(file, 'first') // 父目录不存在也要建
+    assert.equal(await readFile(file, 'utf8'), 'first')
+    await writeFileAtomic(file, 'second') // 覆盖（Windows rename 语义）
+    assert.equal(await readFile(file, 'utf8'), 'second')
+    assert.deepEqual(await readdir(join(root, 'sub')), ['data.txt'])
+    await assert.rejects(() => writeFileAtomic('relative/data.txt', 'x'), (e) => e.code === 'bad-path')
   } finally {
     await cleanup(root)
   }

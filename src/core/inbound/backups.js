@@ -4,10 +4,10 @@
 // 本地 skill 无版本管理，不经插件入库，由用户在配置目录内自管目录。
 // 参考：入站操作.md「remove」「restore」「backups 列表」；DSR-015。
 
-import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { SkillManagerError } from '../base/errors.js'
-import { atomicSwapDirAudited, canonicalPath, pathExists, pathsEqual, safePath } from '../base/fsys.js'
+import { atomicSwapDirAudited, canonicalPath, pathExists, pathsEqual, safePath, writeFileAtomic } from '../base/fsys.js'
 import { dirHash } from '../model/library.js'
 import { backupId } from '../model/store.js'
 import { scanMountLinks } from '../mount/inspect.js'
@@ -52,11 +52,7 @@ export async function remove({ root, userRoot = null, store, name, backupsRoot, 
     await mkdir(backup, { recursive: true })
     try {
       await copyTree(src, backup)
-      await writeFile(
-        join(backup, '_backup_meta.json'),
-        JSON.stringify({ name, record, created_at: nowIso() }, null, 2),
-        'utf8',
-      )
+      await writeFileAtomic(join(backup, '_backup_meta.json'), JSON.stringify({ name, record, created_at: nowIso() }, null, 2))
     } catch (error) {
       await rm(backup, { recursive: true, force: true })
       await op?.fail(error, { result: 'rolled-back' })
