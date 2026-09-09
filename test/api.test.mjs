@@ -5,6 +5,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { join } from 'node:path'
 import { buildApi, createDispatch, createQueue, toRpcFailure } from '../src/core/service.js'
+import { configSchema } from '../src/core/model/intent.js'
 import { SkillManagerError } from '../src/core/base/errors.js'
 import { isLink } from '../src/core/mount/materialize.js'
 import { mkTmp, cleanup, writeSkill, fakeStore, fakeScope, skillRecord, assertRejectsCode } from './helpers.mjs'
@@ -270,6 +271,41 @@ test('sync：配置意图物化到全局根与工作区；配置变更后对账�
   } finally {
     await cleanup(root)
     await cleanup(proj)
+    await cleanup(groot)
+  }
+})
+
+// 配置默认种子的端到端语义（DSR-011「修订（2026-09-09）」）：scope 值一律经
+// configSchema() 求值 —— 与 Host settings 解析面同形（默认值 → base → 用户），
+// 默认种子本身因此成为被断言的对象，而不是测试夹具里手写的 groups。
+const resolveConfig = configSchema() // schemastery 模式：schema 可调用，调用即求值并回填默认
+
+test('默认种子空挂载：未显式配 groups ⇒ sync 零期望 ⇒ 旧种子遗留的全局链接按孤儿摘除；显式勾选可恢复', async () => {
+  const root = await mkTmp()
+  const groot = await mkTmp()
+  try {
+    await writeSkill(root, 'pdf')
+    const seedGlobal = { skillsDir: root, groups: { 默认: { mounts: [{ scope: 'global', project: null }] } } }
+    const box = { value: resolveConfig(seedGlobal) }
+    const { api } = makeApi({ root, globalRoot: groot, scope: () => ({ get: () => box.value }) })
+    // ① 旧种子等价现场（显式「默认」组挂全局）→ 链接物化
+    assert.equal(box.value.groups['默认'].mounts.length, 1)
+    assert.equal((await api.sync({})).errors.length, 0)
+    assert.ok(await isLink(join(groot, 'pdf')))
+    // ② 配置里根本没有 groups 键（新装 / 从未显式配过）→ 解析落到空种子
+    box.value = resolveConfig({ skillsDir: root })
+    assert.deepEqual(box.value.groups, { 默认: { mounts: [] } })
+    const r = await api.sync({})
+    assert.equal(r.errors.length, 0)
+    assert.equal(r.results.find((x) => x.name === 'pdf')?.action, 'removed')
+    assert.match(String(r.results.find((x) => x.name === 'pdf')?.reason), /孤儿/)
+    assert.equal(await isLink(join(groot, 'pdf')), false)
+    // ③ 对照：显式重新勾选全局 → 链接回来（本次只取消隐式默认，不禁止全局挂载）
+    box.value = resolveConfig(seedGlobal)
+    assert.equal((await api.sync({})).errors.length, 0)
+    assert.ok(await isLink(join(groot, 'pdf')))
+  } finally {
+    await cleanup(root)
     await cleanup(groot)
   }
 })
