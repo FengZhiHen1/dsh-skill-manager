@@ -11,7 +11,7 @@ import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { writeFileAtomic } from '../base/fsys.js'
 import { deriveDesired, targetKey } from './derive.js'
-import { findOrphanLinks, scanMountLinks } from './inspect.js'
+import { describeUnmanagedLinks, findAdoptableLinks, findOrphanLinks, scanMountLinks } from './inspect.js'
 import { materializeOne, removeLink } from './materialize.js'
 
 const EXCLUDE_BEGIN = '# >>> dsh-skill-manager'
@@ -28,7 +28,7 @@ const EXCLUDE_LINES = { dsh: '/.dsh/skills/', pi: '/.pi/skills/' }
  * @param {object} opts - 对账输入；audit/actor/configGen 为台账上下文（缺省不记）
  * @returns {Promise<{results: Array, warnings: Array, errors: Array}>}
  */
-export async function reconcile({ root, memberships, mounts, workspacesById, globalRootPath, piSkillsRoot = null, piScanRoot = piSkillsRoot, libraryRoot = null, srcRootOf = null, audit = null, actor = null, configGen = null }) {
+export async function reconcile({ root, memberships, mounts, workspacesById, globalRootPath, piSkillsRoot = null, piScanRoot = piSkillsRoot, libraryRoot = null, srcRootOf = null, audit = null, actor = null, configGen = null, registry = null }) {
   const { desired, warnings } = deriveDesired({ memberships, mounts, workspacesById, globalRootPath, piSkillsRoot })
   const results = []
   // 真实变更计数（供 summary）：noop 不计数、不落条，「执行了但没变化」由此与「没执行」区分。
@@ -38,11 +38,37 @@ export async function reconcile({ root, memberships, mounts, workspacesById, glo
   //    扫描语义用 piScanRoot（开关开或规则引用 pi 才扫）：关开关后 pi 残留链接在此步摘除。
   //    逐条隔离（与物化同构）：单条摘除失败进 results，不中断其余子项。
   const links = await scanMountLinks({ root, globalRootPath, workspacesById, piSkillsRoot: piScanRoot, libraryRoot })
-  const orphans = await findOrphanLinks({ root, desired, globalRootPath, workspacesById, piSkillsRoot, libraryRoot, links })
+  // 1a. 装载归属登记表（DSR-022 第 10/11/13 条）。registry 缺席或不可读 → 本趟零摘除、零认领，
+  //     仍按期望集建链（建链不需要摘除权）；这正是「宁可残留」的落地形态。
+  let canDetach = false
+  if (registry !== null) {
+    const { available } = await registry.load()
+    if (!available) {
+      // 第 13 条第一分支：文案与读面同源，见 inspect.describeUnmanagedLinks
+    } else {
+      canDetach = true
+      if (registry.size() === 0) {
+        const claimed = []
+        for (const l of await findAdoptableLinks({ root, desired, globalRootPath, workspacesById, piSkillsRoot, libraryRoot, links, registry })) {
+          if (await registry.register({ path: l.path, target: l.target, skill: l.name })) claimed.push(l.path)
+        }
+        if (claimed.length > 0) {
+          await audit?.note({ op: 'adopt', actor, reason: '首次认领（登记表为空）：既有且仍在期望集内的链接', evaluated: claimed.length, changed: claimed.length, configGen })
+        }
+      }
+    }
+    // 1b. 未登记残留/不可读显式报告（第 13 条；认领已发生则被认领者不再计入残留）
+    warnings.push(...describeUnmanagedLinks({ links, registry, desired, workspacesById, globalRootPath, piSkillsRoot }))
+  } else {
+    warnings.push('本次未启用归属登记表（registry 缺席）：按宁可残留，本趟不摘除任何链接')
+  }
+  const orphans = canDetach
+    ? await findOrphanLinks({ root, desired, globalRootPath, workspacesById, piSkillsRoot, libraryRoot, links, registered: registry })
+    : []
   for (const link of orphans) {
-    const reason = '孤儿链接（归属本插件且不在期望集）'
+    const reason = '孤儿链接（本实例登记在册且不在期望集）'
     try {
-      await removeLink({ path: link.path, audit, actor, skill: link.name, reason, target: link.target, srcRoot: root, configGen })
+      await removeLink({ path: link.path, audit, actor, skill: link.name, reason, target: link.target, srcRoot: root, configGen, registry })
       changed += 1
       results.push({ name: link.name, target: link.parent, action: 'removed', reason })
     } catch (error) {
@@ -56,7 +82,7 @@ export async function reconcile({ root, memberships, mounts, workspacesById, glo
     for (const t of targets) {
       const key = targetKey(t)
       try {
-        const r = await materializeOne({ root: srcRoot, skill, t, workspacesById, globalRootPath, piSkillsRoot, libraryRoot, audit, actor, configGen })
+        const r = await materializeOne({ root: srcRoot, skill, t, workspacesById, globalRootPath, piSkillsRoot, libraryRoot, audit, actor, configGen, registry })
         if (r.action === 'mounted') changed += 1
         results.push({ name: skill, target: key, action: r.action, method: 'junction' })
       } catch (error) {
@@ -75,6 +101,10 @@ export async function reconcile({ root, memberships, mounts, workspacesById, glo
     if (failures > 0) {
       results.push({ name: 'audit', target: file, action: 'audit-degraded', code: 'audit-degraded', error: `审计台账写入失败 ${String(failures)} 次（挂载业务未受影响，详见该行 target）` })
     }
+  }
+  // 登记表写失败与台账同款降级语义：可见、不阻断、不计入 errors（R6 先例）。
+  if (registry !== null && registry.failures > 0) {
+    results.push({ name: 'link-registry', target: 'managed_links', action: 'registry-degraded', code: 'registry-degraded', error: `归属登记写入失败 ${String(registry.failures)} 次（链接现场已生效，但下次对账无法据登记摘除它们）` })
   }
 
   const errors = results.filter((r) => r.action === 'error')

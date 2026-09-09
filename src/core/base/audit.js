@@ -30,13 +30,13 @@ const KEYS = AUDIT_KEYS
 /**
  * 操作类型全集：只收**实现里真会发射**的 op（test/audit.test.mjs 双向对闸，多一个少一个都红）。
  * 新增必须同步 DSR-022 第 4 条咽喉点清单与本枚举。
- * 曾收录后删除的四个值（2026-09-09 复评）：`backup-restore`（实际发射为 library-swap + reason）、
- * `backup-remove`（无发射点）、`audit-degraded`（走 results 的 action，不是台账 op）、
- * `adopt`（B 案前向声明；随 DSR-022 第 11 条实现时再加）。
+ * 曾收录后删除的三个值（2026-09-09 复评 R8）：`backup-restore`（实际发射为 library-swap + reason）、
+ * `backup-remove`（无发射点）、`audit-degraded`（走 results 的 action，不是台账 op）。
+ * `adopt` 当时因「无发射点」一并删除，同日 B 案实现后按真实发射加回（DSR-022 第 11 条）。
  */
 export const AUDIT_OPS = Object.freeze([
   'link-create', 'link-remove', 'mount-dir-create', 'exclude-write',
-  'library-swap', 'library-remove', 'backup-create',
+  'library-swap', 'library-remove', 'backup-create', 'adopt',
   'batch', 'rotate',
 ])
 
@@ -103,9 +103,14 @@ export function createAudit({ file, profile = null, logger = null, maxLines = DE
     return chain
   }
 
-  /** 归因字段：每条都带，跨实例/跨进程可追。 */
+  /**
+   * 归因字段：每条都带，跨实例/跨进程可追。
+   * actor 允许为 null/undefined（无上下文的直调，如程序内对账与单测）——归因写 null，
+   * 绝不抛：台账是观测面，它的缺字段不该让一次真实的链接变更整批失败。
+   */
   function identity(actor) {
-    return { home, profile, pid, procStarted, entry: actor.entry ?? null, method: actor.method ?? null }
+    const a = actor ?? {}
+    return { home, profile, pid, procStarted, entry: a.entry ?? null, method: a.method ?? null }
   }
 
   /**

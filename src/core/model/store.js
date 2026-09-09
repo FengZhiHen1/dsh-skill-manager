@@ -40,6 +40,19 @@ const checkRecord = z.object({
   missing: z.boolean(),
 })
 
+/**
+ * 挂载归属登记（DSR-022 B 案）：键 = 链接绝对路径（归一口径见 mount/registry.js 的 managedKey），
+ * 值 = 建链事实。**摘除权只由本表授予**——「这条链接是本 HOME 建的」不再有第二处事实源。
+ * 键名沿用域内 snake_case 风格（installed_at/content_hash 同族），故用 op_id 而非 opId；
+ * 记录里不存 entry/挂载根信息——它撞台账的 entry（入口）语义，且完全可由键路径反推。
+ */
+const managedLinkRecord = z.object({
+  target: z.string().nullable(),
+  skill: z.string(),
+  created_at: z.string(),
+  op_id: z.string().nullable(),
+})
+
 // ---- 以下 schema 仅服务 legacy 七表 spec 的存量读取，新 spec 不声明 ----
 
 const groupRecord = z.object({
@@ -70,7 +83,7 @@ const backupRecord = z.object({
 })
 
 /**
- * 域声明构建器：storage 域 skill_manager 两表，version 恒 1。
+ * 域声明构建器：storage 域 skill_manager 三表（skills/check_cache/managed_links），version 恒 1。
  * version 不能 bump：storage-json 后端对 version 严格相等校验，bump 会让存量域打不开。
  * 新 spec 未声明的旧表（synced/projects/backups 乃至 legacy 七表）在首次写入时整体抹除。
  * 抹除机制：打开只载入声明表，写入整文档重序列化，故无需清场代码。
@@ -83,6 +96,7 @@ export const buildSkillManagerSpec = ({ defineDomain, domainTable }) => defineDo
   tables: {
     skills: domainTable(skillRecord),
     check_cache: domainTable(checkRecord),
+    managed_links: domainTable(managedLinkRecord),
   },
 })
 
@@ -126,6 +140,12 @@ export function createStore(domain) {
     skillEntries: () => [...table('skills').entries()],
     putSkill: (name, record) => table('skills').put(name, record),
     deleteSkill: (name) => table('skills').delete(name),
+
+    // 挂载归属登记（DSR-022 B 案）：只经 mount/registry.js 使用，业务层不直接碰表键。
+    linkEntries: () => [...table('managed_links').entries()],
+    getLink: (key) => table('managed_links').get(key),
+    putLink: (key, record) => table('managed_links').put(key, record),
+    deleteLink: (key) => table('managed_links').delete(key),
 
     getCheck: (name) => table('check_cache').get(name),
     checkEntries: () => [...table('check_cache').entries()],

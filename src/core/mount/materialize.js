@@ -46,17 +46,23 @@ export async function auditTarget(value) {
  * @param {string|null} [args.target] - 摘除前的链接目标（本函数内归一）
  * @param {string|null} [args.srcRoot] - 归属源根
  * @param {number|null} [args.configGen] - 配置代次
+ * @param {object|null} [args.registry] - 归属登记表（mount/registry.js）；非空则摘成功后销登记
  */
-export async function removeLink({ path, audit = null, actor = null, skill = null, reason = null, target = null, srcRoot = null, configGen = null } = {}) {
-  if (audit === null) return rmLinkOnly(path)
-  const op = await audit.begin({ op: 'link-remove', actor, skill, path, target: await auditTarget(target), srcRoot, reason, configGen })
-  try {
+export async function removeLink({ path, audit = null, actor = null, skill = null, reason = null, target = null, srcRoot = null, configGen = null, registry = null } = {}) {
+  if (audit === null) {
     await rmLinkOnly(path)
-  } catch (error) {
-    await op.fail(error)
-    throw error
+  } else {
+    const op = await audit.begin({ op: 'link-remove', actor, skill, path, target: await auditTarget(target), srcRoot, reason, configGen })
+    try {
+      await rmLinkOnly(path)
+    } catch (error) {
+      await op.fail(error)
+      throw error
+    }
+    await op.done({ result: 'removed' })
   }
-  await op.done({ result: 'removed' })
+  // 登记销账在链接真删之后（顺序反了会出现「无链接有登记」的假悬挂）；写失败由 registry.failures 计。
+  if (registry !== null) await registry.unregister(path)
 }
 
 /** 摘除动作本体：一次边界，两条 rm（junction 兜底 rmdir 语义）不分别成条。 */
@@ -77,7 +83,7 @@ async function rmLinkOnly(path) {
  * 返回 { action: 'ok' | 'mounted' }；失败抛 SkillManagerError
  * （no-skill-md / target-occupied / wrong-target / junction 创建失败的原始错误）。
  */
-export async function materializeOne({ root, skill, t, workspacesById, globalRootPath, piSkillsRoot = null, libraryRoot = null, audit = null, actor = null, configGen = null }) {
+export async function materializeOne({ root, skill, t, workspacesById, globalRootPath, piSkillsRoot = null, libraryRoot = null, audit = null, actor = null, configGen = null, registry = null }) {
   const src = safePath(root, skill)
   try {
     const info = await stat(join(src, 'SKILL.md'))
@@ -106,18 +112,26 @@ export async function materializeOne({ root, skill, t, workspacesById, globalRoo
     const target = await readLinkTarget(dst)
     const expected = await canonicalPath(src)
     if (pathsEqual(target, expected)) return { action: 'ok' } // 已就位：幂等 ok 不入台账，由 summary 计数
-    // 指向库内他处（如改名后的旧链接）：按归属判据摘除重建（自检修复）；
-    // 库内 = 源根 ∪ 插件库根（双根并集，与 inspect.js 同一判据）。
-    // 指向库外的链接非本插件所有：报告，不夺取。
+    // 夺取既有链接需**两**重许可（DSR-022 第 10 条）：① 前缀判据（库内并集：源根 ∪ 插件库根）
+    // 证明它指向我们的地盘；② managed_links 登记命中证明是本 HOME 建的。
+    // 缺任一即「不夺取」，只报告——前缀判据自此不再单独授予摘除权。
     const owned = withinRoot(await canonicalPath(root), target)
       || (libraryRoot !== null && withinRoot(await canonicalPath(libraryRoot), target))
+    const registered = registry !== null && registry.available && registry.has(dst)
     if (!owned) {
       throw new SkillManagerError('wrong-target', `目标已存在指向库外的链接，不夺取: ${dst}`, false, [
         { label: '目标路径', value: dst },
         { label: '该链接现指向', value: target },
       ])
     }
-    await removeLink({ path: dst, audit, actor, skill, target, srcRoot: root, reason: '自检重建（链接指向库内他处）', configGen })
+    if (!registered) {
+      throw new SkillManagerError('wrong-target', `目标已存在指向库内他处的链接，但不在本实例归属登记内（可能是其他实例或手工所建），不夺取: ${dst}`, false, [
+        { label: '目标路径', value: dst },
+        { label: '该链接现指向', value: target },
+        { label: '登记表', value: registry === null ? '本次未启用（保守：一律不夺取）' : registry.available ? 'managed_links 内无此键' : '登记表不可读（第 13 条：零摘除零认领）' },
+      ])
+    }
+    await removeLink({ path: dst, audit, actor, skill, target, srcRoot: root, reason: '自检重建（链接指向库内他处）', configGen, registry })
   } else {
     try {
       await lstat(dst)
@@ -145,6 +159,8 @@ export async function materializeOne({ root, skill, t, workspacesById, globalRoo
     throw error
   }
   await op?.done({ result: 'mounted' })
+  // 建链成功即登记（摘除权自此成立）；登记失败不回滚链接，只由 registry.failures 计数上报。
+  if (registry !== null) await registry.register({ path: dst, target: linkTarget, skill, opId: op?.opId ?? null })
   return { action: 'mounted' }
 }
 

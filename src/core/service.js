@@ -14,7 +14,8 @@ import { dirHash } from './model/library.js'
 import * as library from './model/library.js'
 import { readCheckCache } from './model/store.js'
 import { deriveDesired, projectWorkspaces, targetKey } from './mount/derive.js'
-import { SKILL_NAME, findOrphanLinks, scanMountLinks, walkMountState } from './mount/inspect.js'
+import { SKILL_NAME, describeUnmanagedLinks, findOrphanLinks, scanMountLinks, walkMountState } from './mount/inspect.js'
+import { createLinkRegistry } from './mount/registry.js'
 import * as reconcileMod from './mount/reconcile.js'
 import * as acquire from './inbound/acquire.js'
 import * as upstream from './inbound/upstream.js'
@@ -94,6 +95,8 @@ export function createSession(scopeGetter, listWorkspaces, getStore, backupsRoot
   // 于是「入库/更新/恢复/出库」本身与它顺带触发的对账记在同一条因果链上（同 entry/method）。
   const audit = ctxOpts.audit ?? null
   const actor = ctxOpts.actor ?? null
+  // 归属登记表（DSR-022 B 案）：与会话同源（store），是摘除权的唯一来源。
+  const registry = createLinkRegistry({ store })
   // pi 探测每会话一次（statSync 便宜）：piScanRoot 是扫描语义——探测到即非空，与开关无关；
   // 期望语义（piSkillsRoot）在 bundle 内按当下配置叠加开关判定。两者为 null 时下游全按单宿主回落。
   const piScanRoot = (() => {
@@ -109,6 +112,7 @@ export function createSession(scopeGetter, listWorkspaces, getStore, backupsRoot
     libraryRoot, // 插件库根（github 外部 skill 专属，DSR-020）
     audit, // 台账写入器（null = 本次不记）
     actor, // 归因入口 { entry, method }
+    registry, // 归属登记表门面（mount/registry.js；inbound 与对账共用同一实例，见 ctx: s）
     /** 配置代次：实时取 shared.bundleGen（写后递进），对账与台账按同一代次归因。 */
     get configGen() {
       return shared.bundleGen
@@ -174,7 +178,11 @@ export function createSession(scopeGetter, listWorkspaces, getStore, backupsRoot
       // 结果随 bundle 快照一起失效。归属判据为双根并集（用户根 ∪ 插件库根）。
       const links = await scanMountLinks({ root, globalRootPath, workspacesById, piSkillsRoot: piScanActive, libraryRoot })
       const mountRows = await walkMountState({ root, desired, links, globalRootPath, workspacesById, piSkillsRoot, srcRootOf })
-      const orphans = await findOrphanLinks({ root, desired, globalRootPath, workspacesById, piSkillsRoot, libraryRoot, links })
+      // 只读面也用同一判据（登记在册才算孤儿），保证「页面报的」与「对账会摘的」是同一集合。
+      await registry.load()
+      const orphans = await findOrphanLinks({ root, desired, globalRootPath, workspacesById, piSkillsRoot, libraryRoot, links, registered: registry })
+      // 读面同步报告未登记残留（只读，绝不在这里认领——认领是对账的动作）
+      warnings.push(...describeUnmanagedLinks({ links, registry, desired, workspacesById, globalRootPath, piSkillsRoot }))
       const mountCount = new Map([...workspacesById.keys()].map((id) => [id, 0]))
       const counted = new Set()
       for (const m of mounts) {
@@ -221,6 +229,7 @@ export function createSession(scopeGetter, listWorkspaces, getStore, backupsRoot
         piScanRoot: b.piScanRoot,
         libraryRoot,
         srcRootOf: b.srcRootOf,
+        registry,
       })
     },
   }

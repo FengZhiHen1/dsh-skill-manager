@@ -3,6 +3,7 @@
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { mkdir, symlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import { buildApi, createDispatch, createQueue, toRpcFailure } from '../src/core/service.js'
 import { configSchema } from '../src/core/model/intent.js'
@@ -33,6 +34,29 @@ function makeApi({ root = '', workspaces = [], store = fakeStore(), backupsRoot 
     store,
   }
 }
+
+test('overview 读面报告未登记残留但绝不认领（DSR-022 第 10/13 条：认领只属于对账）', async () => {
+  const tmp = await mkTmp()
+  try {
+    const root = join(tmp, 'lib')
+    await mkdir(root, { recursive: true })
+    await writeSkill(root, 'old')
+    const groot = join(tmp, 'groot')
+    await mkdir(groot, { recursive: true })
+    const store = fakeStore()
+    // 「改名残留」形状：链接名不在任何期望集里（配置不再要求它），但目标仍指向本实例配置目录。
+    // 期望内的未登记链接不算残留——那是对账要认领的对象，读面不该报警（认领是对账的动作）。
+    const link = join(groot, 'ghost')
+    await symlink(join(root, 'old'), link, 'junction')
+    const { api } = makeApi({ root, store, globalRoot: groot, libraryRoot: join(tmp, 'library') })
+    const view = await api.overview({})
+    assert.ok(view.lib.warnings.some((w) => /不在本实例归属登记内/.test(w)), '顶部提示条必须解释这条为什么还挂着')
+    assert.ok(await isLink(link), '只读面不摘任何链接')
+    assert.equal(store.linkEntries().length, 0, '只读面不写登记表（不认领）')
+  } finally {
+    await cleanup(tmp)
+  }
+})
 
 test('未配置门禁：所有方法统一 skilldir-unconfigured', async () => {
   const { api } = makeApi({ root: '' })

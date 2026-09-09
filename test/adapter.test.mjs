@@ -74,7 +74,7 @@ test('apply 装配：迁移先于 openStore；RPC 通道注册；dispose 关域�
   plugin.apply(ctx)
   // 等 storeReady 链结算（迁移 → openStore）
   await new Promise((r) => setTimeout(r, 50))
-  assert.deepEqual(ctx.calls.filter(([k]) => k === 'open'), [['open', 7], ['open', 2]]) // legacy 七表先于新两表
+  assert.deepEqual(ctx.calls.filter(([k]) => k === 'open'), [['open', 7], ['open', 3]]) // legacy 七表先于新 spec（skills/check_cache/managed_links）
   assert.deepEqual(ctx.calls.filter(([k]) => k === 'rpc'), [['rpc', '/skill-manager']])
   assert.equal(ctx.watchers.size, 1)
 

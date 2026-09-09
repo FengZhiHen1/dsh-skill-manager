@@ -32,9 +32,10 @@ export function scanRoots({ workspacesById, globalRootPath, piSkillsRoot = null 
 
 /**
  * 扫描全部链接现场（只读）：返回 [{ path, name, parent, target, owned }]。
- * owned = 归属判据成立：realpath（悬挂链接以 readlink 原始目标兜底）落在
- * 库内并集（用户根 ∪ libraryRoot，双根制 DSR-020；带路径分隔符边界，`skills-sibling` 不算）。
- * “改配另一目录后旧链接不在新前缀内” → owned=false → 保留为孤儿，永不清理（AC-10）。
+ * owned = realpath（悬挂链接以 readlink 原始目标兜底）落在库内并集（用户根 ∪ libraryRoot，
+ * 双根制 DSR-020；带路径分隔符边界，`skills-sibling` 不算）。
+ * **owned 只是摘除的下界，不是摘除权**（DSR-022 第 10 条）；摘除权另需 managed_links 命中，
+ * 见 findOrphanLinks。“改配另一目录后旧链接不在新前缀内” → owned=false → 一律保留（AC-10）。
  */
 export async function scanMountLinks({ root, globalRootPath, workspacesById, piSkillsRoot = null, libraryRoot = null }) {
   const canonicalGuards = [await canonicalPath(root)]
@@ -76,17 +77,54 @@ function desiredPathSet(desired, { workspacesById, globalRootPath, piSkillsRoot 
 }
 
 /**
- * 归属判据单源：返回扫描根下 owned 且不在期望集内的链接。
- * owned 即指向当前配置目录，定义见 scanMountLinks。
- * 三处共用：
- * - 对账摘除：reconcile 对返回值逐个 removeLink（摘除与孤儿清扫同一步）；
- * - remove 摘除：调用方按 `target === <root>/<name>` 过滤后摘除；
- * - 行状态走查：walkMountState 借同一现场集判定。
+ * 可认领集（DSR-022 第 11 条，R9 收窄口径）：前缀自有 **且已在期望集内** 且未登记的链接。
+ * 「且在期望集内」是硬约束而非省事：若把不在期望集的前缀自有链接一并收编，它们下一趟就会
+ * 被判成自有孤儿摘除——而其中可能正有别的实例指向共享配置目录建的链接，09-08 事故原样重演。
+ * 表已有登记时整体不触发（registry.size()>0 由调用方判定），本函数只回答「能认领谁」。
  */
-export async function findOrphanLinks({ root, desired, globalRootPath, workspacesById, piSkillsRoot = null, libraryRoot = null, links }) {
+export async function findAdoptableLinks({ root, desired, globalRootPath, workspacesById, piSkillsRoot = null, libraryRoot = null, links, registry }) {
+  if (registry === null || !registry.available) return []
   const all = links ?? (await scanMountLinks({ root, globalRootPath, workspacesById, piSkillsRoot, libraryRoot }))
   const expected = desiredPathSet(desired, { workspacesById, globalRootPath, piSkillsRoot })
-  return all.filter((l) => l.owned && !expected.has(resolve(l.path).toLowerCase()))
+  return all.filter((l) => l.owned && expected.has(resolve(l.path).toLowerCase()) && !registry.has(l.path))
+}
+
+/**
+ * 未登记残留的报告面（DSR-022 第 10/13 条；文案单源，读面 bundle 与写面对账共用）：
+ * 前缀像我们的、表里没有、且配置也不再要求它 —— 本插件既不摘（无登记）也不认领（认领只收期望内），
+ * 所以必须报条数，否则用户只看到"配置里没有它、页面上还挂着"而无从解释。
+ * 登记表不可读时改报「不可读」一条（第 13 条第一分支）：看不见表就不猜条数。
+ */
+export function describeUnmanagedLinks({ links, registry, desired, workspacesById, globalRootPath, piSkillsRoot = null }) {
+  if (registry === null) return []
+  if (!registry.available) {
+    return ['挂载归属登记表不可读：本趟不摘除、不认领任何链接（仍按期望集建链）。请检查 storage 域 skill_manager']
+  }
+  const expected = desiredPathSet(desired, { workspacesById, globalRootPath, piSkillsRoot })
+  const count = links.filter((l) => l.owned && !registry.has(l.path) && !expected.has(resolve(l.path).toLowerCase())).length
+  return count > 0
+    ? [`有 ${count} 条指向库内的链接不在本实例归属登记内（可能由其他实例或手工所建），本插件不会摘除它们`]
+    : []
+}
+
+/**
+ * 归属判据单源：**两重否决同时成立**才算孤儿（DSR-022 第 10 条）——
+ * ① owned：realpath 前缀落在当前配置根 ∪ 插件库根（**下界**，护住 AC-10「改配另一目录后旧挂载保留」
+ *    与「不夺取他人」两件事，它不再单独授予摘除权）；
+ * ② registered：managed_links 命中（**授权**，证明是本 HOME 建的）；
+ * ③ 且不在期望集内。
+ * registered 为 null（登记表缺席或不可读）→ 返回空集：宁可残留，绝不据前缀猜所有权。
+ * 三处共用：
+ * - 对账摘除：reconcile 对返回值逐个 removeLink（摘除与孤儿清扫同一步）；
+ * - 行状态走查：借同一现场集判定。
+ * 例外：**出库（remove）摘链不走本函数**——它是用户指名操作且只删指向本次被删库目录的链接
+ * （留着就是悬空 junction），按 target 精确匹配摘除（R9 记录该收窄）。
+ */
+export async function findOrphanLinks({ root, desired, globalRootPath, workspacesById, piSkillsRoot = null, libraryRoot = null, links, registered = null }) {
+  if (registered === null) return []
+  const all = links ?? (await scanMountLinks({ root, globalRootPath, workspacesById, piSkillsRoot, libraryRoot }))
+  const expected = desiredPathSet(desired, { workspacesById, globalRootPath, piSkillsRoot })
+  return all.filter((l) => l.owned && registered.has(l.path) && !expected.has(resolve(l.path).toLowerCase()))
 }
 
 /**

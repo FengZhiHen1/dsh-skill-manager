@@ -90,9 +90,10 @@ test('孤儿摘除：reason 落到记录里，且与 results 行同源', async (
     await writeSkill(root, 'alpha')
     const file = join(tmp, 'audit.jsonl')
     const audit = createAudit({ file })
+    const store = fakeStore() // 必须跨会话持久：摘除权来自 managed_links，每请求换假域会让登记即刻蒸发
     let groups = MOUNT_GLOBAL
     const api = buildApi(() => scopeFor(root, groups), {
-      listWorkspaces: () => [], getStore: () => fakeStore(), backupsRoot: join(tmp, 'backups'),
+      listWorkspaces: () => [], getStore: () => store, backupsRoot: join(tmp, 'backups'),
       globalRoot: groot, libraryRoot: join(tmp, 'library'), audit,
     })
     await api.sync()
@@ -146,8 +147,9 @@ test('稳态 noop：第二次 sync 只多一条 summary，changed=0 且不逐条
     await writeSkill(root, 'beta')
     const file = join(tmp, 'audit.jsonl')
     const audit = createAudit({ file })
+    const store = fakeStore() // 同上：登记表要跨两次 sync 持久，否则每趟都是空表 → 每趟都触发认领
     const api = buildApi(() => scopeFor(root, MOUNT_GLOBAL), {
-      listWorkspaces: () => [], getStore: () => fakeStore(), backupsRoot: join(tmp, 'backups'),
+      listWorkspaces: () => [], getStore: () => store, backupsRoot: join(tmp, 'backups'),
       globalRoot: groot, libraryRoot: join(tmp, 'library'), audit,
     })
     await api.sync()

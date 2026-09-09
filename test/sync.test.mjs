@@ -8,6 +8,8 @@ import { mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promis
 import { join } from 'node:path'
 import { deriveDesired, projectWorkspaces, targetDir, targetKey } from '../src/core/mount/derive.js'
 import { isLink, materializeOne, removeLink } from '../src/core/mount/materialize.js'
+import { createLinkRegistry } from '../src/core/mount/registry.js'
+import { fakeStore } from './helpers.mjs'
 import { findOrphanLinks, scanMountLinks, walkMountState } from '../src/core/mount/inspect.js'
 import { reconcile } from '../src/core/mount/reconcile.js'
 import { piState } from '../src/core/service.js'
@@ -97,7 +99,11 @@ async function fixture() {
   const globalRootPath = join(tmp, 'global')
   const ws1 = join(tmp, 'ws1')
   await mkdir(ws1, { recursive: true })
-  return { tmp, root, globalRootPath, workspacesById: workspaces([{ id: 'w1', title: '', path: ws1 }]) }
+  // 摘除权来自 managed_links（DSR-022 B 案）：物化/对账类用例一律带登记表，
+  // 否则按「宁可残留」新语义它们什么都摘不动——那是设计，不是这些用例要测的东西。
+  const registry = createLinkRegistry({ store: fakeStore() })
+  await registry.load()
+  return { tmp, root, globalRootPath, registry, workspacesById: workspaces([{ id: 'w1', title: '', path: ws1 }]) }
 }
 
 // ---- 物化（materialize.js，junction-only） ----
@@ -107,9 +113,10 @@ test('materializeOne：空闲建 junction，重复调用幂等 ok；无 SKILL.md
   try {
     await writeSkill(f.root, 'pdf')
     const t = { scope: 'global', project: null }
-    const call = () => materializeOne({ root: f.root, skill: 'pdf', t, workspacesById: f.workspacesById, globalRootPath: f.globalRootPath })
+    const call = () => materializeOne({ root: f.root, skill: 'pdf', t, workspacesById: f.workspacesById, globalRootPath: f.globalRootPath, registry: f.registry })
     assert.equal((await call()).action, 'mounted')
     assert.ok(await isLink(join(f.globalRootPath, 'pdf')))
+    assert.ok(f.registry.has(join(f.globalRootPath, 'pdf')), '建链成功必须同刻登记（摘除权来源）')
     assert.equal((await call()).action, 'ok')
     await assert.rejects(
       materializeOne({ root: f.root, skill: 'ghost', t, workspacesById: f.workspacesById, globalRootPath: f.globalRootPath }),
@@ -152,10 +159,16 @@ test('materializeOne：库外链接不夺取（wrong-target）；库内他处链
     const call = () => materializeOne({ root: f.root, skill: 'pdf', t, workspacesById: f.workspacesById, globalRootPath: f.globalRootPath })
     await assert.rejects(call(), (e) => e.code === 'wrong-target')
     assert.ok(await isLink(dst))
-    // 指向库内他处（改名后旧链接）：摘除重建
+    // 指向库内他处（改名后旧链接）：仍需**登记命中**才夺取（DSR-022 第 10 条）
     await removeLink({ path: dst })
     await symlink(join(f.root, 'pdf-old'), dst, 'junction')
-    assert.equal((await call()).action, 'mounted')
+    await assert.rejects(
+      materializeOne({ root: f.root, skill: 'pdf', t, workspacesById: f.workspacesById, globalRootPath: f.globalRootPath, libraryRoot: f.root, registry: f.registry }),
+      (e) => e.code === 'wrong-target' && /不在本实例归属登记内/.test(e.message),
+      '前缀自有但未登记的链接：只报告，不夺取',
+    )
+    await f.registry.register({ path: dst, target: join(f.root, 'pdf-old'), skill: 'pdf' })
+    assert.equal((await materializeOne({ root: f.root, skill: 'pdf', t, workspacesById: f.workspacesById, globalRootPath: f.globalRootPath, libraryRoot: f.root, registry: f.registry })).action, 'mounted')
     assert.ok(await isLink(dst))
     assert.deepEqual(await readdir(dst), ['SKILL.md'])
   } finally {
@@ -170,17 +183,23 @@ test('materializeOne：库外链接不夺取（wrong-target）；库内他处链
 
 // ---- 归属判据（inspect.js 单源） ----
 
-test('findOrphanLinks：owned ∧ ¬expected 才孤儿；库外链接、兄弟前缀、AC-10 改配旧链接均非孤儿', async () => {
+test('findOrphanLinks：登记 ∧ ¬expected 才孤儿；未登记（含前缀自有）、库外、兄弟前缀、AC-10 旧链接均非孤儿', async () => {
   const f = await fixture()
   try {
     await writeSkill(f.root, 'pdf')
     await mkdir(f.globalRootPath, { recursive: true })
     const expected = new Map([['pdf', [{ scope: 'global', project: null }]]])
-    const args = (root) => ({ root, desired: expected, globalRootPath: f.globalRootPath, workspacesById: f.workspacesById })
-    // 期望内链接：非孤儿；改名残留（owned ∧ ¬expected）：孤儿
+    const args = (root) => ({ root, desired: expected, globalRootPath: f.globalRootPath, workspacesById: f.workspacesById, registered: f.registry })
+    // 期望内链接：非孤儿；改名残留（登记 ∧ ¬expected）：孤儿
     await symlink(join(f.root, 'pdf'), join(f.globalRootPath, 'pdf'), 'junction')
     await symlink(join(f.root, 'pdf'), join(f.globalRootPath, 'old-name'), 'junction')
+    await f.registry.register({ path: join(f.globalRootPath, 'old-name'), target: join(f.root, 'pdf'), skill: 'old-name' })
     assert.deepEqual((await findOrphanLinks(args(f.root))).map((l) => l.name), ['old-name'])
+    // 前缀自有但未登记 = 别的东西（其他实例/手工）→ 非孤儿（B 案的立项理由，第 6 条闸的最小面）
+    await symlink(join(f.root, 'pdf'), join(f.globalRootPath, 'foreign'), 'junction')
+    assert.deepEqual((await findOrphanLinks(args(f.root))).map((l) => l.name), ['old-name'])
+    // 登记表缺席（null）→ 一律不判孤儿：宁可残留
+    assert.deepEqual(await findOrphanLinks({ root: f.root, desired: expected, globalRootPath: f.globalRootPath, workspacesById: f.workspacesById }), [])
     // 库外链接：非孤儿
     const outside = join(f.tmp, 'elsewhere')
     await mkdir(outside, { recursive: true })
@@ -192,7 +211,7 @@ test('findOrphanLinks：owned ∧ ¬expected 才孤儿；库外链接、兄弟�
     await writeSkill(sibling, 'sib')
     await symlink(join(sibling, 'sib'), join(f.globalRootPath, 'sib'), 'junction')
     assert.deepEqual((await findOrphanLinks(args(f.root))).map((l) => l.name), ['old-name'])
-    // AC-10：改配另一目录后，指向旧目录的链接不再 owned → 一律保留
+    // AC-10：改配另一目录后，指向旧目录的链接既不再 owned 也未在新目录登记 → 一律保留
     const root2 = join(f.tmp, 'lib2')
     await mkdir(root2, { recursive: true })
     assert.equal((await findOrphanLinks(args(root2))).length, 0)
@@ -248,7 +267,7 @@ test('reconcile：物化 → 幂等 ok → 期望退场摘除（禁用即退场�
   const f = await fixture()
   try {
     await writeSkill(f.root, 'pdf')
-    const opts = () => ({ root: f.root, mounts: [{ group: 'g1', scope: 'global', project: null }], workspacesById: f.workspacesById, globalRootPath: f.globalRootPath })
+    const opts = () => ({ root: f.root, mounts: [{ group: 'g1', scope: 'global', project: null }], workspacesById: f.workspacesById, globalRootPath: f.globalRootPath, registry: f.registry })
     const memberships = new Map([['pdf', 'g1']])
     const r1 = await reconcile({ ...opts(), memberships })
     assert.equal(r1.errors.length, 0)
@@ -293,7 +312,7 @@ test('reconcile：project 期望物化到工作区根并写 git exclude 托管�
     await mkdir(join(wsPath, '.git', 'info'), { recursive: true })
     const excludeFile = join(wsPath, '.git', 'info', 'exclude')
     await writeFile(excludeFile, '# 既有内容\n', 'utf8')
-    const opts = () => ({ root: f.root, mounts: [{ group: 'g1', scope: 'project', project: 'w1' }], workspacesById: f.workspacesById, globalRootPath: f.globalRootPath })
+    const opts = () => ({ root: f.root, mounts: [{ group: 'g1', scope: 'project', project: 'w1' }], workspacesById: f.workspacesById, globalRootPath: f.globalRootPath, registry: f.registry })
     const r = await reconcile({ ...opts(), memberships: new Map([['pdf', 'g1']]) })
     assert.equal(r.results.find((x) => x.name === 'pdf')?.action, 'mounted')
     assert.ok(await isLink(join(wsPath, '.dsh', 'skills', 'pdf')))
@@ -316,13 +335,18 @@ test('reconcile：孤儿链接在对账第一步被摘除（与清扫同一判�
     await writeSkill(f.root, 'pdf')
     await mkdir(f.globalRootPath, { recursive: true })
     await symlink(join(f.root, 'pdf'), join(f.globalRootPath, 'orphan'), 'junction')
+    await f.registry.register({ path: join(f.globalRootPath, 'orphan'), target: join(f.root, 'pdf'), skill: 'orphan' })
     const outside = join(f.tmp, 'kept')
     await mkdir(outside, { recursive: true })
     await symlink(outside, join(f.globalRootPath, 'theirs'), 'junction')
-    const r = await reconcile({ root: f.root, memberships: new Map(), mounts: [], workspacesById: f.workspacesById, globalRootPath: f.globalRootPath })
+    // 前缀自有但未登记（别的实例指向同一配置目录建的）：不摘，且必须报条数
+    await symlink(join(f.root, 'pdf'), join(f.globalRootPath, 'foreign'), 'junction')
+    const r = await reconcile({ root: f.root, memberships: new Map(), mounts: [], workspacesById: f.workspacesById, globalRootPath: f.globalRootPath, registry: f.registry })
     assert.equal(r.results.find((x) => x.name === 'orphan')?.action, 'removed')
     assert.equal(await isLink(join(f.globalRootPath, 'orphan')), false)
     assert.ok(await isLink(join(f.globalRootPath, 'theirs')))
+    assert.ok(await isLink(join(f.globalRootPath, 'foreign')), '未登记的前缀自有链接绝不摘除（宁可残留）')
+    assert.ok(r.warnings.some((w) => /不在本实例归属登记内/.test(w)), '未登记残留必须显式报告条数')
   } finally {
     await cleanup(f.tmp)
   }
@@ -341,6 +365,7 @@ test('reconcile：失效工作区根不在扫描范围，其既有链接不动�
       mounts: [{ group: 'g1', scope: 'project', project: 'gone' }],
       workspacesById: f.workspacesById,
       globalRootPath: f.globalRootPath,
+      registry: f.registry,
     })
     assert.equal(r.warnings.length, 1)
     assert.match(r.warnings[0], /未匹配工作区/)
@@ -369,6 +394,7 @@ test('reconcile：pi 宿主接管——.pi/skills 双侧物化与摘除、exclud
       workspacesById: f.workspacesById,
       globalRootPath: f.globalRootPath,
       piSkillsRoot,
+      registry: f.registry,
     })
     const r = await reconcile({ ...opts(), memberships: new Map([['pdf', 'g1']]) })
     assert.equal(r.errors.length, 0)
@@ -403,6 +429,7 @@ test('reconcile：双根制——github 条目从插件库根物化；归属判�
       globalRootPath: f.globalRootPath,
       libraryRoot: lib,
       srcRootOf: (dir) => (dir === 'pdf' ? lib : f.root),
+      registry: f.registry,
     })
     const memberships = new Map([['mine', 'g1'], ['pdf', 'g1']])
     const r = await reconcile({ ...opts(), memberships })
@@ -440,6 +467,7 @@ test('reconcile：pi 开关关闭但目录探测在（期望根 null + 扫描根
     const piRoot = join(f.tmp, 'pi-agent', 'skills')
     await mkdir(piRoot, { recursive: true })
     await symlink(join(f.root, 'pdf'), join(piRoot, 'pdf'), 'junction')
+    await f.registry.register({ path: join(piRoot, 'pdf'), target: join(f.root, 'pdf'), skill: 'pdf' }) // 模拟本实例早年所建
     const r = await reconcile({
       root: f.root,
       memberships: new Map([['pdf', 'g1']]),
@@ -448,6 +476,7 @@ test('reconcile：pi 开关关闭但目录探测在（期望根 null + 扫描根
       globalRootPath: f.globalRootPath,
       piSkillsRoot: null,
       piScanRoot: piRoot,
+      registry: f.registry,
     })
     assert.match(r.warnings[0], /pi 不可用/)
     assert.equal(await isLink(join(piRoot, 'pdf')), false)
@@ -467,6 +496,7 @@ test('reconcile：pi 不可用（piSkillsRoot 缺省）零副作用——pi 侧�
       mounts: [{ group: 'g1', scope: 'project', project: 'w1', hosts: ['dsh', 'pi'] }],
       workspacesById: f.workspacesById,
       globalRootPath: f.globalRootPath,
+      registry: f.registry,
     })
     assert.equal(r.warnings.length, 1)
     assert.match(r.warnings[0], /pi 不可用/)

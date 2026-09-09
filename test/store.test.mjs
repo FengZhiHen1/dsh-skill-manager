@@ -1,5 +1,5 @@
-// storage 域 spec 与门面（目录配置与状态存储.md；DSR-017 两表投影：
-// skills/check_cache + 旧七表迁移 spec；backups 表随目录事实源废止）。
+// storage 域 spec 与门面（目录配置与状态存储.md；DSR-017 两表投影 + DSR-022 B 案第三表：
+// skills/check_cache/managed_links + 旧七表迁移 spec；backups 表随目录事实源废止）。
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -7,10 +7,10 @@ import { skillManagerSpec, legacySkillManagerSpec } from '../src/adapter/storage
 import { backupId, createStore, readCheckCache } from '../src/core/model/store.js'
 import { fakeDomain, skillRecord } from './helpers.mjs'
 
-test('spec：域名/版本保持 1/两表投影（synced、projects、backups 已随无台账收敛删除）', () => {
+test('spec：域名/版本保持 1/三表投影（synced、projects、backups 已随无台账收敛删除；managed_links 为 B 案新增）', () => {
   assert.equal(skillManagerSpec.name, 'skill_manager')
-  assert.equal(skillManagerSpec.version, 1) // 必须保持 1：storage-json 对 version 严格相等校验
-  assert.deepEqual(Object.keys(skillManagerSpec.tables).sort(), ['check_cache', 'skills'])
+  assert.equal(skillManagerSpec.version, 1) // 必须保持 1：storage-json 对 version 严格相等校验（加表不 bump）
+  assert.deepEqual(Object.keys(skillManagerSpec.tables).sort(), ['check_cache', 'managed_links', 'skills'])
 })
 
 test('legacySpec：旧七表齐备（迁移读意图与旧投影用）', () => {

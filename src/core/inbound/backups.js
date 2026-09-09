@@ -30,7 +30,8 @@ export async function remove({ root, userRoot = null, store, name, backupsRoot, 
   // 台账上下文：出库的四步（备份 / 摘链 / 删库内目录 / 清表）记在同一条因果链上。
   const audit = ctx?.audit ?? null
   const actor = ctx?.actor ?? null
-  const configGen = ctx?.configGen ?? null // quality-floor: ignore docstring-promise 函数体确有 throw SkillManagerError（not-removable 等）；扫描器将参数解构花括号配误作函数体起点致漏看
+  const configGen = ctx?.configGen ?? null
+  const registry = ctx?.registry ?? null // quality-floor: ignore docstring-promise 函数体确有 throw SkillManagerError（not-removable 等）；扫描器将参数解构花括号配误作函数体起点致漏看
   const record = store.getSkill(name) ?? null
   if (!record || record.origin !== 'github') {
     throw new SkillManagerError('not-removable', `「${name}」不是外部 skill（本地与自研目录无删除入口，请在文件系统自管）`, false, [
@@ -67,7 +68,10 @@ export async function remove({ root, userRoot = null, store, name, backupsRoot, 
   const srcCanonical = await canonicalPath(src)
   for (const link of await scanMountLinks({ root: userRoot ?? root, globalRootPath, workspacesById, piSkillsRoot, libraryRoot: root })) {
     if (link.owned && pathsEqual(link.target, srcCanonical)) {
-      await removeLink({ path: link.path, audit, actor, skill: name, target: link.target, srcRoot: userRoot ?? root, reason: '出库摘链', configGen })
+      // 出库是用户指名操作且只删指向本次被删库目录的链接（留着即悬空 junction），
+      // 因此按 target 精确匹配摘除、不要求登记命中（DSR-022 第 10 条的例外，见 R9）；
+      // 但摘成功后必须销登记，否则表里留下一条假悬挂。
+      await removeLink({ path: link.path, audit, actor, skill: name, target: link.target, srcRoot: userRoot ?? root, reason: '出库摘链', configGen, registry })
       detached.push(link.path)
     }
   }
