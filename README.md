@@ -6,7 +6,7 @@ DSH 设置页技能管理插件：**配置即意图**——用户意图（分组
 
 ## 功能
 
-- **配置即意图**（settings 命名空间 `skill-manager`）：`skillsDir`（空串 = 未配置，保存立即生效）+ `groups`（组集合与每组挂载目标，默认种子 = 默认组挂全局）+ `skills`（每目录的 disabled/group 意图）+ `intentMigrated`（迁移标记）。形式校验（组名/形状）在写路径拒绝；引用完整性由对账层容忍回落。旧版 storage 意图一次性迁移进配置。
+- **配置即意图**（settings 命名空间 `skill-manager`）：`skillsDir`（空串 = 未配置，保存立即生效）+ `groups`（组集合与每组挂载目标，默认种子 = 空挂载：默认组不自动挂 DSH 全局，全局需显式勾选，2026-09-09 修订）+ `skills`（每目录的 disabled/group 意图）+ `intentMigrated`（迁移标记）。形式校验（组名/形状）在写路径拒绝；引用完整性由对账层容忍回落。旧版 storage 意图一次性迁移进配置。
 - **对账器**：`scope.watch` 监听配置变更 → 200ms 防抖 → 对账（意图展平 → 投影 storage → 物化 junction/copy、孤儿清扫、项目 git exclude → 预热缓存）；物化失败进健康列表（「应用并修复」可重试）。
 - **库管理**：扫描配置目录直接子目录（frontmatter、来源 self/github/local、上游 commit、缺失状态），管理视图 origin/group/q 本地过滤，建组/改名/删组/换组/禁用全部经配置直写即时生效。
 - **获取**：skills.sh 搜索、GitHub 仓库探测（Trees API → zipball 回退）、入库（分支 branch → main → master 回退）、检查三态（同 repo 去重）、更新（本地修改需显式确认）。

@@ -565,7 +565,7 @@ function CreateGroupDialog({ onCancel, onCreate }) {
         }}
       />
       {error ? <div style={{ fontSize: 12, color: T.error, marginTop: 6 }}>{error}</div> : null}
-      <div style={{ fontSize: 11, color: T.labelSecondary, marginTop: 8 }}>新组复制「默认」组的挂载规则作为起步；组名 1–30 字符。</div>
+      <div style={{ fontSize: 11, color: T.labelSecondary, marginTop: 8 }}>新组复制「默认」组的挂载规则作为起步（不含 DSH 全局，全局需显式勾选）；组名 1–30 字符。</div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
         <OutlineBtn onClick={onCancel}>取消</OutlineBtn>
         <PrimaryBtn onClick={submit}>新建</PrimaryBtn>

@@ -1316,7 +1316,7 @@ function CreateGroupDialog({ onCancel, onCreate }) {
       }
     ),
     error ? /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { fontSize: 12, color: T.error, marginTop: 6 }, children: error }) : null,
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { fontSize: 11, color: T.labelSecondary, marginTop: 8 }, children: "\u65B0\u7EC4\u590D\u5236\u300C\u9ED8\u8BA4\u300D\u7EC4\u7684\u6302\u8F7D\u89C4\u5219\u4F5C\u4E3A\u8D77\u6B65\uFF1B\u7EC4\u540D 1\u201330 \u5B57\u7B26\u3002" }),
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { fontSize: 11, color: T.labelSecondary, marginTop: 8 }, children: "\u65B0\u7EC4\u590D\u5236\u300C\u9ED8\u8BA4\u300D\u7EC4\u7684\u6302\u8F7D\u89C4\u5219\u4F5C\u4E3A\u8D77\u6B65\uFF08\u4E0D\u542B DSH \u5168\u5C40\uFF0C\u5168\u5C40\u9700\u663E\u5F0F\u52FE\u9009\uFF09\uFF1B\u7EC4\u540D 1\u201330 \u5B57\u7B26\u3002" }),
     /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }, children: [
       /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(OutlineBtn, { onClick: onCancel, children: "\u53D6\u6D88" }),
       /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(PrimaryBtn, { onClick: submit, children: "\u65B0\u5EFA" })
@@ -1859,7 +1859,7 @@ function SkillsSection({ call, workspaces, scope, subscribeSkillSettings }) {
       setEditError({ message: `\u5206\u7EC4\u300C${name}\u300D\u5DF2\u5B58\u5728\uFF0C\u5DF2\u62D2\u7EDD\u521B\u5EFA\uFF08\u907F\u514D\u8986\u76D6\u65E2\u6709\u7EC4\u7684\u6302\u8F7D\u89C4\u5219\uFF09`, prompt: null });
       return Promise.resolve(false);
     }
-    const baseMounts = (groups["\u9ED8\u8BA4"] && groups["\u9ED8\u8BA4"].mounts || []).map((m) => ({ ...m }));
+    const baseMounts = (groups["\u9ED8\u8BA4"] && groups["\u9ED8\u8BA4"].mounts || []).filter((m) => m.scope !== "global").map((m) => ({ ...m }));
     return editConfig("groups", { ...groups, [name]: { mounts: baseMounts } });
   };
   const renameGroup = (oldName, newName) => {

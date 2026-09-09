@@ -124,7 +124,8 @@ export function SkillsSection({ call, workspaces, scope, subscribeSkillSettings 
     editConfig('groups', { ...groups, [group]: { ...groups[group], mounts: next } })
   }
   /**
-   * 新建分组：复制「默认」组的挂载规则起步。
+   * 新建分组：复制「默认」组的挂载规则起步，但**不继承全局作用域**（挂 DSH 全局 = 对该 HOME 的所有会话生效，
+   * 只能由用户显式勾选；2026-09-09 口径调整）。项目级规则照抄——那是用户已在默认组表达过的具体意图。
    * @returns {Promise<boolean>} 是否真的落盘（撞名/被 Host 拒绝/传输失败均 false，原因已进错误条）。
    */
   const createGroup = (name) => {
@@ -134,7 +135,9 @@ export function SkillsSection({ call, workspaces, scope, subscribeSkillSettings 
       setEditError({ message: `分组「${name}」已存在，已拒绝创建（避免覆盖既有组的挂载规则）`, prompt: null })
       return Promise.resolve(false)
     }
-    const baseMounts = ((groups['默认'] && groups['默认'].mounts) || []).map((m) => ({ ...m }))
+    const baseMounts = ((groups['默认'] && groups['默认'].mounts) || [])
+      .filter((m) => m.scope !== 'global')
+      .map((m) => ({ ...m }))
     return editConfig('groups', { ...groups, [name]: { mounts: baseMounts } })
   }
   const renameGroup = (oldName, newName) => {

@@ -28,14 +28,14 @@ test('registerConfig：命名空间与 schema 正确（意图字段齐备）', (
   registerConfig(fakeCtx)
   assert.ok(captured)
   assert.equal(typeof captured.options.validate, 'function')
-  // 默认种子：默认组挂载全局（原 ensureSeedMounts 语义，配置化）
+  // 默认种子：空挂载——默认组不自动挂 DSH 全局（2026-09-09 口径，全局必须显式勾选）
   const resolved = schema({})
   assert.equal(resolved[SKILLS_DIR_FIELD], '')
   assert.equal(resolved[PI_FIELD], false)
-  assert.equal(resolved.groups[DEFAULT_GROUP].mounts.length, 1)
-  assert.equal(resolved.groups[DEFAULT_GROUP].mounts[0].scope, 'global')
-  // hosts 缺省回落 ['dsh']：存量无 hosts 键的规则天然仅 DSH（向后兼容）
-  assert.deepEqual(resolved.groups[DEFAULT_GROUP].mounts[0].hosts, ['dsh'])
+  assert.deepEqual(resolved.groups[DEFAULT_GROUP], { mounts: [] })
+  // hosts 缺省回落 ['dsh']：显式写出的无 hosts 规则天然仅 DSH（向后兼容）
+  const withGlobal = schema({ groups: { 默认: { mounts: [{ scope: 'global', project: null }] } } })
+  assert.deepEqual(withGlobal.groups[DEFAULT_GROUP].mounts[0].hosts, ['dsh'])
   assert.deepEqual(resolved.skills, {})
   assert.equal(resolved.intentMigrated, false)
 })

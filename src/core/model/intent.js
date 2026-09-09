@@ -74,13 +74,15 @@ const skillIntentSchema = () => z.object({
  * groups         组集合 { 组名: { mounts: [{ scope, project, hosts }] } }；hosts 缺省 = ['dsh']。
  * skills         技能意图 { 目录名: { disabled, group } }。
  * intentMigrated 存量 storage 意图一次性导入标记；导入后 UI 不展示。
- * 默认种子 = 「默认」组挂载全局（仅 DSH 宿主）。
+ * 默认种子 = 空挂载（「默认」组不自动挂 DSH 全局；全局作用域影响所有会话，必须显式勾选）。
+ * 修订（2026-09-09）：原种子为「默认」组挂全局——隐式挂全局让新装/未显式配过 groups 的
+ * HOME 一装就把全库对外生效，且翻转后旧链接按孤儿摘除（文件不动，重勾即恢复）。
  */
 export const configSchema = () => z.object({
   [SKILLS_DIR_FIELD]: z.string().default(''),
   [PI_FIELD]: z.boolean().default(false),
   intentMigrated: z.boolean().default(false),
-  groups: z.dict(groupSchema()).default({ [DEFAULT_GROUP]: { mounts: [{ scope: 'global', project: null }] } }),
+  groups: z.dict(groupSchema()).default({ [DEFAULT_GROUP]: { mounts: [] } }),
   skills: z.dict(skillIntentSchema()).default({}),
 })
 
