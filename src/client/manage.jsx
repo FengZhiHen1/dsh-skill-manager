@@ -2,7 +2,7 @@
 //
 // 边界：列表纯前端过滤零请求，写入只经 settings 意图与 call 门面；targetKey 推导单源在 derive.js，失效组回落在 service.js。
 // 参考：插件运行时.md「管理视图」、挂载与同步.md「行状态走查」；DSR-008/009/017/018。
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { Input, Menu } from '@deepseek-ai/dsh-client-ui-primitives'
 import { T, S, badgeStyle, cardStyle, cardTitle, noteText, dotStyle, sectionHead, statusPillStyle, dividerStyle, navItemStyle, navItemActiveStyle, pillBase } from './theme.js'
 import { GhostBtn, OutlineBtn, PrimaryBtn, ErrorLine, NoticeBar, RowMenu, MenuItem, menuCardStyle, ChevronIcon, UpdateConfirmationDialog, ConfirmDialog, ModalShell } from './ui.jsx'
@@ -243,10 +243,12 @@ export function ManageView({ call, data, config, reload, showToast }) {
     deleteGroup(name)
     if (groupFilter === name) setGroupFilter('默认')
   }
-  // 新建成功后跳到新组，便于立即配置它的使用范围；拒绝（撞名）时错误条已上屏，不再假装成功。
-  const doCreateGroup = (name) => {
+  // 新建成功后跳到新组，便于立即配置它的使用范围。
+  // 「成功」只在写落定后说：撞名/Host 拒绝/传输失败时错误条已上屏，此处再弹成功 toast
+  // 就成了「提示新增成功但组里没有」（2026-09-09 走查）。
+  const doCreateGroup = async (name) => {
     setDialog(null)
-    if (!config.createGroup(name)) return
+    if (!await config.createGroup(name)) return
     setGroupFilter(name)
     showToast(`已创建分组「${name}」`)
   }
@@ -455,9 +457,18 @@ const subRowPanel = {
  * 分组数无上限：列高封顶内滚，组名超长截断并 title 悬浮。
  */
 function GroupNav({ groups, selected, total, countForGroup, onSelect, onCreate }) {
+  const itemRefs = useRef(new Map())
+  const names = Object.keys(groups).filter((group) => group !== '默认')
+  // 选中项滚入视野：列高封顶内滚，十几个组时新组正落在折线以下——不滚就呈现为
+  // 「提示新增成功，但组里没有」（2026-09-09 走查）。nearest 保证已在视野内时页面不跳。
+  useEffect(() => {
+    if (!selected) return
+    itemRefs.current.get(selected)?.scrollIntoView({ block: 'nearest' })
+  }, [selected, names.length])
   const renderItem = (key, label, count) => (
     <button
       key={key || '<all>'}
+      ref={(el) => { if (el) itemRefs.current.set(key, el); else itemRefs.current.delete(key) }}
       type="button"
       title={label}
       onClick={() => onSelect(key)}
@@ -478,7 +489,7 @@ function GroupNav({ groups, selected, total, countForGroup, onSelect, onCreate }
         {renderItem('', '全部', total)}
         {renderItem('默认', '默认', countForGroup('默认'))}
         {/* 「默认」上一行已固定渲染，map 中排除防重复；groups 表合法含「默认」键，它是真实组非回落伪组 */}
-        {Object.keys(groups).filter((group) => group !== '默认').map((group) => renderItem(group, group, countForGroup(group)))}
+        {names.map((group) => renderItem(group, group, countForGroup(group)))}
       </div>
     </div>
   )

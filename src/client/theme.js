@@ -58,13 +58,19 @@ export const statusPillStyle = (kind) => {
 /** 页面布局基元速查（行卡/下拉/面板/提示文本等，全部由 T token 组合）。 */
 export const S = {
   row: { display: 'flex', alignItems: 'center', gap: '8px', padding: '9px 12px', border: `1px solid ${T.borderL1}`, borderRadius: 12, marginBottom: 8, fontSize: 13 },
-  panel: { padding: '10px 12px' },
+  /**
+   * 视图容器（管理/搜索两视图根）：左右零内缩——设置外壳 `.options` 已给 24px 页边距
+   * （ui-settings-general SettingsRoot.module.css），官方各节自身不再加横向 padding；
+   * 页面自加 12px 即与标准节双倍内缩（2026-09-09 走查：技能页比「插件」页窄一圈）。
+   */
+  panel: { padding: '10px 0' },
   /** 高密度列表行（容器卡 + 分隔线用法）：比 S.row 描边卡轻，行内不再带边框。 */
   listRow: { display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', fontSize: 13 },
   /** 筛选器触发钮（宿主 Menu 的 anchor）：浅底小圆角，与工具条输入框同高。 */
   filterTrigger: { display: 'inline-flex', alignItems: 'center', gap: 4, border: 'none', background: T.bgModulePlatform, borderRadius: 8, padding: '5px 10px', font: 'inherit', fontSize: 12, color: T.labelPrimary, cursor: 'pointer' },
   muted: { color: T.labelSecondary, fontSize: 12 },
-  guide: { padding: '24px 16px', textAlign: 'center', color: T.labelSecondary, fontSize: 13 },
+  /** 未配置引导页：同 panel 口径，横向零内缩（纵向留白自管）。 */
+  guide: { padding: '24px 0', textAlign: 'center', color: T.labelSecondary, fontSize: 13 },
   toolbar: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 },
 }
 

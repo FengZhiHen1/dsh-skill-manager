@@ -10,6 +10,13 @@ import { ManageView } from './manage.jsx'
 import { SearchView } from './search.jsx'
 
 /**
+ * 写后自动收敛的等待窗口：必须大于 Host 对账器的 200ms 防抖（src/adapter/index.js），
+ * 让后台对账先落地；即便如此也无需赌时序——随后的 sync 经写队列串行，
+ * 与任何在途对账排队相差不远，返回即代表现场已收敛。
+ */
+const CONVERGE_DELAY_MS = 400
+
+/**
  * 技能页（settings.section 槽位注入组件）。
  * @param {object} props
  * @param {(endpoint: string, payload?: object) => Promise<unknown>} props.call RPC 门面
@@ -51,10 +58,13 @@ export function SkillsSection({ call, workspaces, scope, subscribeSkillSettings 
    * set() 抛错只剩传输/围栏类失败（请求未达 Host），单独呈错。
    * 被拒与抛回两态都有明确反馈，无静默。
    * 检测按字段独立比对：多字段编辑（如组改名连改两处）互不误伤。
+   * @returns {Promise<boolean>} 该字段是否已被 Host 接受（权威快照与尝试值等值）。
+   *   调用方拿到 true 才能说「成功」：先报成功再等结果会把被拒的写说成成功（2026-09-09 走查）。
+   *   接受时排一次写后收敛（converge），界面自动反映对账结果，无需人工点「↻ 刷新」。
    */
   const editConfig = (field, next) => {
     setEditError(null)
-    void (async () => {
+    return (async () => {
       try {
         await scope.set(field, next)
       } catch (error) {
@@ -62,7 +72,7 @@ export function SkillsSection({ call, workspaces, scope, subscribeSkillSettings 
           message: `配置「${field}」写入失败（请求未达 Host）：${error?.message ?? String(error)}`,
           prompt: null,
         })
-        return
+        return false
       }
       const after = scope.getSnapshot()
       const value = after && after.value && typeof after.value === 'object' ? after.value : {}
@@ -76,7 +86,10 @@ export function SkillsSection({ call, workspaces, scope, subscribeSkillSettings 
             repair: settingsRejectedRepair(field, next, value[field], data && data.root),
           }),
         })
+        return false
       }
+      converge()
+      return true
     })()
   }
   const intentOf = (dir) => skillsIntent[dir] || { disabled: false, group: '默认' }
@@ -110,16 +123,19 @@ export function SkillsSection({ call, workspaces, scope, subscribeSkillSettings 
     })
     editConfig('groups', { ...groups, [group]: { ...groups[group], mounts: next } })
   }
+  /**
+   * 新建分组：复制「默认」组的挂载规则起步。
+   * @returns {Promise<boolean>} 是否真的落盘（撞名/被 Host 拒绝/传输失败均 false，原因已进错误条）。
+   */
   const createGroup = (name) => {
     // 防御：groups 字段是全量覆盖写，撞名会静默覆盖既有组的挂载规则。
     // 撞「默认」还会把默认组重置成复制品，故客户端先拒，Host 不拦。
     if (Object.prototype.hasOwnProperty.call(groups, name)) {
       setEditError({ message: `分组「${name}」已存在，已拒绝创建（避免覆盖既有组的挂载规则）`, prompt: null })
-      return false
+      return Promise.resolve(false)
     }
     const baseMounts = ((groups['默认'] && groups['默认'].mounts) || []).map((m) => ({ ...m }))
-    editConfig('groups', { ...groups, [name]: { mounts: baseMounts } })
-    return true
+    return editConfig('groups', { ...groups, [name]: { mounts: baseMounts } })
   }
   const renameGroup = (oldName, newName) => {
     // 防御：nextGroups 以 newName 为键——撞既有组名会静默覆盖目标组的规则与成员。
@@ -153,8 +169,12 @@ export function SkillsSection({ call, workspaces, scope, subscribeSkillSettings 
   // 序号守卫：reloadTick/settings 总线/首刷三源并发时，只有最新一次加载落地，
   // 迟到的旧响应是恒等迁移（既不盖数据也不盖错误）。载荷形状由 createCall 契约保证。
   const loadSeq = useRef(0)
-  const load = () => {
-    setError(null)
+  /**
+   * @param {Error|null} [cause] 需要先上屏的前置错误（写后对账失败）：仍要重读 overview 呈现现场，
+   *   但失败原因不能被一次成功的读抹掉。普通重读不传，照常清错误。
+   */
+  const load = (cause = null) => {
+    setError(cause)
     const seq = ++loadSeq.current
     return call('overview')
       .then((r) => {
@@ -174,8 +194,34 @@ export function SkillsSection({ call, workspaces, scope, subscribeSkillSettings 
         else setError(e)
       })
   }
+  /**
+   * 写后自动收敛刷新（2026-09-09 走查：改完配置必须人工点「↻ 刷新」才见新现场）。
+   * 为什么不能立刻重读：settings 提交一 resolve 客户端快照就新了，而 Host 对账器还在
+   * 200ms 防抖窗口里，此刻读到的仍是旧物化现场。故：过窗口 → 显式 sync 一次
+   * （写队列串行、幂等收敛并预热 bundle 读缓存）→ 重读 overview。
+   * 一次编辑连打多次（组改名写两字段）由防抖合并成一次刷新，不抖动。
+   */
+  const convergeTimer = useRef(null)
+  const converge = () => {
+    clearTimeout(convergeTimer.current)
+    convergeTimer.current = setTimeout(() => {
+      void (async () => {
+        let cause = null
+        try {
+          await call('sync', {})
+        } catch (error) {
+          // 未配置是正常空态（load 的引导分支负责呈现），不当作对账失败上报
+          if (error && error.code !== 'skilldir-unconfigured') cause = error
+        }
+        load(cause)
+      })()
+    }, CONVERGE_DELAY_MS)
+  }
+  useEffect(() => () => clearTimeout(convergeTimer.current), [])
+
   useEffect(() => {
-    const off = subscribeSkillSettings(load)
+    // 外部改动（手改 settings.yaml、别处写入）经此总线进来：同样先收敛再刷新，口径一致。
+    const off = subscribeSkillSettings(converge)
     load()
     return off
   }, [reloadTick, subscribeSkillSettings])
@@ -213,17 +259,20 @@ export function SkillsSection({ call, workspaces, scope, subscribeSkillSettings 
   const activeTab = TABS.find((t) => t.key === tab)
   return (
     <div>
-      <div style={{ padding: '4px 12px 0', marginBottom: 12 }}>
-        <div style={{ fontSize: 20, fontWeight: 600, color: T.labelPrimary }}>技能</div>
-        <div style={{ fontSize: 13, color: T.labelTertiary, marginTop: 4 }}>{activeTab ? activeTab.sub : ''}</div>
+      {/* 页头与页签零横向内缩：外壳 .options 的 24px 就是页边距，官方节（通用/插件）不自加内缩。
+          字号 18/600 + 副标题 13 tertiary + 0.5px border-l2 分隔线，与 PluginsSettingsSection 同一口径。 */}
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 18, fontWeight: 600, color: T.labelPrimary }}>技能</div>
+        <div style={{ fontSize: 13, lineHeight: '20px', color: T.labelTertiary, marginTop: 4 }}>{activeTab ? activeTab.sub : ''}</div>
       </div>
-      <div style={{ display: 'flex', gap: 20, padding: '0 12px', borderBottom: `1px solid ${T.borderL1}` }}>
+      <div style={{ display: 'flex', gap: 22, marginTop: 2, borderBottom: `0.5px solid ${T.borderL2}` }}>
         {TABS.map((t) => (
           <button
             key={t.key}
             type="button"
             onClick={() => setTab(t.key)}
-            style={{ border: 'none', background: 'none', padding: '6px 2px 8px', font: 'inherit', fontSize: 13, cursor: 'pointer', marginBottom: -1, color: tab === t.key ? T.labelPrimary : T.labelSecondary, fontWeight: tab === t.key ? 500 : 400, borderBottom: tab === t.key ? `2px solid ${T.labelPrimary}` : '2px solid transparent' }}
+            // 官方页签口径：13/20px tertiary → primary，激活只加 2px 下划线不改字重；下划线压住分隔线
+            style={{ border: 'none', background: 'none', padding: '7px 1px 9px', font: 'inherit', fontSize: 13, lineHeight: '20px', cursor: 'pointer', marginBottom: -1, color: tab === t.key ? T.labelPrimary : T.labelTertiary, borderBottom: tab === t.key ? `2px solid ${T.labelPrimary}` : '2px solid transparent' }}
           >
             {t.label}
           </button>
@@ -232,7 +281,7 @@ export function SkillsSection({ call, workspaces, scope, subscribeSkillSettings 
       {error ? <ErrorLineWrap error={error} root={data && data.root} /> : null}
       {editError
         ? (
-            <div style={{ ...badgeStyle(T.error), borderRadius: 10, padding: '8px 12px', margin: '8px 12px 0', fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ ...badgeStyle(T.error), borderRadius: 10, padding: '8px 12px', margin: '8px 0 0', fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ flex: 1, minWidth: 0, wordBreak: 'break-all' }}>{editError.message}</span>
               {editError.prompt ? <RepairCopy text={editError.prompt} /> : null}
             </div>
@@ -249,7 +298,7 @@ export function SkillsSection({ call, workspaces, scope, subscribeSkillSettings 
 function ErrorLineWrap({ error, root }) {
   if (!error) return null
   return (
-    <div style={{ ...badgeStyle(T.error), borderRadius: 10, padding: '8px 12px', margin: '4px 12px 0', fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+    <div style={{ ...badgeStyle(T.error), borderRadius: 10, padding: '8px 12px', margin: '4px 0 0', fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
       <span style={{ flex: 1, minWidth: 0, wordBreak: 'break-all' }}>{error.message || String(error)}</span>
       <RepairCopy text={buildRepairPrompt({ root, code: error.code, message: error.message, repair: error.repair })} />
     </div>

@@ -363,13 +363,19 @@ var statusPillStyle = (kind) => {
 };
 var S = {
   row: { display: "flex", alignItems: "center", gap: "8px", padding: "9px 12px", border: `1px solid ${T.borderL1}`, borderRadius: 12, marginBottom: 8, fontSize: 13 },
-  panel: { padding: "10px 12px" },
+  /**
+   * 视图容器（管理/搜索两视图根）：左右零内缩——设置外壳 `.options` 已给 24px 页边距
+   * （ui-settings-general SettingsRoot.module.css），官方各节自身不再加横向 padding；
+   * 页面自加 12px 即与标准节双倍内缩（2026-09-09 走查：技能页比「插件」页窄一圈）。
+   */
+  panel: { padding: "10px 0" },
   /** 高密度列表行（容器卡 + 分隔线用法）：比 S.row 描边卡轻，行内不再带边框。 */
   listRow: { display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", fontSize: 13 },
   /** 筛选器触发钮（宿主 Menu 的 anchor）：浅底小圆角，与工具条输入框同高。 */
   filterTrigger: { display: "inline-flex", alignItems: "center", gap: 4, border: "none", background: T.bgModulePlatform, borderRadius: 8, padding: "5px 10px", font: "inherit", fontSize: 12, color: T.labelPrimary, cursor: "pointer" },
   muted: { color: T.labelSecondary, fontSize: 12 },
-  guide: { padding: "24px 16px", textAlign: "center", color: T.labelSecondary, fontSize: 13 },
+  /** 未配置引导页：同 panel 口径，横向零内缩（纵向留白自管）。 */
+  guide: { padding: "24px 0", textAlign: "center", color: T.labelSecondary, fontSize: 13 },
   toolbar: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 6 }
 };
 var cardStyle = { border: `1px solid ${T.borderL1}`, borderRadius: 12, background: T.bgLayer3 };
@@ -1015,9 +1021,9 @@ function ManageView({ call, data, config, reload, showToast }) {
     deleteGroup(name);
     if (groupFilter === name) setGroupFilter("\u9ED8\u8BA4");
   };
-  const doCreateGroup = (name) => {
+  const doCreateGroup = async (name) => {
     setDialog(null);
-    if (!config.createGroup(name)) return;
+    if (!await config.createGroup(name)) return;
     setGroupFilter(name);
     showToast(`\u5DF2\u521B\u5EFA\u5206\u7EC4\u300C${name}\u300D`);
   };
@@ -1194,9 +1200,19 @@ var subRowPanel = {
   border: `1px solid ${T.borderL1}`
 };
 function GroupNav({ groups, selected, total, countForGroup, onSelect, onCreate }) {
+  const itemRefs = (0, import_react3.useRef)(/* @__PURE__ */ new Map());
+  const names = Object.keys(groups).filter((group) => group !== "\u9ED8\u8BA4");
+  (0, import_react3.useEffect)(() => {
+    if (!selected) return;
+    itemRefs.current.get(selected)?.scrollIntoView({ block: "nearest" });
+  }, [selected, names.length]);
   const renderItem = (key, label, count) => /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(
     "button",
     {
+      ref: (el) => {
+        if (el) itemRefs.current.set(key, el);
+        else itemRefs.current.delete(key);
+      },
       type: "button",
       title: label,
       onClick: () => onSelect(key),
@@ -1217,7 +1233,7 @@ function GroupNav({ groups, selected, total, countForGroup, onSelect, onCreate }
     /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { maxHeight: 320, overflowY: "auto" }, children: [
       renderItem("", "\u5168\u90E8", total),
       renderItem("\u9ED8\u8BA4", "\u9ED8\u8BA4", countForGroup("\u9ED8\u8BA4")),
-      Object.keys(groups).filter((group) => group !== "\u9ED8\u8BA4").map((group) => renderItem(group, group, countForGroup(group)))
+      names.map((group) => renderItem(group, group, countForGroup(group)))
     ] })
   ] });
 }
@@ -1756,6 +1772,7 @@ function DirectAdd({ busy, onProbeAdd }) {
 
 // src/client/section.jsx
 var import_jsx_runtime5 = require("react/jsx-runtime");
+var CONVERGE_DELAY_MS = 400;
 function SkillsSection({ call, workspaces, scope, subscribeSkillSettings }) {
   const [tab, setTab] = (0, import_react5.useState)("manage");
   const [error, setError] = (0, import_react5.useState)(null);
@@ -1783,7 +1800,7 @@ function SkillsSection({ call, workspaces, scope, subscribeSkillSettings }) {
   const skillsDir = configReady && typeof snap.value.skillsDir === "string" ? snap.value.skillsDir : "";
   const editConfig = (field, next) => {
     setEditError(null);
-    void (async () => {
+    return (async () => {
       try {
         await scope.set(field, next);
       } catch (error2) {
@@ -1791,7 +1808,7 @@ function SkillsSection({ call, workspaces, scope, subscribeSkillSettings }) {
           message: `\u914D\u7F6E\u300C${field}\u300D\u5199\u5165\u5931\u8D25\uFF08\u8BF7\u6C42\u672A\u8FBE Host\uFF09\uFF1A${error2?.message ?? String(error2)}`,
           prompt: null
         });
-        return;
+        return false;
       }
       const after = scope.getSnapshot();
       const value = after && after.value && typeof after.value === "object" ? after.value : {};
@@ -1805,7 +1822,10 @@ function SkillsSection({ call, workspaces, scope, subscribeSkillSettings }) {
             repair: settingsRejectedRepair(field, next, value[field], data && data.root)
           })
         });
+        return false;
       }
+      converge();
+      return true;
     })();
   };
   const intentOf = (dir) => skillsIntent[dir] || { disabled: false, group: "\u9ED8\u8BA4" };
@@ -1837,11 +1857,10 @@ function SkillsSection({ call, workspaces, scope, subscribeSkillSettings }) {
   const createGroup = (name) => {
     if (Object.prototype.hasOwnProperty.call(groups, name)) {
       setEditError({ message: `\u5206\u7EC4\u300C${name}\u300D\u5DF2\u5B58\u5728\uFF0C\u5DF2\u62D2\u7EDD\u521B\u5EFA\uFF08\u907F\u514D\u8986\u76D6\u65E2\u6709\u7EC4\u7684\u6302\u8F7D\u89C4\u5219\uFF09`, prompt: null });
-      return false;
+      return Promise.resolve(false);
     }
     const baseMounts = (groups["\u9ED8\u8BA4"] && groups["\u9ED8\u8BA4"].mounts || []).map((m) => ({ ...m }));
-    editConfig("groups", { ...groups, [name]: { mounts: baseMounts } });
-    return true;
+    return editConfig("groups", { ...groups, [name]: { mounts: baseMounts } });
   };
   const renameGroup = (oldName, newName) => {
     if (Object.prototype.hasOwnProperty.call(groups, newName)) {
@@ -1870,8 +1889,8 @@ function SkillsSection({ call, workspaces, scope, subscribeSkillSettings }) {
   };
   const config = { groups, skillsIntent, intentOf, editConfig, setSkillDisabled, moveSkill, toggleMount, toggleHost, createGroup, renameGroup, deleteGroup };
   const loadSeq = (0, import_react5.useRef)(0);
-  const load = () => {
-    setError(null);
+  const load = (cause = null) => {
+    setError(cause);
     const seq = ++loadSeq.current;
     return call("overview").then((r) => {
       if (seq !== loadSeq.current) return;
@@ -1888,8 +1907,24 @@ function SkillsSection({ call, workspaces, scope, subscribeSkillSettings }) {
       else setError(e);
     });
   };
+  const convergeTimer = (0, import_react5.useRef)(null);
+  const converge = () => {
+    clearTimeout(convergeTimer.current);
+    convergeTimer.current = setTimeout(() => {
+      void (async () => {
+        let cause = null;
+        try {
+          await call("sync", {});
+        } catch (error2) {
+          if (error2 && error2.code !== "skilldir-unconfigured") cause = error2;
+        }
+        load(cause);
+      })();
+    }, CONVERGE_DELAY_MS);
+  };
+  (0, import_react5.useEffect)(() => () => clearTimeout(convergeTimer.current), []);
   (0, import_react5.useEffect)(() => {
-    const off = subscribeSkillSettings(load);
+    const off = subscribeSkillSettings(converge);
     load();
     return off;
   }, [reloadTick, subscribeSkillSettings]);
@@ -1912,22 +1947,22 @@ function SkillsSection({ call, workspaces, scope, subscribeSkillSettings }) {
   ];
   const activeTab = TABS.find((t) => t.key === tab);
   return /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { children: [
-    /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { style: { padding: "4px 12px 0", marginBottom: 12 }, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { style: { fontSize: 20, fontWeight: 600, color: T.labelPrimary }, children: "\u6280\u80FD" }),
-      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { style: { fontSize: 13, color: T.labelTertiary, marginTop: 4 }, children: activeTab ? activeTab.sub : "" })
+    /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { style: { marginBottom: 12 }, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { style: { fontSize: 18, fontWeight: 600, color: T.labelPrimary }, children: "\u6280\u80FD" }),
+      /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { style: { fontSize: 13, lineHeight: "20px", color: T.labelTertiary, marginTop: 4 }, children: activeTab ? activeTab.sub : "" })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { style: { display: "flex", gap: 20, padding: "0 12px", borderBottom: `1px solid ${T.borderL1}` }, children: TABS.map((t) => /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(
+    /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("div", { style: { display: "flex", gap: 22, marginTop: 2, borderBottom: `0.5px solid ${T.borderL2}` }, children: TABS.map((t) => /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(
       "button",
       {
         type: "button",
         onClick: () => setTab(t.key),
-        style: { border: "none", background: "none", padding: "6px 2px 8px", font: "inherit", fontSize: 13, cursor: "pointer", marginBottom: -1, color: tab === t.key ? T.labelPrimary : T.labelSecondary, fontWeight: tab === t.key ? 500 : 400, borderBottom: tab === t.key ? `2px solid ${T.labelPrimary}` : "2px solid transparent" },
+        style: { border: "none", background: "none", padding: "7px 1px 9px", font: "inherit", fontSize: 13, lineHeight: "20px", cursor: "pointer", marginBottom: -1, color: tab === t.key ? T.labelPrimary : T.labelTertiary, borderBottom: tab === t.key ? `2px solid ${T.labelPrimary}` : "2px solid transparent" },
         children: t.label
       },
       t.key
     )) }),
     error ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(ErrorLineWrap, { error, root: data && data.root }) : null,
-    editError ? /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { style: { ...badgeStyle(T.error), borderRadius: 10, padding: "8px 12px", margin: "8px 12px 0", fontSize: 12, display: "flex", alignItems: "center", gap: 8 }, children: [
+    editError ? /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { style: { ...badgeStyle(T.error), borderRadius: 10, padding: "8px 12px", margin: "8px 0 0", fontSize: 12, display: "flex", alignItems: "center", gap: 8 }, children: [
       /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { style: { flex: 1, minWidth: 0, wordBreak: "break-all" }, children: editError.message }),
       editError.prompt ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(RepairCopy, { text: editError.prompt }) : null
     ] }) : null,
@@ -1938,7 +1973,7 @@ function SkillsSection({ call, workspaces, scope, subscribeSkillSettings }) {
 }
 function ErrorLineWrap({ error, root }) {
   if (!error) return null;
-  return /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { style: { ...badgeStyle(T.error), borderRadius: 10, padding: "8px 12px", margin: "4px 12px 0", fontSize: 12, display: "flex", alignItems: "center", gap: 8 }, children: [
+  return /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { style: { ...badgeStyle(T.error), borderRadius: 10, padding: "8px 12px", margin: "4px 0 0", fontSize: 12, display: "flex", alignItems: "center", gap: 8 }, children: [
     /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { style: { flex: 1, minWidth: 0, wordBreak: "break-all" }, children: error.message || String(error) }),
     /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(RepairCopy, { text: buildRepairPrompt({ root, code: error.code, message: error.message, repair: error.repair }) })
   ] });

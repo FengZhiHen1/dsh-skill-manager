@@ -150,6 +150,46 @@ test('createDispatch：三路队列语义 — 读等写屏障、网络不等写�
   await write2
 })
 
+/** 一次性闸门假 api：sync 停在门上，overview 记录自己何时被放行。 */
+function gatedApi(order) {
+  let release
+  const gate = new Promise((r) => { release = r })
+  return {
+    api: {
+      async overview() { order.push('read'); return 'r' },
+      async sync() { order.push('reconcile'); await gate; return 'w' },
+    },
+    release,
+  }
+}
+
+test('写队列共享（adapter 注入）：后台对账入同队才被读屏障看见，自起一路则读到半收敛现场', async () => {
+  // 装配后：对账器经注入的 writeQueue 入队 → 写后自动刷新的读等它结算
+  const shared = []
+  const g1 = gatedApi(shared)
+  const writeQueue = createQueue()
+  const dispatch1 = createDispatch(g1.api, { writeQueue, validate: false })
+  const bg = writeQueue.enqueue(() => g1.api.sync({}))
+  const read = dispatch1('overview', {})
+  await new Promise((r) => setImmediate(r)) // 推进到各自阻塞点：对账在门上、读在屏障上
+  assert.deepEqual(shared, ['reconcile']) // 读尚未被放行
+  g1.release()
+  await bg
+  assert.equal((await read).value, 'r')
+  assert.deepEqual(shared, ['reconcile', 'read'])
+
+  // 装配前（缺陷对照）：对账不入队，dispatch 私有写队列的 busy 屏障看不见它 → 读抢跑
+  const alone = []
+  const g2 = gatedApi(alone)
+  const dispatch2 = createDispatch(g2.api, { validate: false })
+  const bg2 = g2.api.sync({})
+  const read2 = await dispatch2('overview', {})
+  assert.deepEqual(alone, ['reconcile', 'read']) // 对账还在门上，读已经走了
+  assert.equal(read2.value, 'r')
+  g2.release()
+  await bg2
+})
+
 test('overview：配置意图驱动 — 禁用/分组/挂载目标/工作区/健康一次出全', async () => {
   const root = await mkTmp()
   const proj = await mkTmp()

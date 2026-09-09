@@ -7,7 +7,7 @@ import { registerConfig } from './settings.js'
 import { openStore } from './storage.js'
 import { migrateLegacyIntent } from './migrate.js'
 import { createSharedCache } from '../core/base/cache.js'
-import { buildApi, createDispatch } from '../core/service.js'
+import { buildApi, createDispatch, createQueue } from '../core/service.js'
 
 export default {
   name: 'skill-manager',
@@ -59,8 +59,10 @@ export default {
     // 与用户配置的 skillsDir 物理隔离，本地编辑/整理动作不波及外部条目。
     const libraryRoot = ctx.dshHomePath('skill-manager', 'library')
 
-    // 三路排队在 createDispatch 内建：READ 快照 / NET 网络 / WRITE FIFO。
+    // 三路排队：READ 快照 / NET 网络 / WRITE FIFO。后两路由 createDispatch 内建，
+    // 唯有 WRITE FIFO 由本装配创建并注入——后台对账器要与 RPC 写同队（见下）。
     // bundle 缓存跨分发共享，读路径与写后预热都落在这里。
+    const writeQueue = createQueue()
     const sharedCache = createSharedCache()
     // workspaceRegistry 是项目级目标的唯一事实源，Client 不参与路径解析。
     const api = buildApi(() => scope, {
@@ -80,7 +82,11 @@ export default {
     const offWatch = scope.watch(() => {
       clearTimeout(reconcileTimer)
       reconcileTimer = setTimeout(() => {
-        void api.sync({}).catch((error) => {
+        // 对账走注入的 WRITE FIFO，不自起一路：
+        // ① 两路全量对账并发时会对同一目标同时建链，后到者吃 EEXIST 误报「挂载失败」；
+        // ② createDispatch 的读屏障只看 writeQueue.busy，对账不入队就不被它覆盖，
+        //    Client 在防抖窗口后自动刷新（section.jsx converge）会读到半收敛现场。
+        void writeQueue.enqueue(() => api.sync({})).catch((error) => {
           ctx.logger?.warn?.(`dsh-skill-manager: 配置对账失败（详见健康列表）：${error?.message ?? String(error)}`)
         })
       }, 200)
@@ -101,6 +107,6 @@ export default {
     // RPC 通道：/skill-manager 前缀挂 connection.rpc，围栏与 JSON 信封由平台承担。
     // handler 必须返回 Result，抛错会退化成 500 纯文本——createDispatch 保证绝不外抛。
     // handle 经 owner.effect 自持生命周期，随本插件 fiber 注销，无需插件清理。
-    ctx.connection.rpc.handle('/skill-manager', createDispatch(api))
+    ctx.connection.rpc.handle('/skill-manager', createDispatch(api, { writeQueue }))
   },
 }
