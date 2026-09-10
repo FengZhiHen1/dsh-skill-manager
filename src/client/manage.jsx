@@ -255,8 +255,8 @@ export function ManageView({ call, data, config, reload, showToast }) {
 
   return (
     <div style={S.panel}>
-      {/* 主从布局：左栏分组导航（纵列可滚动，容纳无上限分组），右栏为当前组详情 */}
-      <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+      {/* 主从布局：左栏分组导航（默认 stretch 随行等高，列表吃满剩余高度，容纳无上限分组），右栏为当前组详情 */}
+      <div style={{ display: 'flex', gap: 14 }}>
         <GroupNav
           groups={groups}
           selected={groupFilter}
@@ -454,12 +454,14 @@ const subRowPanel = {
 
 /**
  * 左栏分组导航：全部/默认/自定义组纵列，计数随行。
- * 分组数无上限：列高封顶内滚，组名超长截断并 title 悬浮。
+ * 列高随行拉伸（右栏多高就有多少空间），仅组列表确实超出时才内滚——
+ * 定高封顶会让左下大片空白还逼出滚轮，违反直觉（2026-09-10 走查，取代 DSR-021 的「保留封顶」案）。
+ * 组名超长截断并 title 悬浮。
  */
 function GroupNav({ groups, selected, total, countForGroup, onSelect, onCreate }) {
   const itemRefs = useRef(new Map())
   const names = Object.keys(groups).filter((group) => group !== '默认')
-  // 选中项滚入视野：列高封顶内滚，十几个组时新组正落在折线以下——不滚就呈现为
+  // 选中项滚入视野：列内滚或外层面板滚，新组落在折线以下时不滚就呈现为
   // 「提示新增成功，但组里没有」（2026-09-09 走查）。nearest 保证已在视野内时页面不跳。
   useEffect(() => {
     if (!selected) return
@@ -479,13 +481,14 @@ function GroupNav({ groups, selected, total, countForGroup, onSelect, onCreate }
     </button>
   )
   return (
-    <div style={{ flex: 'none', width: 140 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6, padding: '0 4px' }}>
+    <div style={{ flex: 'none', width: 140, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6, padding: '0 4px', flex: 'none' }}>
         <span style={cardTitle}>分组</span>
         <span style={{ flex: 1 }} />
         <button type="button" onClick={onCreate} style={{ border: 'none', background: 'none', padding: 0, font: 'inherit', fontSize: 11, color: T.labelSecondary, cursor: 'pointer' }}>＋ 新建</button>
       </div>
-      <div style={{ maxHeight: 320, overflowY: 'auto' }}>
+      {/* flex:1 + minHeight:0：吃满列内剩余高度；行高由两栏较高者决定，正常情况下永不出滚动条 */}
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
         {renderItem('', '全部', total)}
         {renderItem('默认', '默认', countForGroup('默认'))}
         {/* 「默认」上一行已固定渲染，map 中排除防重复；groups 表合法含「默认」键，它是真实组非回落伪组 */}

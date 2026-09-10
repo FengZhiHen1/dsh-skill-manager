@@ -507,9 +507,11 @@ var menuCardStyle = {
 var menuDivider = /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: { height: 1, margin: "5px 6px", background: T.borderL2 } });
 function RowMenu({ it, groupNames, flags = [], busy, onAction, onMove, onClose, triggerRect }) {
   const menuRef = (0, import_react.useRef)(null);
+  const subRef = (0, import_react.useRef)(null);
   const [sub, setSub] = (0, import_react.useState)(null);
   (0, import_react.useEffect)(() => {
     const onScroll = (event) => {
+      if (subRef.current && subRef.current.contains(event.target)) return;
       if (menuRef.current && menuRef.current.contains(event.target)) setSub(null);
       else onClose();
     };
@@ -531,6 +533,8 @@ function RowMenu({ it, groupNames, flags = [], busy, onAction, onMove, onClose, 
     right: Math.max(8, vw - triggerRect.right),
     maxHeight: Math.max(160, dropDown ? spaceBelow : spaceAbove),
     overflowY: "auto",
+    // 滚到边界不链动外层面板：外层一滚 trigger rect 即失效，菜单会被自己的滚动关掉
+    overscrollBehavior: "contain",
     ...dropDown ? { top: triggerRect.bottom + 6 } : { bottom: vh - triggerRect.top + 6 }
   };
   let subStyle = null;
@@ -546,6 +550,7 @@ function RowMenu({ it, groupNames, flags = [], busy, onAction, onMove, onClose, 
       minWidth: 124,
       maxHeight: Math.max(140, subDown ? subBelow : subAbove),
       overflowY: "auto",
+      overscrollBehavior: "contain",
       ...openLeft ? { right: Math.max(8, vw - sub.rect.left + 6) } : { left: sub.rect.right + 6 },
       ...subDown ? { top: sub.rect.top - 7 } : { bottom: Math.max(8, vh - sub.rect.bottom - 7) }
     };
@@ -603,7 +608,7 @@ function RowMenu({ it, groupNames, flags = [], busy, onAction, onMove, onClose, 
         } })
       ] })
     ] }),
-    sub && subStyle && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: subStyle, children: allGroups.map((group) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
+    sub && subStyle && /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { ref: subRef, style: subStyle, children: allGroups.map((group) => /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(
       "div",
       {
         style: {
@@ -1028,7 +1033,7 @@ function ManageView({ call, data, config, reload, showToast }) {
     showToast(`\u5DF2\u521B\u5EFA\u5206\u7EC4\u300C${name}\u300D`);
   };
   return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: S.panel, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { display: "flex", gap: 14, alignItems: "flex-start" }, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { display: "flex", gap: 14 }, children: [
       /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
         GroupNav,
         {
@@ -1224,13 +1229,13 @@ function GroupNav({ groups, selected, total, countForGroup, onSelect, onCreate }
     },
     key || "<all>"
   );
-  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { flex: "none", width: 140 }, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { display: "flex", alignItems: "center", gap: 6, marginBottom: 6, padding: "0 4px" }, children: [
+  return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { flex: "none", width: 140, display: "flex", flexDirection: "column" }, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { display: "flex", alignItems: "center", gap: 6, marginBottom: 6, padding: "0 4px", flex: "none" }, children: [
       /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: cardTitle, children: "\u5206\u7EC4" }),
       /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: { flex: 1 } }),
       /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("button", { type: "button", onClick: onCreate, style: { border: "none", background: "none", padding: 0, font: "inherit", fontSize: 11, color: T.labelSecondary, cursor: "pointer" }, children: "\uFF0B \u65B0\u5EFA" })
     ] }),
-    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { maxHeight: 320, overflowY: "auto" }, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { flex: 1, minHeight: 0, overflowY: "auto" }, children: [
       renderItem("", "\u5168\u90E8", total),
       renderItem("\u9ED8\u8BA4", "\u9ED8\u8BA4", countForGroup("\u9ED8\u8BA4")),
       names.map((group) => renderItem(group, group, countForGroup(group)))

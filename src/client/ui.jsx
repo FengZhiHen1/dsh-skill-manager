@@ -154,15 +154,20 @@ export const menuDivider = <div style={{ height: 1, margin: '5px 6px', backgroun
  * 浮层几何：主/子菜单一律 position:fixed，锚定触发按钮的 rect。
  * 宿主设置面板是定高 overflow:hidden 容器，absolute 会被面板底边裁掉且滚不到。
  * fixed 逃逸裁剪与滚动流：近底自动向上翻、近左自动向右翻、max-height 按可用空间封顶并内部滚动。
+ * 主/子菜单内部滚动不关菜单（overscroll contain 挡住边界链动外层）；
  * 任何外层滚动/缩放即关闭菜单：trigger rect 失效，浮层不跟随文档流。
  */
 export function RowMenu({ it, groupNames, flags = [], busy, onAction, onMove, onClose, triggerRect }) {
   const menuRef = useRef(null)
+  const subRef = useRef(null)
   const [sub, setSub] = useState(null) // {rect}：「移动到分组」项 rect，悬停/点击展开；null 收起
   useEffect(() => {
     // scroll 不冒泡，capture 才能捕获任意滚动容器（宿主 .options 等）。
     const onScroll = (event) => {
-      if (menuRef.current && menuRef.current.contains(event.target)) setSub(null) // 主菜单内部滚动：子菜单不跟随，收起
+      // 子菜单渲染在 menuRef 之外（fixed 兄弟节点）：不单独放行就会落进「外层滚动」分支，
+      // 分组一多滚一下整菜单即消失（2026-09-10 走查）。内部滚动走原生，菜单保持。
+      if (subRef.current && subRef.current.contains(event.target)) return
+      if (menuRef.current && menuRef.current.contains(event.target)) setSub(null) // 主菜单内部滚动：子菜单锚点失效，收起
       else onClose() // 外层滚动：trigger rect 失效
     }
     window.addEventListener('scroll', onScroll, true)
@@ -184,6 +189,8 @@ export function RowMenu({ it, groupNames, flags = [], busy, onAction, onMove, on
     right: Math.max(8, vw - triggerRect.right),
     maxHeight: Math.max(160, dropDown ? spaceBelow : spaceAbove),
     overflowY: 'auto',
+    // 滚到边界不链动外层面板：外层一滚 trigger rect 即失效，菜单会被自己的滚动关掉
+    overscrollBehavior: 'contain',
     ...(dropDown ? { top: triggerRect.bottom + 6 } : { bottom: vh - triggerRect.top + 6 }),
   }
   // 子菜单：默认开在主菜单左侧（左空间不足向右翻）；纵向随菜单项，近底向上翻。
@@ -200,6 +207,7 @@ export function RowMenu({ it, groupNames, flags = [], busy, onAction, onMove, on
       minWidth: 124,
       maxHeight: Math.max(140, subDown ? subBelow : subAbove),
       overflowY: 'auto',
+      overscrollBehavior: 'contain',
       ...(openLeft ? { right: Math.max(8, vw - sub.rect.left + 6) } : { left: sub.rect.right + 6 }),
       ...(subDown ? { top: sub.rect.top - 7 } : { bottom: Math.max(8, vh - sub.rect.bottom - 7) }),
     }
@@ -258,7 +266,7 @@ export function RowMenu({ it, groupNames, flags = [], busy, onAction, onMove, on
         )}
       </div>
       {sub && subStyle && (
-        <div style={subStyle}>
+        <div ref={subRef} style={subStyle}>
           {allGroups.map((group) => (
             <div
               key={group}
