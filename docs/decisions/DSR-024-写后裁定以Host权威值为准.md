@@ -1,6 +1,6 @@
 # DSR-024：写后裁定以 Host 权威值为准——弃用镜像快照比对，两字段写串行
 
-> 状态：**已落地，过静态闸与 test 实例实测**（2026-09-14：`npm run check` 退出 0、`node --test` 144/144、分层门禁通过；页面走查见文末「实测」）。**web（stable-dev）尚未更新**，待用户指令。
+> 状态：**已落地并挂载 web**（2026-09-14）。静态闸：`npm run check` 退出 0、`node --test` 144/144、分层门禁通过；test 实例页面走查见文末「实测」。web（stable-dev）同日经 `dsh plugin --profile web add github:FengZhiHen1/dsh-skill-manager` 重挂：lockfile resolution = `5694198`、线上 `dist/client.js` 与本地构建**逐字节相同**（sha256 `4CA3F54B…`，137200 B）、`--dump-config` 155 行无告警、页面走查技能页分组/技能库正常渲染且无错误横幅。本次为**纯 Client 半区**改动（Host 装配、端点与 schema 未变），故**无须重启实例**。
 
 ## 上下文
 
@@ -62,3 +62,14 @@
 修复前误报截图留档：`tmp/repro-banner-before-fix.jpg`（会话临时产物，gitignore）。
 
 中期踩坑（当场修掉）：首次实测裁定落 `unknown`，横幅如实回显原因 `cannot get property "remote.settings" without inject`——这条也证明"把权威读失败原因上屏"的设计当场就起了作用。
+
+### web（stable-dev）挂载核对（2026-09-14）
+
+| 核对项 | 结果 |
+|---|---|
+| lockfile resolution | `github:FengZhiHen1/dsh-skill-manager` → `5694198`（重挂前为 `a2830f6`） |
+| 线上产物 vs 本地构建 | `dist/client.js` 137200 B，sha256 相同；新旧码标记：`settings-write-not-applied` 命中、`settings-validation-rejected` 零命中 |
+| `--dump-config`（实例版本二进制 + stable-dev HOME） | 退出 0、155 行、无 `not found`/告警，skill-manager 行在位 |
+| 页面走查（web 实例，`127.0.0.1:3080`） | 设置 → 技能 正常渲染（分组列 + 技能库、生产分组计数一致），无错误横幅；profile `package.json` 的 deps 与 `dsh.profile.bundles` 未变（成员集未变 ⇒ 无须重启） |
+| **未做**：生产侧写路径冒烟 | 未在 stable-dev 触发任何配置写（不拿用户生产配置做试验）；正向路径已在 test 实例用同一份产物验证 |
+

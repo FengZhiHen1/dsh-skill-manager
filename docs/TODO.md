@@ -4,7 +4,6 @@
 
 ## 待办
 
-- **DSR-024 修复的 web 生效**（用户操作，2026-09-14）：子仓库 commit + push 后，`dsh plugin --profile web add github:FengZhiHen1/dsh-skill-manager` 重挂 → 刷页即生效（**纯 client 半区改动**：`src/client/*` + `core/model/verdict.js`，无 Host 端点/装配变化，**不需要重启 stable-dev**）。生效前 web 上仍是旧行为：删组/改名会误报「配置「groups」被拒绝，已恢复原值」（写入实际成功）。
 
 - **2026-09-09 三项修复的 web 生效**（用户操作）：子仓库已 commit + push（远端 master 现为 `00cdb6d`，含 `d2164e0` fix / `a9c49d5` docs / `6c39088` 红线 / `f9b56d2` 默认种子翻转 / `00cdb6d` 回归闸与实测记录）。生效两步：① `dsh plugin --profile web add github:FengZhiHen1/dsh-skill-manager` 重挂 → 刷页即生效（client 半区：页边距、新建组可见性与成功话术、写后自动收敛刷新）；② Host 半区（`src/adapter/index.js` 写队列注入）须重启 stable-dev 才生效（`dshl instances restart`，需用户明确指令）。缺 ② 时上述三项仍工作，只是后台防抖对账与写操作可并发（旧行为，可能出现 EEXIST 型误报挂载失败）。
 - **GUI 浏览器走查**（test 实例实测场，2026-09-09 起为**合成库** `E:\Project\Skills-test\skills`，5 个 `demo-*` 夹具 + 12 个命名组，专供复现组列表裁切）：设置页「技能」两视图渲染与 ⋯ 菜单/徽章/挂载失败展开、修复提示词一键复制出口、本地修改遮罩确认对话框（Host 边界已实测不可绕过，剩渲染面）、改 `dist/client.js` 一句文案后仅刷页的产物增量通道、Console 无 `slot entry crashed`；**本批次专项**：AC-16 写后自动收敛（改配置不点 `↻ 刷新`）、第 13 个组新建后可见（选中滚入视野）、页边距与「插件/通用」页对齐（判据：外壳 `.options` 的 24px 独供，页内零自加内缩）。结果回填 `需求.md` missing evidence 节。
