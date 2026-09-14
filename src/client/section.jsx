@@ -5,7 +5,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { T, S, badgeStyle } from './theme.js'
 import { ErrorLine, OutlineBtn, useTick, useToast, ToastHost } from './ui.jsx'
-import { buildRepairPrompt, RepairCopy, settingsRejectedRepair } from './repair.jsx'
+import { buildRepairPrompt, RepairCopy, settingsWriteRepair } from './repair.jsx'
+import { writeVerdict } from '../core/model/verdict.js'
 import { ManageView } from './manage.jsx'
 import { SearchView } from './search.jsx'
 
@@ -22,9 +23,10 @@ const CONVERGE_DELAY_MS = 400
  * @param {(endpoint: string, payload?: object) => Promise<unknown>} props.call RPC 门面
  * @param {object} props.workspaces 工作区服务面（GroupScopePanel 用）
  * @param {object} props.scope skill-manager settings scope（直读直写）
+ * @param {(field: string) => Promise<unknown>} props.readConfigField Host 权威读（settings.describe 的该字段值；读不到返回 undefined）
  * @param {(fn: () => void) => () => void} props.subscribeSkillSettings 配置变更总线订阅（入口 apply 闭包持有）
  */
-export function SkillsSection({ call, workspaces, scope, subscribeSkillSettings }) {
+export function SkillsSection({ call, workspaces, scope, subscribeSkillSettings, readConfigField }) {
   const [tab, setTab] = useState('manage')
   const [error, setError] = useState(null)
   const [data, setData] = useState(null)
@@ -52,13 +54,15 @@ export function SkillsSection({ call, workspaces, scope, subscribeSkillSettings 
   const skillsDir = configReady && typeof snap.value.skillsDir === 'string' ? snap.value.skillsDir : ''
 
   /**
-   * 配置写与拒绝检测，依据 DSH settings-scope.ts 的客户端语义。
-   * Host validate 拒绝时 mutate 应答 ok=false，客户端 recover 重载镜像静默回退，set() 照常 resolve 不抛。
-   * 因此被拒判定 = 写 resolve 后权威快照的该字段 ≠ 尝试值。
+   * 配置写与裁定，依据 DSH settings-scope 的客户端语义。
+   * Host 拒绝时 mutate 应答 ok=false，客户端 recover 重载镜像**静默**回退，set() 照常 resolve 不抛；
+   * 且被后续写超越的那一笔不回折视图（只有最新一笔的回执折进镜像）。
+   * 因此裁定**只认 Host 权威值**（readConfigField → writeVerdict），不拿镜像快照比对：
+   * 删组/改名连发两笔写，第一笔必然读到落后快照，比对会把已落盘的写误报成"被拒绝"
+   * （2026-09-14 现场实证）。权威读失败 = unknown，如实说"未确认"，不猜原因。
    * set() 抛错只剩传输/围栏类失败（请求未达 Host），单独呈错。
-   * 被拒与抛回两态都有明确反馈，无静默。
-   * 检测按字段独立比对：多字段编辑（如组改名连改两处）互不误伤。
-   * @returns {Promise<boolean>} 该字段是否已被 Host 接受（权威快照与尝试值等值）。
+   * 被拒、未确认与抛回三态都有明确反馈，无静默。
+   * @returns {Promise<boolean>} 该字段是否已被 Host 接受（权威值与尝试值等值）。
    *   调用方拿到 true 才能说「成功」：先报成功再等结果会把被拒的写说成成功（2026-09-09 走查）。
    *   接受时排一次写后收敛（converge），界面自动反映对账结果，无需人工点「↻ 刷新」。
    */
@@ -74,16 +78,18 @@ export function SkillsSection({ call, workspaces, scope, subscribeSkillSettings 
         })
         return false
       }
-      const after = scope.getSnapshot()
-      const value = after && after.value && typeof after.value === 'object' ? after.value : {}
-      if (JSON.stringify(value[field]) !== JSON.stringify(next)) {
+      const read = await readConfigField(field)
+      const verdict = writeVerdict(next, read.value)
+      if (verdict !== 'accepted') {
         setEditError({
-          message: `配置「${field}」被拒绝，已恢复原值（组名保留字/非法字符或格式不合法）。`,
+          message: verdict === 'not-applied'
+            ? `配置「${field}」写入未生效：Host 权威值仍是原值（被拒绝或已被并发写覆盖）。`
+            : `配置「${field}」写入结果未确认：读不到 Host 权威值（${read.error || '原因未知'}），请刷新页面核对现场。`,
           prompt: buildRepairPrompt({
             root: data && data.root,
-            code: 'settings-validation-rejected',
-            message: `字段 ${field} 写入被 Host validate 拒绝`,
-            repair: settingsRejectedRepair(field, next, value[field], data && data.root),
+            code: verdict === 'not-applied' ? 'settings-write-not-applied' : 'settings-write-unconfirmed',
+            message: `字段 ${field} 写后裁定：${verdict}`,
+            repair: settingsWriteRepair(verdict, field, next, read.value, data && data.root, read.error),
           }),
         })
         return false
@@ -140,7 +146,7 @@ export function SkillsSection({ call, workspaces, scope, subscribeSkillSettings 
       .map((m) => ({ ...m }))
     return editConfig('groups', { ...groups, [name]: { mounts: baseMounts } })
   }
-  const renameGroup = (oldName, newName) => {
+  const renameGroup = async (oldName, newName) => {
     // 防御：nextGroups 以 newName 为键——撞既有组名会静默覆盖目标组的规则与成员。
     if (Object.prototype.hasOwnProperty.call(groups, newName)) {
       setEditError({ message: `分组「${newName}」已存在，已拒绝改名（改名会覆盖目标组的规则与成员）`, prompt: null })
@@ -152,19 +158,20 @@ export function SkillsSection({ call, workspaces, scope, subscribeSkillSettings 
     for (const [dir, intent] of Object.entries(skillsIntent)) {
       nextSkills[dir] = intent.group === oldName ? { ...intent, group: newName } : intent
     }
-    editConfig('groups', nextGroups)
-    editConfig('skills', nextSkills)
-    return true
+    // 两字段写**串行**：groups 未落定就不写 skills——否则会留下"组名没改成、成员却已指向新名"
+    // 的半套用（成员按失效组回落「默认」，挂载静默丢失）。串行同时保证每笔写裁定时不带后继写。
+    if (!await editConfig('groups', nextGroups)) return false
+    return editConfig('skills', nextSkills)
   }
-  const deleteGroup = (name) => {
+  const deleteGroup = async (name) => {
     const nextGroups = {}
     for (const [n, g] of Object.entries(groups)) if (n !== name) nextGroups[n] = g
     const nextSkills = {}
     for (const [dir, intent] of Object.entries(skillsIntent)) {
       nextSkills[dir] = intent.group === name ? { ...intent, group: '默认' } : intent
     }
-    editConfig('groups', nextGroups)
-    editConfig('skills', nextSkills)
+    if (!await editConfig('groups', nextGroups)) return false
+    return editConfig('skills', nextSkills)
   }
   const config = { groups, skillsIntent, intentOf, editConfig, setSkillDisabled, moveSkill, toggleMount, toggleHost, createGroup, renameGroup, deleteGroup }
 

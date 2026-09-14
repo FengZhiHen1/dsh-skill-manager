@@ -815,22 +815,43 @@ function mountIssueRepair(issue, { name, targetLabel: targetLabel2, path, root }
   if (root) facts.push({ label: "\u914D\u7F6E\u76EE\u5F55", value: String(root) });
   return { operation: "mount-inspect", summary: meta.summary, facts, recommendation: meta.recommendation };
 }
-function settingsRejectedRepair(field, attempted, current, root) {
+function settingsWriteRepair(verdict, field, attempted, authoritative, root, readError = null) {
+  const notApplied = verdict === "not-applied";
+  const facts = [
+    { label: "\u5B57\u6BB5", value: String(field) },
+    { label: "\u5C1D\u8BD5\u5199\u5165\u7684\u503C", value: JSON.stringify(attempted ?? null) },
+    { label: notApplied ? "Host \u6743\u5A01\u503C" : "\u6743\u5A01\u8BFB\u7ED3\u679C", value: authoritative === void 0 ? "\uFF08\u8BFB\u4E0D\u5230\uFF09" : JSON.stringify(authoritative ?? null) },
+    { label: "\u914D\u7F6E\u76EE\u5F55", value: String(root || "\uFF08\u672A\u914D\u7F6E\uFF09") }
+  ];
+  if (readError) facts.push({ label: "\u6743\u5A01\u8BFB\u5931\u8D25\u539F\u56E0", value: String(readError) });
   return {
     operation: "settings.set",
-    summary: `\u914D\u7F6E\u300C${field}\u300D\u88AB settings \u6821\u9A8C\u62D2\u7EDD\uFF0C\u5DF2\u56DE\u6EDA\u4E3A\u5F53\u524D\u503C\u3002`,
-    facts: [
-      { label: "\u88AB\u62D2\u7EDD\u7684\u5B57\u6BB5", value: String(field) },
-      { label: "\u5C1D\u8BD5\u5199\u5165\u7684\u503C", value: JSON.stringify(attempted ?? null) },
-      { label: "\u5F53\u524D\u751F\u6548\u7684\u503C", value: JSON.stringify(current ?? null) },
-      { label: "\u914D\u7F6E\u76EE\u5F55", value: String(root || "\uFF08\u672A\u914D\u7F6E\uFF09") }
-    ],
-    recommendation: [
-      '\u7EC4\u540D\uFF1A1\u201330 \u5B57\u7B26\uFF0C\u300C\u9ED8\u8BA4\u300D\u300C\u5168\u90E8\u300D\u4E3A\u4FDD\u7559\u5B57\uFF0C\u4E0D\u542B / \\ : * ? " < > | \u4E0E\u63A7\u5236\u5B57\u7B26',
-      "skillsDir\uFF1A\u975E\u7A7A\u65F6\u5FC5\u987B\u662F\u7EDD\u5BF9\u8DEF\u5F84",
-      "\u8BF7\u68C0\u67E5 $DSH_HOME/settings.yaml \u7684 skill-manager \u6BB5\u4E0E\u63D2\u4EF6 src/core/model/intent.js \u7684 validate \u89C4\u5219\uFF0C\u4FEE\u6B63\u540E\u91CD\u8BD5"
+    summary: notApplied ? `\u914D\u7F6E\u300C${field}\u300D\u5199\u5165\u672A\u751F\u6548\uFF1AHost \u6743\u5A01\u503C\u4ECD\u662F\u65E7\u503C\uFF08\u88AB\u62D2\u7EDD\uFF0C\u6216\u5DF2\u88AB\u5E76\u53D1\u5199\u8986\u76D6\uFF09\u3002` : `\u914D\u7F6E\u300C${field}\u300D\u5199\u5165\u7ED3\u679C\u672A\u786E\u8BA4\uFF1A\u8BFB\u4E0D\u5230 Host \u6743\u5A01\u503C\uFF0C\u5199\u53EF\u80FD\u5DF2\u751F\u6548\u3002`,
+    facts,
+    recommendation: notApplied ? [
+      "\u5148\u539F\u6837\u91CD\u8BD5\u4E00\u6B21\uFF08\u5E76\u53D1\u5199\u51B2\u7A81\u53EF\u81EA\u884C\u6062\u590D\uFF09",
+      '\u4ECD\u4E0D\u751F\u6548\u65F6\u6838\u5BF9\u503C\u672C\u8EAB\uFF1A\u7EC4\u540D 1\u201330 \u5B57\u7B26\uFF0C\u300C\u9ED8\u8BA4\u300D\u300C\u5168\u90E8\u300D\u4E3A\u4FDD\u7559\u5B57\uFF0C\u4E0D\u542B / \\ : * ? " < > | \u4E0E\u63A7\u5236\u5B57\u7B26\uFF1BskillsDir \u975E\u7A7A\u65F6\u5FC5\u987B\u662F\u7EDD\u5BF9\u8DEF\u5F84',
+      "\u5E73\u53F0\u4E0D\u628A\u62D2\u7EDD\u539F\u56E0\u900F\u7ED9\u5BA2\u6237\u7AEF\uFF1B\u8981\u5B9A\u4F4D\u5230\u5177\u4F53\u539F\u56E0\u65F6\uFF0C\u53EA\u8BFB\u6838\u5BF9 $DSH_HOME/settings.yaml \u7684 skill-manager \u6BB5\u4E0E\u63D2\u4EF6 src/core/model/intent.js \u7684 validate \u89C4\u5219"
+    ] : [
+      "\u5148\u5237\u65B0\u9875\u9762\uFF08\u6216\u91CD\u8BFB\u914D\u7F6E\u5FEB\u7167\uFF09\u6838\u5BF9\u73B0\u573A\uFF1A\u5DF2\u662F\u76EE\u6807\u503C\u5C31\u65E0\u9700\u91CD\u8BD5\uFF0C\u5199\u5165\u5F88\u53EF\u80FD\u5DF2\u751F\u6548",
+      "\u73B0\u573A\u4ECD\u662F\u65E7\u503C\u518D\u539F\u6837\u91CD\u8BD5\u4E00\u6B21",
+      "\u53CD\u590D\u8BFB\u4E0D\u5230\u6743\u5A01\u503C\u65F6\uFF0C\u6309\u300C\u6743\u5A01\u8BFB\u5931\u8D25\u539F\u56E0\u300D\u6392\uFF1A\u53EA\u8BFB\u6838\u5BF9\u4E0E Host \u7684 remote.settings.describe \u8C03\u7528\u662F\u5426\u53EF\u7528"
     ]
   };
+}
+
+// src/core/model/verdict.js
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    const body = Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`);
+    return `{${body.join(",")}}`;
+  }
+  return JSON.stringify(value ?? null);
+}
+function writeVerdict(attempted, authoritative) {
+  if (authoritative === void 0) return "unknown";
+  return canonicalJson(attempted) === canonicalJson(authoritative) ? "accepted" : "not-applied";
 }
 
 // src/client/manage.jsx
@@ -1011,19 +1032,19 @@ function ManageView({ call, data, config, reload, showToast }) {
     const pad = (n) => String(n).padStart(2, "0");
     return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
   };
-  const groupOp = (action, name, newName) => {
+  const groupOp = async (action, name, newName) => {
     if (action === "delete") {
       setDialog({ kind: "group-delete", name });
     } else if (action === "rename") {
-      renameGroup(name, newName);
+      if (!await renameGroup(name, newName)) return;
       if (groupFilter === name && newName) setGroupFilter(newName);
     }
   };
-  const confirmDeleteGroup = () => {
+  const confirmDeleteGroup = async () => {
     const name = dialog?.kind === "group-delete" ? dialog.name : null;
     setDialog(null);
     if (!name) return;
-    deleteGroup(name);
+    if (!await deleteGroup(name)) return;
     if (groupFilter === name) setGroupFilter("\u9ED8\u8BA4");
   };
   const doCreateGroup = async (name) => {
@@ -1778,7 +1799,7 @@ function DirectAdd({ busy, onProbeAdd }) {
 // src/client/section.jsx
 var import_jsx_runtime5 = require("react/jsx-runtime");
 var CONVERGE_DELAY_MS = 400;
-function SkillsSection({ call, workspaces, scope, subscribeSkillSettings }) {
+function SkillsSection({ call, workspaces, scope, subscribeSkillSettings, readConfigField }) {
   const [tab, setTab] = (0, import_react5.useState)("manage");
   const [error, setError] = (0, import_react5.useState)(null);
   const [data, setData] = (0, import_react5.useState)(null);
@@ -1815,16 +1836,16 @@ function SkillsSection({ call, workspaces, scope, subscribeSkillSettings }) {
         });
         return false;
       }
-      const after = scope.getSnapshot();
-      const value = after && after.value && typeof after.value === "object" ? after.value : {};
-      if (JSON.stringify(value[field]) !== JSON.stringify(next)) {
+      const read = await readConfigField(field);
+      const verdict = writeVerdict(next, read.value);
+      if (verdict !== "accepted") {
         setEditError({
-          message: `\u914D\u7F6E\u300C${field}\u300D\u88AB\u62D2\u7EDD\uFF0C\u5DF2\u6062\u590D\u539F\u503C\uFF08\u7EC4\u540D\u4FDD\u7559\u5B57/\u975E\u6CD5\u5B57\u7B26\u6216\u683C\u5F0F\u4E0D\u5408\u6CD5\uFF09\u3002`,
+          message: verdict === "not-applied" ? `\u914D\u7F6E\u300C${field}\u300D\u5199\u5165\u672A\u751F\u6548\uFF1AHost \u6743\u5A01\u503C\u4ECD\u662F\u539F\u503C\uFF08\u88AB\u62D2\u7EDD\u6216\u5DF2\u88AB\u5E76\u53D1\u5199\u8986\u76D6\uFF09\u3002` : `\u914D\u7F6E\u300C${field}\u300D\u5199\u5165\u7ED3\u679C\u672A\u786E\u8BA4\uFF1A\u8BFB\u4E0D\u5230 Host \u6743\u5A01\u503C\uFF08${read.error || "\u539F\u56E0\u672A\u77E5"}\uFF09\uFF0C\u8BF7\u5237\u65B0\u9875\u9762\u6838\u5BF9\u73B0\u573A\u3002`,
           prompt: buildRepairPrompt({
             root: data && data.root,
-            code: "settings-validation-rejected",
-            message: `\u5B57\u6BB5 ${field} \u5199\u5165\u88AB Host validate \u62D2\u7EDD`,
-            repair: settingsRejectedRepair(field, next, value[field], data && data.root)
+            code: verdict === "not-applied" ? "settings-write-not-applied" : "settings-write-unconfirmed",
+            message: `\u5B57\u6BB5 ${field} \u5199\u540E\u88C1\u5B9A\uFF1A${verdict}`,
+            repair: settingsWriteRepair(verdict, field, next, read.value, data && data.root, read.error)
           })
         });
         return false;
@@ -1867,7 +1888,7 @@ function SkillsSection({ call, workspaces, scope, subscribeSkillSettings }) {
     const baseMounts = (groups["\u9ED8\u8BA4"] && groups["\u9ED8\u8BA4"].mounts || []).filter((m) => m.scope !== "global").map((m) => ({ ...m }));
     return editConfig("groups", { ...groups, [name]: { mounts: baseMounts } });
   };
-  const renameGroup = (oldName, newName) => {
+  const renameGroup = async (oldName, newName) => {
     if (Object.prototype.hasOwnProperty.call(groups, newName)) {
       setEditError({ message: `\u5206\u7EC4\u300C${newName}\u300D\u5DF2\u5B58\u5728\uFF0C\u5DF2\u62D2\u7EDD\u6539\u540D\uFF08\u6539\u540D\u4F1A\u8986\u76D6\u76EE\u6807\u7EC4\u7684\u89C4\u5219\u4E0E\u6210\u5458\uFF09`, prompt: null });
       return false;
@@ -1878,19 +1899,18 @@ function SkillsSection({ call, workspaces, scope, subscribeSkillSettings }) {
     for (const [dir, intent] of Object.entries(skillsIntent)) {
       nextSkills[dir] = intent.group === oldName ? { ...intent, group: newName } : intent;
     }
-    editConfig("groups", nextGroups);
-    editConfig("skills", nextSkills);
-    return true;
+    if (!await editConfig("groups", nextGroups)) return false;
+    return editConfig("skills", nextSkills);
   };
-  const deleteGroup = (name) => {
+  const deleteGroup = async (name) => {
     const nextGroups = {};
     for (const [n, g] of Object.entries(groups)) if (n !== name) nextGroups[n] = g;
     const nextSkills = {};
     for (const [dir, intent] of Object.entries(skillsIntent)) {
       nextSkills[dir] = intent.group === name ? { ...intent, group: "\u9ED8\u8BA4" } : intent;
     }
-    editConfig("groups", nextGroups);
-    editConfig("skills", nextSkills);
+    if (!await editConfig("groups", nextGroups)) return false;
+    return editConfig("skills", nextSkills);
   };
   const config = { groups, skillsIntent, intentOf, editConfig, setSkillDisabled, moveSkill, toggleMount, toggleHost, createGroup, renameGroup, deleteGroup };
   const loadSeq = (0, import_react5.useRef)(0);
@@ -1987,7 +2007,7 @@ function ErrorLineWrap({ error, root }) {
 // src/client/card.jsx
 var import_react6 = require("react");
 var import_jsx_runtime6 = require("react/jsx-runtime");
-function SkillManagerCard({ scope, uiWorkspace }) {
+function SkillManagerCard({ scope, uiWorkspace, readConfigField }) {
   const [open, setOpen] = (0, import_react6.useState)(false);
   const [draft, setDraft] = (0, import_react6.useState)("");
   const [touched, setTouched] = (0, import_react6.useState)(false);
@@ -2019,48 +2039,55 @@ function SkillManagerCard({ scope, uiWorkspace }) {
   }, [current, touched]);
   const [piDraft, setPiDraft] = (0, import_react6.useState)(null);
   const dirty = touched && draft !== current || piDraft !== null && piDraft !== piOn;
-  const reject = (message, code) => ({
-    message,
+  const failure = (verdict, field, attempted, authoritative, readError) => ({
+    message: verdict === "not-applied" ? `\u914D\u7F6E\u300C${field}\u300D\u5199\u5165\u672A\u751F\u6548\uFF1AHost \u6743\u5A01\u503C\u4ECD\u662F\u539F\u503C\uFF08\u88AB\u62D2\u7EDD\u6216\u5DF2\u88AB\u5E76\u53D1\u5199\u8986\u76D6\uFF09\u3002` : `\u914D\u7F6E\u300C${field}\u300D\u5199\u5165\u7ED3\u679C\u672A\u786E\u8BA4\uFF1A\u8BFB\u4E0D\u5230 Host \u6743\u5A01\u503C\uFF08${readError || "\u539F\u56E0\u672A\u77E5"}\uFF09\uFF0C\u8BF7\u5237\u65B0\u9875\u9762\u6838\u5BF9\u73B0\u573A\u3002`,
     prompt: buildRepairPrompt({
       root: current,
-      code,
-      message,
-      repair: settingsRejectedRepair("skillsDir", draft.trim(), current, current)
+      code: verdict === "not-applied" ? "settings-write-not-applied" : "settings-write-unconfirmed",
+      message: `\u5B57\u6BB5 ${field} \u5199\u540E\u88C1\u5B9A\uFF1A${verdict}`,
+      repair: settingsWriteRepair(verdict, field, attempted, authoritative, current, readError)
     })
   });
   const save = async () => {
     if (!ready) return;
     setBusy(true);
     setFailed(null);
-    const attempted = draft.trim();
+    let field = "skillsDir";
+    let attempted = draft.trim();
     try {
       if (touched && attempted !== current) {
         await scope.set("skillsDir", attempted);
-        const fresh = scope.getSnapshot();
-        const v = fresh.value && typeof fresh.value === "object" ? fresh.value : {};
-        const committed = typeof v.skillsDir === "string" ? v.skillsDir : "";
-        if (committed !== attempted) {
-          setFailed(reject(`\u4FDD\u5B58\u88AB Host \u6821\u9A8C\u62D2\u7EDD\uFF0C\u5DF2\u56DE\u6EDA\u4E3A\u300C${committed || "\u672A\u914D\u7F6E"}\u300D\uFF08\u975E\u7A7A\u76EE\u5F55\u5FC5\u987B\u662F\u7EDD\u5BF9\u8DEF\u5F84\uFF09\u3002`, "settings-validation-rejected"));
+        const read = await readConfigField("skillsDir");
+        const verdict = writeVerdict(attempted, read.value);
+        if (verdict !== "accepted") {
+          setFailed(failure(verdict, "skillsDir", attempted, read.value, read.error));
           return;
         }
-        setDraft(committed);
+        setDraft(attempted);
         setTouched(false);
       }
       if (piDraft !== null && piDraft !== piOn) {
+        field = "pi";
+        attempted = piDraft;
         await scope.set("pi", piDraft);
-        const fresh = scope.getSnapshot();
-        const v = fresh.value && typeof fresh.value === "object" ? fresh.value : {};
-        if (v.pi === true !== piDraft) {
-          setFailed({
-            message: "\u63A5\u7BA1\u5F00\u5173\u4FDD\u5B58\u88AB\u62D2\u7EDD\uFF0C\u5DF2\u6062\u590D\u539F\u503C\u3002",
-            prompt: buildRepairPrompt({ root: current, code: "settings-validation-rejected", message: "\u5B57\u6BB5 pi \u5199\u5165\u88AB Host validate \u62D2\u7EDD", repair: settingsRejectedRepair("pi", piDraft, v.pi, current) })
-          });
+        const read = await readConfigField("pi");
+        const verdict = writeVerdict(piDraft, read.value);
+        if (verdict !== "accepted") {
+          setFailed(failure(verdict, "pi", piDraft, read.value, read.error));
           return;
         }
         setPiDraft(null);
       }
     } catch (e) {
-      setFailed(reject(`\u5199\u5165\u5931\u8D25\uFF08\u8BF7\u6C42\u672A\u8FBE Host\uFF09\uFF1A${e?.message ?? String(e)}`, "settings-write-failed"));
+      setFailed({
+        message: `\u5199\u5165\u5931\u8D25\uFF08\u8BF7\u6C42\u672A\u8FBE Host\uFF09\uFF1A${e?.message ?? String(e)}`,
+        prompt: buildRepairPrompt({
+          root: current,
+          code: "settings-write-failed",
+          message: `\u5B57\u6BB5 ${field} \u5199\u5165\u8BF7\u6C42\u672A\u8FBE Host`,
+          repair: settingsWriteRepair("unknown", field, attempted, void 0, current)
+        })
+      });
     } finally {
       setBusy(false);
     }
@@ -2251,12 +2278,28 @@ function observeSkillsNavIcon() {
 }
 
 // src/client/index.jsx
-var inject = ["slots", "workspaces", "uiWorkspace", "settingsScope", "remote", "connection"];
+var inject = ["slots", "workspaces", "uiWorkspace", "settingsScope", "remote", "remote.settings", "connection"];
 function apply(ctx) {
   const call = createCall(ctx);
   const workspaces = ctx.workspaces;
   const uiWorkspace = ctx.uiWorkspace;
   const scope = ctx.settingsScope.bind({ namespace: "skill-manager" });
+  const readConfigField = async (field) => {
+    try {
+      const response = await ctx.remote.settings.describe();
+      if (!response || response.ok !== true) {
+        const reason = response && response.error && response.error.message ? response.error.message : "settings.describe \u672A\u6210\u529F\u5E94\u7B54";
+        return { value: void 0, error: String(reason) };
+      }
+      const namespaces = response.value && Array.isArray(response.value.namespaces) ? response.value.namespaces : [];
+      const row = namespaces.find((candidate) => candidate && candidate.ns === "skill-manager");
+      const value = row && row.value;
+      if (!value || typeof value !== "object") return { value: void 0, error: "\u6743\u5A01\u503C\u91CC\u6CA1\u6709 skill-manager \u547D\u540D\u7A7A\u95F4" };
+      return { value: value[field], error: null };
+    } catch (error) {
+      return { value: void 0, error: error?.message ?? String(error) };
+    }
+  };
   const settingsListeners = /* @__PURE__ */ new Set();
   const subscribeSkillSettings = (fn) => {
     settingsListeners.add(fn);
@@ -2269,7 +2312,7 @@ function apply(ctx) {
     const offSection = ctx.slots.inject(
       "settings.section",
       () => ctx.slots.register(
-        { name: "settings.section", id: "skills", order: 16, label: "\u6280\u80FD", inject: () => ({ call, workspaces, scope, subscribeSkillSettings }) },
+        { name: "settings.section", id: "skills", order: 16, label: "\u6280\u80FD", inject: () => ({ call, workspaces, scope, subscribeSkillSettings, readConfigField }) },
         SkillsSection
       )
     );
@@ -2278,7 +2321,7 @@ function apply(ctx) {
       () => ctx.slots.register(
         // rc.7 起该槽为 keyed：key = 本卡片编辑的 settings 命名空间
         // 卡片只需要 scope + uiWorkspace（目录选择器在 uiWorkspace 面上，不在 workspaces 面上）
-        { name: "settings.plugin.item", key: "skill-manager", inject: () => ({ scope, uiWorkspace }) },
+        { name: "settings.plugin.item", key: "skill-manager", inject: () => ({ scope, uiWorkspace, readConfigField }) },
         SkillManagerCard
       )
     );

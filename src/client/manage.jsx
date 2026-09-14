@@ -228,19 +228,21 @@ export function ManageView({ call, data, config, reload, showToast }) {
     const pad = (n) => String(n).padStart(2, '0')
     return `${pad(d.getHours())}:${pad(d.getMinutes())}`
   }
-  const groupOp = (action, name, newName) => {
+  const groupOp = async (action, name, newName) => {
     if (action === 'delete') {
       setDialog({ kind: 'group-delete', name }) // 删组波及成员归属与挂载规则，走遮罩确认（不用 window.confirm）
     } else if (action === 'rename') {
-      renameGroup(name, newName)
+      // 视图切换只跟写落定：未生效时留在原组，否则筛选会被切到一个并不存在的组名（2026-09-14 走查）
+      if (!await renameGroup(name, newName)) return
       if (groupFilter === name && newName) setGroupFilter(newName)
     }
   }
-  const confirmDeleteGroup = () => {
+  const confirmDeleteGroup = async () => {
     const name = dialog?.kind === 'group-delete' ? dialog.name : null
     setDialog(null)
     if (!name) return
-    deleteGroup(name)
+    // 同上：只有真的删掉了才把筛选落到「默认」
+    if (!await deleteGroup(name)) return
     if (groupFilter === name) setGroupFilter('默认')
   }
   // 新建成功后跳到新组，便于立即配置它的使用范围。

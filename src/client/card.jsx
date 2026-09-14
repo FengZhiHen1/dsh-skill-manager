@@ -7,15 +7,17 @@
 import { useState, useEffect } from 'react'
 import { T } from './theme.js'
 import { ChevronIcon, GhostBtn } from './ui.jsx'
-import { buildRepairPrompt, RepairCopy, settingsRejectedRepair } from './repair.jsx'
+import { buildRepairPrompt, RepairCopy, settingsWriteRepair } from './repair.jsx'
+import { writeVerdict } from '../core/model/verdict.js'
 
 /**
  * skill-manager 配置卡片（settings.plugin.item keyed 槽位组件）。
  * @param {object} props
  * @param {object} props.scope skill-manager settings scope（直读直写）
  * @param {{ pickDirectory: () => Promise<string|null> }} props.uiWorkspace 原生目录选择服务面
+ * @param {(field: string) => Promise<unknown>} props.readConfigField Host 权威读（settings.describe 的该字段值；读不到返回 undefined）
  */
-export function SkillManagerCard({ scope, uiWorkspace }) {
+export function SkillManagerCard({ scope, uiWorkspace, readConfigField }) {
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState('')
   const [touched, setTouched] = useState(false) // 用户是否编辑过草稿
@@ -57,55 +59,65 @@ export function SkillManagerCard({ scope, uiWorkspace }) {
 
   /**
    * 失败呈现：组装 footer 显示的 message 与可复制的修复提示词。
-   * code 区分被拒与传输失败两类。
+   * verdict 取自 core 的 writeVerdict：not-applied（权威值未变）/ unknown（读不到权威值）。
    */
-  const reject = (message, code) => ({
-    message,
+  const failure = (verdict, field, attempted, authoritative, readError) => ({
+    message: verdict === 'not-applied'
+      ? `配置「${field}」写入未生效：Host 权威值仍是原值（被拒绝或已被并发写覆盖）。`
+      : `配置「${field}」写入结果未确认：读不到 Host 权威值（${readError || '原因未知'}），请刷新页面核对现场。`,
     prompt: buildRepairPrompt({
       root: current,
-      code,
-      message,
-      repair: settingsRejectedRepair('skillsDir', draft.trim(), current, current),
+      code: verdict === 'not-applied' ? 'settings-write-not-applied' : 'settings-write-unconfirmed',
+      message: `字段 ${field} 写后裁定：${verdict}`,
+      repair: settingsWriteRepair(verdict, field, attempted, authoritative, current, readError),
     }),
   })
 
-  // 保存：按序写脏字段（skillsDir → pi），逐个核对权威快照；第一个被拒即停，其余草稿保留。
+  // 保存：按序写脏字段（skillsDir → pi），逐字段以 **Host 权威值** 裁定；第一个未落定即停，其余草稿保留。
+  // 裁定只认权威值（writeVerdict）：Host 拒绝时 set 照常 resolve（客户端 recover 静默回退，DSH
+  // settings-scope 语义），且镜像快照在"本笔写被后继写超越"时不回折——拿镜像比对会误报被拒
+  // （2026-09-14 实证）。catch 只剩传输/围栏类失败（请求未达 Host）。
   const save = async () => {
     if (!ready) return
     setBusy(true)
     setFailed(null)
-    const attempted = draft.trim()
+    let field = 'skillsDir'
+    let attempted = draft.trim()
     try {
-      // Host validate 拒绝时 set 照常 resolve（客户端 recover 静默回滚，
-      // DSH settings-scope.ts 语义）；catch 只剩传输/围栏类失败。
       if (touched && attempted !== current) {
         await scope.set('skillsDir', attempted)
-        const fresh = scope.getSnapshot()
-        const v = fresh.value && typeof fresh.value === 'object' ? fresh.value : {}
-        const committed = typeof v.skillsDir === 'string' ? v.skillsDir : ''
-        if (committed !== attempted) {
-          // 权威快照 ≠ 尝试值 → 被 validate 拒绝已回滚：回显且草稿保留供修改
-          setFailed(reject(`保存被 Host 校验拒绝，已回滚为「${committed || '未配置'}」（非空目录必须是绝对路径）。`, 'settings-validation-rejected'))
+        const read = await readConfigField('skillsDir')
+        const verdict = writeVerdict(attempted, read.value)
+        if (verdict !== 'accepted') {
+          // 未生效/未确认：错误条上屏（含修复提示词），草稿保留供修改
+          setFailed(failure(verdict, 'skillsDir', attempted, read.value, read.error))
           return
         }
-        setDraft(committed)
+        setDraft(attempted)
         setTouched(false)
       }
       if (piDraft !== null && piDraft !== piOn) {
+        field = 'pi'
+        attempted = piDraft
         await scope.set('pi', piDraft)
-        const fresh = scope.getSnapshot()
-        const v = fresh.value && typeof fresh.value === 'object' ? fresh.value : {}
-        if ((v.pi === true) !== piDraft) {
-          setFailed({
-            message: '接管开关保存被拒绝，已恢复原值。',
-            prompt: buildRepairPrompt({ root: current, code: 'settings-validation-rejected', message: '字段 pi 写入被 Host validate 拒绝', repair: settingsRejectedRepair('pi', piDraft, v.pi, current) }),
-          })
+        const read = await readConfigField('pi')
+        const verdict = writeVerdict(piDraft, read.value)
+        if (verdict !== 'accepted') {
+          setFailed(failure(verdict, 'pi', piDraft, read.value, read.error))
           return
         }
         setPiDraft(null)
       }
     } catch (e) {
-      setFailed(reject(`写入失败（请求未达 Host）：${e?.message ?? String(e)}`, 'settings-write-failed'))
+      setFailed({
+        message: `写入失败（请求未达 Host）：${e?.message ?? String(e)}`,
+        prompt: buildRepairPrompt({
+          root: current,
+          code: 'settings-write-failed',
+          message: `字段 ${field} 写入请求未达 Host`,
+          repair: settingsWriteRepair('unknown', field, attempted, undefined, current),
+        }),
+      })
     } finally {
       setBusy(false)
     }

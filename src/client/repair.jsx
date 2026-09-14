@@ -153,21 +153,39 @@ export function mountIssueRepair(issue, { name, targetLabel, path, root }) {
   return { operation: 'mount-inspect', summary: meta.summary, facts, recommendation: meta.recommendation }
 }
 
-/** settings 校验被拒的本地 repair facts：该呈现面 Host 不参与，上下文在 Client 手里。 */
-export function settingsRejectedRepair(field, attempted, current, root) {
+/**
+ * settings 写入裁定的本地 repair facts（该呈现面 Host 不参与，上下文在 Client 手里）。
+ * verdict 取自 core/model/verdict.js 的 writeVerdict：not-applied = Host 权威值未变；
+ * unknown = 读不到权威值（readError 带上失败原因，便于把"读不通"与"写没落定"分开排）。
+ * 措辞只陈述裁定事实，不自称"Host validate 拒绝"——平台只回 ok=false，拒绝原因不经客户端透出
+ * （DSH 把 seam 异常映射成 settings/rejected | settings/conflict，但 settings-scope 客户端语义是
+ * 静默 recover），把"被拒"当成已知原因会把人引向错误方向（2026-09-14 实证：合法值被说成组名非法）。
+ */
+export function settingsWriteRepair(verdict, field, attempted, authoritative, root, readError = null) {
+  const notApplied = verdict === 'not-applied'
+  const facts = [
+    { label: '字段', value: String(field) },
+    { label: '尝试写入的值', value: JSON.stringify(attempted ?? null) },
+    { label: notApplied ? 'Host 权威值' : '权威读结果', value: authoritative === undefined ? '（读不到）' : JSON.stringify(authoritative ?? null) },
+    { label: '配置目录', value: String(root || '（未配置）') },
+  ]
+  if (readError) facts.push({ label: '权威读失败原因', value: String(readError) })
   return {
     operation: 'settings.set',
-    summary: `配置「${field}」被 settings 校验拒绝，已回滚为当前值。`,
-    facts: [
-      { label: '被拒绝的字段', value: String(field) },
-      { label: '尝试写入的值', value: JSON.stringify(attempted ?? null) },
-      { label: '当前生效的值', value: JSON.stringify(current ?? null) },
-      { label: '配置目录', value: String(root || '（未配置）') },
-    ],
-    recommendation: [
-      '组名：1–30 字符，「默认」「全部」为保留字，不含 / \\ : * ? " < > | 与控制字符',
-      'skillsDir：非空时必须是绝对路径',
-      '请检查 $DSH_HOME/settings.yaml 的 skill-manager 段与插件 src/core/model/intent.js 的 validate 规则，修正后重试',
-    ],
+    summary: notApplied
+      ? `配置「${field}」写入未生效：Host 权威值仍是旧值（被拒绝，或已被并发写覆盖）。`
+      : `配置「${field}」写入结果未确认：读不到 Host 权威值，写可能已生效。`,
+    facts,
+    recommendation: notApplied
+      ? [
+          '先原样重试一次（并发写冲突可自行恢复）',
+          '仍不生效时核对值本身：组名 1–30 字符，「默认」「全部」为保留字，不含 / \\ : * ? " < > | 与控制字符；skillsDir 非空时必须是绝对路径',
+          '平台不把拒绝原因透给客户端；要定位到具体原因时，只读核对 $DSH_HOME/settings.yaml 的 skill-manager 段与插件 src/core/model/intent.js 的 validate 规则',
+        ]
+      : [
+          '先刷新页面（或重读配置快照）核对现场：已是目标值就无需重试，写入很可能已生效',
+          '现场仍是旧值再原样重试一次',
+          '反复读不到权威值时，按「权威读失败原因」排：只读核对与 Host 的 remote.settings.describe 调用是否可用',
+        ],
   }
 }
