@@ -212,6 +212,23 @@ export default {
     // RPC 通道：/skill-manager 前缀挂 connection.rpc，围栏与 JSON 信封由平台承担。
     // handler 必须返回 Result，抛错会退化成 500 纯文本——createDispatch 保证绝不外抛。
     // handle 经 owner.effect 自持生命周期，随本插件 fiber 注销，无需插件清理。
-    ctx.connection.rpc.handle('/skill-manager', createDispatch(api, { writeQueue }))
+    //
+    // ⚠ 必须在 `ctx.inject(['webServer'], …)` 回调里、用**回调给的 ctx** 注册（DSR-028）。
+    // 生产实测（0.1.7-rc.2，2026-09-28）：直接在 apply 里 `ctx.connection.rpc.handle()` 抛
+    //   `cannot get property "webServer" without inject`
+    // 成因是平台实现把 owner 绑成**读该服务的 ctx**：
+    //   connection/lib/index.js:573  get rpc() { const owner = this.ctx; … }
+    //   connection/lib/index.js:656  owner.effect(() => owner.webServer.register(route))
+    // ⇒ 注册路径末端要触达 `owner.webServer`，而 cordis 只在**读该 ctx 的 inject 声明内**
+    //   服务名时放行（vendor/cordis/src/reflect.ts:140 `Reflect.has(target, prop)` 为守卫入口）。
+    // 两个易错点：
+    //   ① 不能在 apply 里直接调 —— 此时本 fiber 的 ctx 没声明 webServer；
+    //   ② 回调里必须用 `webCtx` 读 connection，**不能**用外层 `ctx` —— 外层 ctx 同样没声明。
+    // 用**动态**注入而非静态 `inject: [..., 'webServer']`：webServer 由 profile 的 web bundle
+    // 提供（@deepseek-ai/dsh-web-app 的 webserver 行），非本插件依赖；静态声明会在不含该行的
+    // profile 上让本插件永远 PENDING（正是 DSR-027 那类启动挂死）。动态注入则只是不注册 RPC。
+    ctx.inject(['webServer'], (webCtx) => {
+      webCtx.connection.rpc.handle('/skill-manager', createDispatch(api, { writeQueue }))
+    })
   },
 }

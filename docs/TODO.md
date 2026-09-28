@@ -4,7 +4,8 @@
 
 ## 待办
 
-- **DSR-025（配置模型迁移到 `0.1.7-rc.2`）的实例级实测**（**用户操作**，2026-09-28）：静态闸已全绿（`npm run check` 退出 0：产物新鲜度 + 语法 + 分层门禁 + `node --test` **150/150**），但**未起实例、未做页面走查**——按红线实例启停只能由用户在启动器侧执行。要验三件事：
+- **DSR-028 修复后的实例级复验**（**用户操作**，2026-09-28）：test 实例在 DSR-027 修复后**已能启动成功**，但两个插件行因 `connection.rpc.handle` 未注入 `webServer` 而挂载失败（界面标「异常」、日志 `2 entries did not activate`）。已按动态注入修复（DSR-028），**待重启实例复验**：① 两行不再标「异常」、启动无 `N entries did not activate`；② RPC 通道真实可用——设置页/技能页能读到 Host 数据（技能页出条目、配置页读到五个字段）；③ unity-search 的 `search_sources`/`read_source` 工具可调。
+- **DSR-025（配置模型迁移到 `0.1.7-rc.2`）的实例级实测**（**用户操作**，2026-09-28）：静态闸已全绿（`npm run check` 退出 0：产物新鲜度 + 语法 + 分层门禁 + `node --test` **162/162**），但**未起实例、未做页面走查**——按红线实例启停只能由用户在启动器侧执行。要验三件事：
   1. **Host**：test profile 挂 `link:` 后启动，行 ACTIVE、无 `N entries did not activate`、无 `startup failed`；`--dump-config` 里 `skill-manager` 行在位且无 `disabled`（peer 门禁未误伤）；`settings.describe` 返回 `ns: "skill-manager"` 且 `autoGenerate: false`，`value` 含五个字段（`skillsDir`/`pi`/`intentMigrated`/`groups`/`skills`）。
   2. **配置页接线**：侧栏 Plugins 页 → `dsh-skill-manager` → 本行出现「配置」控件；打开见一句话摘要与表单主体；保存后 profile `cordis.patch.yml` 落盘且技能页无需手点刷新即收敛；把本行从 profile 移除后该入口消失（`whileServed` 撤下）。DevTools Console 无 `slot "plugins.row.config" is not declared`、无 `slot entry crashed in 'plugins.row.config'`。
   3. **图标换代**：设置导航「技能」一行显示的是现行 `IconSkillOutline` 几何（与外壳其余导航项同代），配置页折叠箭头是图标而非文本箭头（旧名 `IconChevronDownOutline14` 已不存在，取不到会**静默**降级成 `▾`）。

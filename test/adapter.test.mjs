@@ -67,8 +67,39 @@ function fakeCtx(home, { config, openImpl, updateImpl } = {}) {
     storage: { domain: { open: openImpl ?? defaultOpen } },
     workspaceRegistry: { list: () => [] },
     dshHomePath: (...parts) => join(home, ...parts),
-    connection: { rpc: { handle: (channel, handler) => { ctx.handler = handler; calls.push(['rpc', channel]) } } },
+    // 外层 ctx 的连接服务：`connection` 本身可用（本插件静态 inject 了它），但其 `rpc.handle`
+    // 在生产里会触达 `owner.webServer` 而 owner 无该声明 ⇒ **直接调必抛**。
+    // 这就是 DSR-028 的现场形态：抛的不是 connection，而是它内部的 webServer。
+    connection: {
+      rpc: {
+        handle: () => {
+          throw new Error('cannot get property "webServer" without inject')
+        },
+      },
+    },
     effect: (fn) => disposers.push(fn()),
+    /**
+     * 动态注入（真实 cordis 语义的最小复刻，DSR-028）。
+     * 生产平台把 `connection.rpc.handle` 的 owner 绑成**读该服务的 ctx**，注册末端要触达
+     * `owner.webServer`，而 cordis 只在读该 ctx 的 inject 声明内放行
+     * （reflect.ts:140 `Reflect.has(target, prop)` 为守卫入口）⇒ 必须用**回调给的 ctx** 读连接服务。
+     *
+     * 这里刻意复刻这条守卫（两个易错点都会抛与生产同形的错误）：
+     *   ① 在 apply 里直接 `ctx.connection.rpc.handle(...)` → 外层 ctx 无 webServer ⇒ 抛；
+     *   ② 回调里误用外层 `ctx` 而非 `webCtx` → 同样抛。
+     * 只有 `webCtx.connection.rpc.handle(...)` 成功。消融验证见本文件 DSR-028 用例。
+     */
+    inject(deps, callback) {
+      calls.push(['inject', deps.join(',')])
+      for (const d of deps) {
+        if (d !== 'webServer') throw new Error(`fakeCtx.inject: 本假件只提供 webServer，收到 ${d}`)
+      }
+      const injected = Object.create(ctx)
+      injected.connection = {
+        rpc: { handle: (channel, handler) => { ctx.handler = handler; calls.push(['rpc', channel]) } },
+      }
+      return callback(injected, undefined)
+    },
     volatileListeners,
     configListeners,
     domains,
@@ -133,6 +164,48 @@ test('apply 装配：fiber 结算 → 迁移 → openStore；页面策略关自�
   assert.equal(ctx.volatileListeners.size, 0)
   await new Promise((r) => setTimeout(r, 400))
   assert.equal(await isLink(join(home, 'skills', 'pdf')), false) // dispose 后无对账发生
+})
+
+// DSR-028 回归：RPC 必须在 `ctx.inject(['webServer'], …)` 回调里、用**回调给的 ctx** 注册。
+//
+// 生产实测（0.1.7-rc.2，2026-09-28）：两个插件行都挂载失败并报
+//   `cannot get property "webServer" without inject`
+// 成因：平台把 `connection.rpc.handle` 的 owner 绑成**读该服务的 ctx**
+//   （connection/lib/index.js:573 `const owner = this.ctx`），注册末端执行
+//   `owner.effect(() => owner.webServer.register(route))`（同文件 :656）
+// ⇒ 只有读该 ctx 的 inject 声明内有 webServer 才放行（cordis reflect.ts:140 是守卫入口）。
+//
+// 本用例把守卫复刻进假 ctx（见 fakeCtx.connection / fakeCtx.inject），钉死两个易错点。
+test('DSR-028：RPC 走动态注入注册；直接调或误用外层 ctx 都会撞 webServer 守卫', async (t) => {
+  const home = await mkTmp('dsh-sm-home-')
+  const root = await mkTmp()
+  t.after(() => cleanup(home))
+  t.after(() => cleanup(root))
+
+  const ctx = fakeCtx(home, { config: CONFIG(root) })
+  plugin.apply(ctx, CONFIG(root))
+  ctx.openFiber()
+  await new Promise((r) => setTimeout(r, 30))
+
+  // ① 生产正确路径：经 inject 回调注册（成功，且通道名正确）
+  assert.deepEqual(ctx.calls.filter(([k]) => k === 'rpc'), [['rpc', '/skill-manager']],
+    'RPC 必须在动态注入回调里注册成功')
+  assert.ok(ctx.calls.some(([k, d]) => k === 'inject' && d === 'webServer'),
+    '必须请求注入 webServer（否则平台注册路径会撞守卫）')
+
+  // ② 易错点一：绕过动态注入、直接在外层 ctx 上注册 → 与生产同形地抛错
+  assert.throws(() => ctx.connection.rpc.handle('/x', () => ({})), /without inject/,
+    '外层 ctx 无 webServer 声明 ⇒ 直接注册必须抛（这正是生产失败的形态）')
+
+  // ③ 易错点二：回调里误用外层 ctx（而非 webCtx）→ 同样抛
+  let leaked = null
+  ctx.inject(['webServer'], () => {
+    try { ctx.connection.rpc.handle('/y', () => ({})) } catch (error) { leaked = error }
+  })
+  assert.match(String(leaked?.message), /without inject/,
+    '注入回调里若读外层 ctx，仍会撞守卫 ⇒ 必须用回调给的 ctx')
+
+  await ctx.dispose()
 })
 
 test('apply 降级：storage 域打开失败 → 管理 API 回 internal，插件不拖垮启动', async (t) => {
