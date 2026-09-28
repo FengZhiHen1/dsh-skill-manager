@@ -25,7 +25,7 @@ export const T = {
 /**
  * 圆角 token 表（DSR-026）。0.1.7 起宿主把半径收成六档并在自己仓内用守卫挡离格字面量
  * （`packages/client/ui-theme/tests/radius-styles.client.spec.ts`；该守卫只扫 DSH 自己
- * `packages/client/**/src/**` 的 CSS，**不约束第三方内联样式**——所以这是观感一致性问题，
+ * `packages/client` 树内各级 `src` 目录的 CSS，**不约束第三方内联样式**——所以这是观感一致性问题，
  * 不是兼容失败；但对齐之后本插件与外壳共用同一套材料）。
  * 档位：xs 4 / sm 8 / md 12 / lg 16 / xl 20 / panel 28。
  * 归位规则（原字面量无对应档时）：

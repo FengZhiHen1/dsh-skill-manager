@@ -30,5 +30,10 @@ for (const file of targets) {
     console.error(`✗ ${file}\n${error.stderr?.toString() ?? error.message}`)
   }
 }
+
+// 注：块注释提前终止守卫（2026-09-28 实测事故）由仓库级 `tools/plugin-layering-check.mjs`
+// 的 R3 规则承担——它扫全部插件、覆盖 .js/.jsx/.ts/.tsx，且已由 `npm run layering` 纳入本
+// 脚本之后的门禁链。此处**不再重复实现**（同一规则两份实现 = 漂移源）。
+
 if (failed === 0) console.log('✓ src 全部 .js 语法检查通过')
 process.exit(failed)

@@ -342,7 +342,6 @@ var T = {
   warn: "var(--dsw-alias-state-warn-primary)",
   mask: "var(--dsw-alias-bg-mask-1)"
 };
-src;
 var R = {
   xs: "var(--dsw-radius-xs)",
   sm: "var(--dsw-radius-sm)",

@@ -111,6 +111,38 @@ apply 次数 = 2，迁移写次数 = 1  ⇒ ✅ 收敛
 - 平台若为「apply 期写配置」提供**不触发重组的**通道（或让 `reconcileProfilePatches` 不再等待被重组 fiber），则第 1 条的时序顾虑消失，迁移可直接在 apply 内完成、无需 `fiber.await()` 前置。
 - 若上游让 `Fiber._unload()` 对 disposer 施加超时，则本条不变量降级为「性能建议」而非「正确性要求」——但**仍不应**依赖它。
 
+## 附：同批次暴露的第二个缺陷——JSDoc 提前终止（`src is not defined`）
+
+死锁修复后实例**不再卡死**，但随即报出一个此前被死锁掩盖的真错：
+
+```
+Failed to load plugins
+dsh-skill-manager
+web boot: 1 entry did not activate
+dsh-skill-manager: import failed: src is not defined
+```
+
+⇒ 这是**死锁解除后暴露的第二个独立缺陷**，与闭环无关。
+
+- **成因**：`src/client/theme.js:28` 的 JSDoc 正文里写了路径 glob `` `packages/client/**/src/**` ``。
+  其中 `**/` 的 `*/` 字符序列**提前终止了块注释**，余下 `src/**` 的文本泄漏成代码——产物里落成
+  一条裸语句 `src;`（`dist/client.js:345`）。
+- **为何三处门禁都没拦住**：裸标识符 `src;` 是**合法语法** ⇒ esbuild 正常产出、
+  `node --check` 也通过、`build-client.mjs --check` 的产物比对同样通过（源码与产物一致，只是都错）。
+  它只在**运行时**炸 `ReferenceError`，在浏览器里表现为 `import failed`（整个 Client 半区不加载）。
+- **引入者**：`76606a0`（DSR-026），该行注释是那次改写时新增的。⇒ 与 DSR-027 的 disposer 修复无关，
+  是同期引入但一直未被观测到的独立缺陷（DSR-025/026 均登记「实例级实测未做」，故无人跑过它）。
+- **定位方式**：扫全部产物里的「裸标识符语句」（形如单独一行的 `ident;`）⇒ 只有本插件一处命中。
+- **修复**：改写该行为「`packages/client` 树内各级 `src` 目录」，不含终止符序列。
+- **新守卫**：仓库级 `tools/plugin-layering-check.mjs` 新增 **R3 规则**——JSDoc 体行（缩进后以
+  `*` 开头）内出现注释终止符且其后仍有非空白内容即报错。判据不误伤 JSX 的 `{/* … */}`（以 `{` 开头）
+  与行内类型标注（不以 `*` 开头）。
+  - **消融已验证判别力**：把原 bug 行写回 ⇒ 门禁报红并精确指向 `src/client/theme.js:28`；复原 ⇒ 转绿。
+  - 覆盖**全部插件**（另有独立 `dist` 产物扫查），不限于本插件。
+  - ⚠ 该守卫在一个文件里**只实现一份**：`check-syntax.mjs` 里不重复实现，避免同一规则两处漂移。
+  - ⚠ 附带教训：写这条守卫的注释时，我自己**连续三次**把终止符序列写进注释而触发同一个错误——
+    足见该坑极易复现，机械闸门（而非"注意点写"）才是正确处置。
+
 ## 尚未验证（如实登记）
 
 - **实例级复验未做**：修复后未起实例。已在**真 cordis 4.0.4** 上完成单变量消融（修复前 HANG / 修复后 SETTLED，见上），但以下仍属**推断**：真实 boot 下 `settings.update` 确实走到 `reconcileProfilePatches` 并因此重组本插件 fiber（探针用 `fiber.dispose()` 复刻该效果，**未**接真实 `config-editor`）；真实重组后新 apply 的 `openStore` 不撞 `already-open`（单测/探针只用假域，未在真 storage 后端上验证「旧句柄已释放」）。
