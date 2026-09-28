@@ -1,14 +1,23 @@
 // ui — Client 通用 UI 基元与对话框：按钮、通知条、行菜单、遮罩对话框。
 //
 // 边界：按钮复用 ui-primitives 原子组件；icon 缺失时降级文本箭头，不整卡失败。
-// 参考：插件运行时.md「视图设计」；DSR-008、DSR-017。
+// 参考：插件运行时.md「视图设计」；DSR-008、DSR-017、DSR-025。
 import { useEffect, useRef, useState } from 'react'
 import * as primitives from '@deepseek-ai/dsh-client-ui-primitives'
 import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
 import { T, S, badgeStyle, dotStyle } from './theme.js'
 
-/** 防御：icon 为可选装饰，缺失时降级为文本箭头，绝不让整卡渲染失败。 */
-export const ChevronIcon = typeof primitives.IconChevronDownOutline14 === 'function' ? primitives.IconChevronDownOutline14 : null
+/**
+ * 防御：icon 为可选装饰，缺失时降级为文本箭头，绝不让整卡渲染失败。
+ * ⚠ 0.1.7 图标导出整体换代（size-neutral 命名）：旧 `IconChevronDownOutline14` 一类带尺寸
+ * 后缀的名字**全灭**（旧 75 → 新 190）。此处用动态属性取，旧名不会编译报错，而会
+ * **静默降级成文本箭头**——即"没坏但变丑"，故必须同步改用新名。
+ * weight 取 Regular：决策笔记（.agents/notes/implemented/architecture/
+ * 2026-09-16-size-neutral-product-icon-weights.md）把 Medium 保留给「刻意的强调」
+ * （新建会话、设置触发与导航图标、外观选择等），卡片折叠箭头属其余既有消费方，用 Regular；
+ * 尺寸由 size 属性决定（该几何默认 14）。
+ */
+export const ChevronIcon = typeof primitives.IconChevronDownOutlineRegular === 'function' ? primitives.IconChevronDownOutlineRegular : null
 
 /** 宿主 Toast 原语（顶中浮层，holdMs + onDone）；缺失时 ToastHost 用内置简易浮层兜底。 */
 const ToastImpl = typeof primitives.Toast === 'function' ? primitives.Toast : null

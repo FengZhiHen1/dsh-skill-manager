@@ -25,11 +25,11 @@
     "check": "node build-client.mjs --check && node check-syntax.mjs && npm run layering && node --test test/*.test.mjs"
   },
   "dependencies": {
-    "schemastery": "^3.18.0",
     "zod": "^3.25.0"
   },
   "peerDependencies": {
-    "@deepseek-ai/dsh-storage-domain": "*"
+    "@deepseek-ai/dsh-storage-domain": "^0.1.7-rc.2",
+    "@deepseek-ai/schemastery": "^3.18.4"
   },
   "dsh": {
     "bundle": {
@@ -38,15 +38,17 @@
     "client": {
       "platform": "web",
       "inject": [
-        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-connection",
         "@deepseek-ai/dsh-client-ui-slots",
         "@deepseek-ai/dsh-client-ui-primitives",
-        "@deepseek-ai/dsh-client-connection"
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-plugin-manager"
       ]
     }
   },
   "devDependencies": {
-    "@deepseek-ai/dsh-storage-domain": "0.1.2-rc.1",
+    "@deepseek-ai/dsh-storage-domain": "^0.1.7-rc.2",
+    "@deepseek-ai/schemastery": "^3.18.4",
     "esbuild": "^0.28.2"
   }
 }

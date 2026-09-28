@@ -7,6 +7,8 @@ import { mkdir, symlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import { buildApi, createDispatch, createQueue, toRpcFailure } from '../src/core/service.js'
 import { configSchema } from '../src/core/model/intent.js'
+import { readConfig } from '../src/adapter/settings.js'
+import z from '@deepseek-ai/schemastery'
 import { SkillManagerError } from '../src/core/base/errors.js'
 import { isLink } from '../src/core/mount/materialize.js'
 import { mkTmp, cleanup, writeSkill, fakeStore, fakeScope, skillRecord, assertRejectsCode } from './helpers.mjs'
@@ -300,9 +302,11 @@ test('sync：配置意图物化到全局根与工作区；配置变更后对账�
 })
 
 // 配置默认种子的端到端语义（DSR-011「修订（2026-09-09）」）：scope 值一律经
-// configSchema() 求值 —— 与 Host settings 解析面同形（默认值 → base → 用户），
+// configSchema 求值 —— 与 Host 配置面同形（默认值 → base → 用户），
 // 默认种子本身因此成为被断言的对象，而不是测试夹具里手写的 groups。
-const resolveConfig = configSchema() // schemastery 模式：schema 可调用，调用即求值并回填默认
+// 0.1.7：schema 可调用，调用即求值并回填默认；volatile 字段产出引用对象，
+// 故再经 readConfig 解包——这正是生产 apply→core 的那条读路径（DSR-025）。
+const resolveConfig = (value) => readConfig(configSchema(z)(value))
 
 test('默认种子空挂载：未显式配 groups ⇒ sync 零期望 ⇒ 旧种子遗留的全局链接按孤儿摘除；显式勾选可恢复', async () => {
   const root = await mkTmp()

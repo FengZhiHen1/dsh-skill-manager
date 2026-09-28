@@ -84,9 +84,9 @@ export function piState(config, probedRoot) {const enabled = config?.[PI_FIELD] 
 
 /**
  * 每请求会话：按当下配置解析 skills 目录根，组装只读 bundle 快照。
- * 无台账：期望集由 settings 意图与工作区投影现算，行状态由文件系统走查现算。
+ * 无台账：期望集由配置意图与工作区投影现算，行状态由文件系统走查现算。
  * globalRootPath 由 Host 注入，本层不自行推导 DSH 根。
- * @param {() => SettingsScope} scopeGetter - settings 句柄取器，命名空间注册见 adapter/settings.js
+ * @param {() => { get: () => object }} scopeGetter - 配置只读门面取器（adapter 由 volatile 引用现读组装；DSR-025）
  */
 export function createSession(scopeGetter, listWorkspaces, getStore, backupsRoot, globalRootPath, shared, libraryRoot = null, ctxOpts = {}) {
   const root = requireDir(scopeGetter())

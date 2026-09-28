@@ -1,4 +1,4 @@
-// 配置命名空间与目录门禁（需求.md R-22；插件运行时.md「配置即意图」）。
+// 配置命名空间与目录门禁（需求.md R-22；插件运行时.md「配置即意图」；DSR-025）。
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -6,45 +6,56 @@ import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   CONFIG_NS, SKILLS_DIR_FIELD, PI_FIELD, DEFAULT_GROUP, configSchema, requireDir, probePiAgentDir,
+  validateConfigIntent,
 } from '../src/core/model/intent.js'
-import { registerConfig } from '../src/adapter/settings.js'
+import { Config, readConfig, configReader } from '../src/adapter/settings.js'
 import { atomicSwapDir, safePath, existsDir, writeFileAtomic } from '../src/core/base/fsys.js'
 import { mkTmp, cleanup, assertRejectsCode, assertThrowsCode } from './helpers.mjs'
 
-test('registerConfig：命名空间与 schema 正确（意图字段齐备）', () => {
+const isRef = (v) => typeof v === 'object' && v !== null && typeof v.get === 'function'
+
+test('Config：命名空间、字段齐备、全量 volatile、默认种子与 hosts 回落（0.1.7 配置模型）', () => {
   assert.equal(CONFIG_NS, 'skill-manager')
   assert.equal(SKILLS_DIR_FIELD, 'skillsDir')
-  const schema = configSchema()
-  assert.ok(schema)
-  let captured = null
-  const fakeCtx = {
-    settings: {
-      register(ns, s, options) {
-        captured = { ns, schema: s, options }
-        return { get: () => ({}) }
-      },
-    },
+  // settings 面按 `'toJSON' in schema` 认这份 schema，且 loader 读的正是 plugin.Config。
+  assert.equal(typeof Config.toJSON, 'function')
+  // 摆放合法性：volatile 字段必须落在固定对象路径上（不允许 volatile 套 dict/union 子项），
+  // 故这里必须真的**调用**一次 schema —— 摆放违规是在 resolve 期抛，不是构造期。
+  const resolved = Config({})
+  // 全量 volatile：settings 的 volatileForm 只保留 volatile 子树，漏标 = 该字段既不上设置页
+  // 也不可写（静默功能缺失），故逐字段锁住「是引用对象而非普通值」。
+  for (const key of [SKILLS_DIR_FIELD, PI_FIELD, 'intentMigrated', 'groups', 'skills']) {
+    assert.ok(isRef(resolved[key]), `${key} 必须是 volatile 引用（0.1.7 只允许写 volatile 字段）`)
   }
-  registerConfig(fakeCtx)
-  assert.ok(captured)
-  assert.equal(typeof captured.options.validate, 'function')
-  // 默认种子：空挂载——默认组不自动挂 DSH 全局（2026-09-09 口径，全局必须显式勾选）
-  const resolved = schema({})
-  assert.equal(resolved[SKILLS_DIR_FIELD], '')
-  assert.equal(resolved[PI_FIELD], false)
-  assert.deepEqual(resolved.groups[DEFAULT_GROUP], { mounts: [] })
+  // readConfig 解包引用 → 纯值；默认种子 = 空挂载（默认组不自动挂 DSH 全局，必须显式勾选）
+  const plain = readConfig(resolved)
+  assert.equal(plain[SKILLS_DIR_FIELD], '')
+  assert.equal(plain[PI_FIELD], false)
+  assert.equal(plain.intentMigrated, false)
+  assert.deepEqual(plain.groups[DEFAULT_GROUP], { mounts: [] })
+  assert.deepEqual(plain.skills, {})
   // hosts 缺省回落 ['dsh']：显式写出的无 hosts 规则天然仅 DSH（向后兼容）
-  const withGlobal = schema({ groups: { 默认: { mounts: [{ scope: 'global', project: null }] } } })
+  const withGlobal = readConfig(Config({ groups: { 默认: { mounts: [{ scope: 'global', project: null }] } } }))
   assert.deepEqual(withGlobal.groups[DEFAULT_GROUP].mounts[0].hosts, ['dsh'])
-  assert.deepEqual(resolved.skills, {})
-  assert.equal(resolved.intentMigrated, false)
+  // 深嵌套意图（组内 mounts / 技能意图）也要解包到位
+  const nested = readConfig(Config({ skillsDir: 'E:/x', pi: true, skills: { pdf: { disabled: true } } }))
+  assert.deepEqual(nested.skills, { pdf: { disabled: true, group: DEFAULT_GROUP } })
+  // 每次调用都是新 schema：命名空间常量是唯一共享标识
+  assert.notEqual(configSchema, undefined)
 })
 
-test('registerConfig.validate：形式校验（绝对路径/组名/意图形状）；引用完整性放行', () => {
-  let captured = null
-  const fakeCtx = { settings: { register(ns, s, options) { captured = options } } }
-  registerConfig(fakeCtx)
-  const validate = captured.validate
+test('readConfig/configReader：容忍普通值（单测与手写行 config 的形态），非对象回落空对象', () => {
+  // 生产是 volatile 引用，测试与手写行 config 是普通对象——两者必须同形可读。
+  assert.deepEqual(readConfig({ skillsDir: 'E:/plain', pi: true, groups: {} }), { skillsDir: 'E:/plain', pi: true, groups: {} })
+  assert.deepEqual(readConfig(null), {})
+  assert.deepEqual(readConfig(undefined), {})
+  assert.deepEqual(readConfig('x'), {})
+  assert.deepEqual(readConfig([1, 2]), {})
+  assert.deepEqual(configReader({ skillsDir: 'E:/r' }).get(), { skillsDir: 'E:/r' })
+})
+
+test('validateConfigIntent：形式校验（绝对路径/组名/空 hosts/意图形状）；引用完整性放行', () => {
+  const validate = validateConfigIntent
   // skillsDir
   assert.doesNotThrow(() => validate({ skillsDir: '' }))
   assert.throws(() => validate({ skillsDir: 'relative/path' }), /绝对路径/)
@@ -59,7 +70,7 @@ test('registerConfig.validate：形式校验（绝对路径/组名/意图形状�
   assert.doesNotThrow(() => validate({ skillsDir: 'E:/s', groups: { 默认: { mounts: [{ scope: 'global', project: null }] } } }))
   assert.throws(() => validate({ skillsDir: 'E:/s', groups: { 全部: { mounts: [] } } }), /保留字/)
   assert.throws(() => validate({ skillsDir: 'E:/s', groups: { 'a/b': { mounts: [] } } }), /不能包含/)
-  // 引用完整性不在此拒绝（settings 写是字段级原子，跨字段中间态必须放行）
+  // 引用完整性不在此拒绝（提交是字段级原子，跨字段中间态必须放行）
   assert.doesNotThrow(() => validate({
     skillsDir: 'E:/s',
     groups: {},
@@ -67,6 +78,19 @@ test('registerConfig.validate：形式校验（绝对路径/组名/意图形状�
   }))
   // 意图形状
   assert.throws(() => validate({ skillsDir: 'E:/s', skills: { pdf: { group: 42 } } }), /技能意图格式错误/)
+})
+
+test('validateConfigIntent：容忍未求值的 !!js 表达式（校验挂在 internal/config 上时值是原始 config）', () => {
+  // loader 的 interpolate 在本瀑布之后才求值，故挂点拿到的是表达式占位对象；
+  // 对它做结构判定必然误判——旧代 validate 作用在已解析值上，故这是本次迁移引入的差异。
+  const expr = (code) => ({ __jsExpr: code })
+  assert.doesNotThrow(() => validateConfigIntent({ skillsDir: expr("ctx.dshHomePath('skills')") }))
+  assert.doesNotThrow(() => validateConfigIntent({ skillsDir: 'E:/s', groups: expr('someExpr') }))
+  assert.doesNotThrow(() => validateConfigIntent({ skillsDir: 'E:/s', skills: expr('someExpr') }))
+  assert.doesNotThrow(() => validateConfigIntent({ skillsDir: 'E:/s', skills: { pdf: expr('someExpr') } }))
+  // 但具体值仍照拦：表达式与合法/非法具体值混排时，非法的那条照样抛
+  assert.throws(() => validateConfigIntent({ skillsDir: expr('x'), groups: { 全部: { mounts: [] } } }), /保留字/)
+  assert.throws(() => validateConfigIntent({ skillsDir: expr('x'), skills: { pdf: { group: 42 } } }), /技能意图格式错误/)
 })
 
 test('requireDir：未配置抛 skilldir-unconfigured', () => {

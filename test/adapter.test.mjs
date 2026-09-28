@@ -1,5 +1,11 @@
-// adapter 装配（插件运行时.md）：apply 的硬时序（迁移先于 openStore）、storage
-// 域降级、watch 防抖对账、dispose 清理。fake ctx 直调 apply，不依赖真实 Host。
+// adapter 装配（插件运行时.md；DSR-025）：apply 的硬时序（等 fiber 结算 → 迁移 → openStore）、
+// storage 域降级、loader/volatile-update 防抖对账、internal/config 校验挂点、dispose 清理。
+// fake ctx 直调 apply，不依赖真实 Host。
+//
+// 0.1.7 配置模型：配置真相在 apply 的第二个参数 `config`（即时字段是 volatile 引用，
+// 现读 ref.get()）。旧代的 `ctx.settings.register()` 返回 SettingsScope 与 `scope.watch`
+// 在新树零命中，故假 Host 只提供 `settings.configure`（页面策略）与 `settings.update`（写面）。
+// 测试直接传**普通对象** config——生产是引用对象，readConfig 的鸭子类型让两者同形可读。
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -8,23 +14,24 @@ import plugin from '../src/adapter/index.js'
 import { isLink } from '../src/core/mount/materialize.js'
 import { mkTmp, cleanup, writeSkill, fakeDomain } from './helpers.mjs'
 
+/** 可控结算的 fiber 闸：等它放行后才推进「迁移 → openStore」链。 */
+function createGate() {
+  let open
+  const promise = new Promise((resolve) => { open = resolve })
+  return { promise, open: () => open() }
+}
+
 /**
  * 假 Host ctx：settings/storage/connection/workspaceRegistry/dshHomePath/effect 全记录。
- * 域句柄带 close 追踪；watch 回调捕获供手动触发。
+ * 域句柄带 close 追踪；volatile 回调捕获供手动触发；fiber 结算由闸控制。
  */
 function fakeCtx(home, { config, openImpl } = {}) {
   const calls = []
-  const watchers = new Set()
+  const volatileListeners = new Set()
+  const configListeners = new Set()
   const disposers = []
   const domains = []
-  const scope = {
-    get: () => config,
-    update: async (patch) => Object.assign(config, patch),
-    watch: (fn) => {
-      watchers.add(fn)
-      return () => watchers.delete(fn)
-    },
-  }
+  const gate = createGate()
   const defaultOpen = async (spec) => {
     const domain = fakeDomain()
     domain.closed = false
@@ -39,16 +46,42 @@ function fakeCtx(home, { config, openImpl } = {}) {
   }
   const ctx = {
     logger: { warn: (msg) => calls.push(['warn', String(msg)]) },
-    settings: { register: () => scope },
+    // 0.1.7：settings 只提供「本实例页面策略」与写面；配置真相在 config 参数里。
+    settings: {
+      configure: (presentation, owner) => {
+        calls.push(['configure', presentation.auto, owner === ctx.fiber])
+        return () => calls.push(['configure-off'])
+      },
+      update: async (ns, patch) => { calls.push(['settings-update', ns, patch]) },
+    },
+    fiber: { await: () => gate.promise },
+    on: (event, fn) => {
+      const set = event === 'loader/volatile-update' ? volatileListeners : configListeners
+      set.add(fn)
+      return () => set.delete(fn)
+    },
     storage: { domain: { open: openImpl ?? defaultOpen } },
     workspaceRegistry: { list: () => [] },
     dshHomePath: (...parts) => join(home, ...parts),
     connection: { rpc: { handle: (channel, handler) => { ctx.handler = handler; calls.push(['rpc', channel]) } } },
     effect: (fn) => disposers.push(fn()),
-    scope,
-    watchers,
+    volatileListeners,
+    configListeners,
     domains,
     calls,
+    /** 放行 fiber 结算（生产里 = apply 返回后 fiber 转 ACTIVE）。 */
+    openFiber: () => gate.open(),
+    /** 以本 fiber 为 this 触发 internal/config 瀑布（生产里由 loader/config-editor 触发）。 */
+    fireConfig(candidate, { asSelf = true } = {}) {
+      let value = candidate
+      const next = () => value
+      for (const fn of [...ctx.configListeners]) fn.call(asSelf ? ctx.fiber : { alien: true }, candidate, next)
+      return value
+    },
+    /** 触发 loader/volatile-update（只派发给所属 fiber）。 */
+    fireVolatile() {
+      for (const fn of [...ctx.volatileListeners]) fn([['skillsDir']])
+    },
     /** 推进全部 disposer（模拟 fiber 销毁）。 */
     async dispose() {
       for (const d of disposers) await (typeof d === 'function' ? d() : d)
@@ -57,33 +90,43 @@ function fakeCtx(home, { config, openImpl } = {}) {
   return ctx
 }
 
-test('apply 装配：迁移先于 openStore；RPC 通道注册；dispose 关域撤 watch 清 timer', async (t) => {
+const CONFIG = (root, over = {}) => ({
+  skillsDir: root,
+  pi: false,
+  intentMigrated: true,
+  groups: { 默认: { mounts: [{ scope: 'global', project: null }] } },
+  skills: {},
+  ...over,
+})
+
+test('apply 装配：fiber 结算 → 迁移 → openStore；页面策略关自动表单；RPC 注册；dispose 全清', async (t) => {
   const home = await mkTmp('dsh-sm-home-')
   const root = await mkTmp()
   t.after(() => cleanup(home))
   t.after(() => cleanup(root))
   await writeSkill(root, 'pdf')
-  const ctx = fakeCtx(home, {
-    config: {
-      skillsDir: root,
-      intentMigrated: false,
-      groups: { 默认: { mounts: [{ scope: 'global', project: null }] } },
-      skills: {},
-    },
-  })
-  plugin.apply(ctx)
-  // 等 storeReady 链结算（迁移 → openStore）
+  const ctx = fakeCtx(home, { config: CONFIG(root, { intentMigrated: false }) })
+  plugin.apply(ctx, CONFIG(root, { intentMigrated: false }))
+
+  // 迁移与 openStore 都挂在 fiber 结算之后：闸未开时一个域都不许开
+  // （写面 ctx.settings.update 要求该 ns 已出现在 describe() 里，而 describe 只收 ACTIVE 的行）。
+  await new Promise((r) => setTimeout(r, 30))
+  assert.deepEqual(ctx.calls.filter(([k]) => k === 'open'), [], 'fiber 未结算前不得开域')
+
+  ctx.openFiber()
   await new Promise((r) => setTimeout(r, 50))
   assert.deepEqual(ctx.calls.filter(([k]) => k === 'open'), [['open', 7], ['open', 3]]) // legacy 七表先于新 spec（skills/check_cache/managed_links）
   assert.deepEqual(ctx.calls.filter(([k]) => k === 'rpc'), [['rpc', '/skill-manager']])
-  assert.equal(ctx.watchers.size, 1)
+  // 页面策略：auto:false，且 owner 必须是本 fiber（否则策略挂错实例）
+  assert.deepEqual(ctx.calls.filter(([k]) => k === 'configure'), [['configure', false, true]])
+  assert.equal(ctx.volatileListeners.size, 1)
 
-  // watch 触发后立即 dispose：防抖窗口（200ms）内销毁 → 对账不得执行（fs 证据）
-  for (const fn of [...ctx.watchers]) fn()
+  // volatile 触发后立即 dispose：防抖窗口（200ms）内销毁 → 对账不得执行（fs 证据）
+  ctx.fireVolatile()
   await ctx.dispose()
   assert.equal(ctx.domains.length, 2)
   assert.ok(ctx.domains.every((d) => d.closed === true)) // 两域都随 fiber 关闭
-  assert.equal(ctx.watchers.size, 0)
+  assert.equal(ctx.volatileListeners.size, 0)
   await new Promise((r) => setTimeout(r, 400))
   assert.equal(await isLink(join(home, 'skills', 'pdf')), false) // dispose 后无对账发生
 })
@@ -93,11 +136,9 @@ test('apply 降级：storage 域打开失败 → 管理 API 回 internal，插�
   const root = await mkTmp()
   t.after(() => cleanup(home))
   t.after(() => cleanup(root))
-  const ctx = fakeCtx(home, {
-    config: { skillsDir: root, intentMigrated: true, groups: {}, skills: {} },
-    openImpl: async () => { throw new Error('already-open') },
-  })
-  plugin.apply(ctx)
+  const ctx = fakeCtx(home, { config: CONFIG(root), openImpl: async () => { throw new Error('already-open') } })
+  plugin.apply(ctx, CONFIG(root))
+  ctx.openFiber()
   await new Promise((r) => setTimeout(r, 50))
   const result = await ctx.handler('overview', {})
   assert.equal(result.ok, false)
@@ -107,25 +148,51 @@ test('apply 降级：storage 域打开失败 → 管理 API 回 internal，插�
   await ctx.dispose()
 })
 
-test('apply 对账器：watch 触发经 200ms 防抖后 sync 收敛（真实物化到全局根）', async (t) => {
+test('apply 对账器：loader/volatile-update 经 200ms 防抖后 sync 收敛（真实物化到全局根）', async (t) => {
   const home = await mkTmp('dsh-sm-home-')
   const root = await mkTmp()
   t.after(() => cleanup(home))
   t.after(() => cleanup(root))
   await writeSkill(root, 'pdf')
-  const ctx = fakeCtx(home, {
-    config: {
-      skillsDir: root,
-      intentMigrated: true,
-      groups: { 默认: { mounts: [{ scope: 'global', project: null }] } },
-      skills: {},
-    },
-  })
-  plugin.apply(ctx)
+  const ctx = fakeCtx(home, { config: CONFIG(root) })
+  plugin.apply(ctx, CONFIG(root))
+  ctx.openFiber()
   await new Promise((r) => setTimeout(r, 50)) // 等 openStore 就绪
   assert.equal(await isLink(join(home, 'skills', 'pdf')), false)
-  for (const fn of [...ctx.watchers]) fn() // 模拟 settings 变更
+  ctx.fireVolatile() // 模拟设置页写入提交进运行中 fiber
   await new Promise((r) => setTimeout(r, 400)) // 200ms 防抖 + 对账执行
   assert.equal(await isLink(join(home, 'skills', 'pdf')), true)
   await ctx.dispose()
+})
+
+test('internal/config 校验挂点：本 fiber 的非法候选抛错（拒绝写入），合法候选放行，他 fiber 不拦', async (t) => {
+  const home = await mkTmp('dsh-sm-home-')
+  const root = await mkTmp()
+  t.after(() => cleanup(home))
+  t.after(() => cleanup(root))
+  const ctx = fakeCtx(home, { config: CONFIG(root) })
+  plugin.apply(ctx, CONFIG(root))
+  ctx.openFiber()
+  await new Promise((r) => setTimeout(r, 30))
+
+  // 合法候选放行，且返回值即候选本身（本层只校验、不改编排）
+  const ok = CONFIG(root, { skillsDir: 'E:/Project/Skills' })
+  assert.equal(ctx.fireConfig(ok), ok)
+  // 非法候选：抛错 → loader 侧的写入被拒（config-editor 在落盘前走这条瀑布）
+  assert.throws(() => ctx.fireConfig(CONFIG(root, { skillsDir: 'relative/path' })), /绝对路径/)
+  assert.throws(() => ctx.fireConfig(CONFIG(root, { groups: { 办公: { mounts: [{ scope: 'global', hosts: [] }] } } })), /宿主/)
+  // 别的 fiber 解析自己的配置：不属本行，一律放行
+  const alien = { skillsDir: 'relative/path' }
+  assert.equal(ctx.fireConfig(alien, { asSelf: false }), alien)
+  await ctx.dispose()
+})
+
+test('apply 挂载期校验：apply 收到的配置非法即在挂载期抛错（行挂载失败，不带进第一次调用）', async () => {
+  const home = await mkTmp('dsh-sm-home-')
+  try {
+    const ctx = fakeCtx(home, { config: { skillsDir: 'relative/path' } })
+    assert.throws(() => plugin.apply(ctx, { skillsDir: 'relative/path' }), /绝对路径/)
+  } finally {
+    await cleanup(home)
+  }
 })

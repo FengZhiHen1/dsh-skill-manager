@@ -1,15 +1,20 @@
 // intent — 配置即意图领域模型：settings 段 schema、形式校验与组纯推导。
 //
 // 边界：settings 命名空间注册与 @deepseek-ai 平台 import 在 adapter 层。
-// 参考：插件运行时.md「配置即意图」；DSR-015。
+//       故 schemastery 实例由调用方注入（`configSchema(z)`），本层不 import 它——
+//       配置 schema 需要 `.volatile()`，而该扩展只存在于 `@deepseek-ai/schemastery`，
+//       按分层门禁 R1 core 不得 import `@deepseek-ai/*`。同 store.js 的 DI 形态。
+// 参考：插件运行时.md「配置即意图」；DSR-015、DSR-025。
 
 import { statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
-import z from 'schemastery'
 import { SkillManagerError } from '../base/errors.js'
 
-/** 插件配置的 settings 命名空间名。 */
+/** 插件配置的 settings 命名空间名。
+ * ⚠ 0.1.7 起命名空间 = 本行在 profile 中的 loader entry id（ds-harness 不再有插件自选名）。
+ * 故本常量必须与 cordis.patch.yml 里 insert 行的 `id:` 逐字相同；改行 id 即换命名空间，
+ * 会把设置页的配置卡与本命名空间解绑。 */
 export const CONFIG_NS = 'skill-manager'
 /** 本地 skills 目录的配置键名；空串 = 未配置。 */
 export const SKILLS_DIR_FIELD = 'skillsDir'
@@ -41,7 +46,18 @@ const RESERVED_GROUPS = new Set(['默认', '全部'])
 const BAD_GROUP_CHARS = /[/\\:*?"<>|\x00-\x1f]/
 
 /**
- * 组名校验（形式约束；settings validate 与客户端建组共用同一规则）。
+ * 值是否为尚未求值的 `!!js` 表达式（loader 的 `interpolate` 在 internal/config
+ * waterfall **之后**才求值，故挂在 waterfall 上的校验拿到的是原始 config，表达式此时
+ * 仍是一层占位对象）。对这种值做结构判定必然误判，一律跳过：表达式只可能来自作者手写的
+ * patch 文件（可信级高于表单写入），而表单写入永远是具体 JSON；真正的越界由挂载期的
+ * assertConfigValid 作用于**已求值**配置时拦下。
+ * 判据与平台 `isJsExpr` 一致（`value instanceof Object && '__jsExpr' in value`），
+ * 此处鸭子类型实现而非 import：core 层不得依赖 DSH（分层门禁 R1）。
+ */
+const isOpaque = (value) => typeof value === 'object' && value !== null && '__jsExpr' in value
+
+/**
+ * 组名校验（形式约束；Host 校验与客户端建组共用同一规则）。
  * @throws {SkillManagerError} bad-group-name — 空/超长/保留字/含非法字符
  */
 export function validateGroupName(name) {
@@ -52,23 +68,28 @@ export function validateGroupName(name) {
   if (BAD_GROUP_CHARS.test(name)) throw new SkillManagerError('bad-group-name', '组名不能包含 / \\ : * ? " < > | 与控制字符')
 }
 
-const mountSchema = () => z.object({
+const mountSchema = (z) => z.object({
   scope: z.union([z.const('global'), z.const('project')]),
   project: z.union([z.string(), z.const(null)]).default(null),
   hosts: z.array(z.union([z.const('dsh'), z.const('pi')])).default(DEFAULT_HOSTS),
 })
 
-const groupSchema = () => z.object({
-  mounts: z.array(mountSchema()).default([]),
+const groupSchema = (z) => z.object({
+  mounts: z.array(mountSchema(z)).default([]),
 })
 
-const skillIntentSchema = () => z.object({
+const skillIntentSchema = (z) => z.object({
   disabled: z.boolean().default(false),
   group: z.string().default(DEFAULT_GROUP),
 })
 
 /**
- * 配置 schema：全部用户意图字段，落在 settings.yaml 的 skill-manager 段。
+ * 配置 schema 工厂：全部用户意图字段，即本插件 loader 行的 Cordis `Config`。
+ * 每个字段都带 `.volatile()`——0.1.7 起只有 volatile 字段可写、且写入后经
+ * 「替换 volatile 引用快照」提交进**运行中**的 fiber（不重挂载）；非 volatile
+ * 字段既不上设置页、写它直接抛 `Config field "x" is not volatile`。
+ * 本插件全部字段都是运行时可变意图，故全量 volatile。
+ *
  * skillsDir      本地 skills 目录绝对路径；空串 = 未配置。
  * pi             pi 接管开关；true 才按默认路径探测（PI_CODING_AGENT_DIR → <home>/.pi/agent）。
  * groups         组集合 { 组名: { mounts: [{ scope, project, hosts }] } }；hosts 缺省 = ['dsh']。
@@ -77,29 +98,40 @@ const skillIntentSchema = () => z.object({
  * 默认种子 = 空挂载（「默认」组不自动挂 DSH 全局；全局作用域影响所有会话，必须显式勾选）。
  * 修订（2026-09-09）：原种子为「默认」组挂全局——隐式挂全局让新装/未显式配过 groups 的
  * HOME 一装就把全库对外生效，且翻转后旧链接按孤儿摘除（文件不动，重勾即恢复）。
+ *
+ * @param {object} z schemastery 实例（须为 `@deepseek-ai/schemastery`：`.volatile()` 是该分支的扩展）
  */
-export const configSchema = () => z.object({
-  [SKILLS_DIR_FIELD]: z.string().default(''),
-  [PI_FIELD]: z.boolean().default(false),
-  intentMigrated: z.boolean().default(false),
-  groups: z.dict(groupSchema()).default({ [DEFAULT_GROUP]: { mounts: [] } }),
-  skills: z.dict(skillIntentSchema()).default({}),
+export const configSchema = (z) => z.object({
+  [SKILLS_DIR_FIELD]: z.string().default('').volatile(),
+  [PI_FIELD]: z.boolean().default(false).volatile(),
+  intentMigrated: z.boolean().default(false).volatile(),
+  groups: z.dict(groupSchema(z)).default({ [DEFAULT_GROUP]: { mounts: [] } }).volatile(),
+  skills: z.dict(skillIntentSchema(z)).default({}).volatile(),
 })
 
 /**
- * settings 段形式校验：路径绝对性、组名合法性、意图形状。
+ * 配置形式校验：路径绝对性、组名合法性、意图形状。
  * skillsDir 为空直接跳过——未配置时不拦编辑。
  * 引用完整性（组是否存在、工作区是否存在）由对账层容忍回落，写路径不拒绝。
- * settings 写是字段级原子，跨字段编辑中间态必须放行。
+ * 跨字段编辑中间态必须放行（提交是字段级原子，不比整段快照）。
+ *
+ * ⚠ 0.1.7 挂点变更：旧代由 settings 服务的 `validate` 选项在写路径（**已解析**值）调用；该选项
+ * 已随 `SettingsForms` 取代旧注册面而消失。现行把点有两处：
+ *   ① adapter 挂载期对 **apply 收到的已解析配置** 调 assertConfigValid（严格、完整）；
+ *   ② adapter 挂 `internal/config` waterfall 拦设置页写入的候选——那里的值是**原始** config
+ *      （`!!js` 表达式尚未求值），故还要容忍 isOpaque，见该 helper 的说明。
  * @throws {Error} 非绝对路径 / 非法组名（validateGroupName 转抛）/ 意图形状错误
- *   ——settings validate 契约以消息面呈现，不要求稳定码
+ *   ——以消息面呈现，不要求稳定码
  */
 export function validateConfigIntent(value) {
   const dir = value?.[SKILLS_DIR_FIELD]
   if (typeof dir === 'string' && dir !== '' && !isAbsolute(dir)) throw new Error('本地 skill 目录必须是绝对路径')
+  // 整段是表达式时不判结构（见 isOpaque）。
+  const groups = isOpaque(value?.groups) ? {} : value?.groups ?? {}
+  const skills = isOpaque(value?.skills) ? {} : value?.skills ?? {}
   // 「默认」是虚拟组的合法 groups 键，仅作挂载配置载体。
   // 保留字规则约束命名组创建/改名路径；客户端预检仍走 validateGroupName 全量。
-  for (const [name, g] of Object.entries(value?.groups ?? {})) {
+  for (const [name, g] of Object.entries(groups)) {
     if (name !== DEFAULT_GROUP) validateGroupName(name)
     for (const m of Array.isArray(g?.mounts) ? g.mounts : []) {
       // 空 hosts = 死规则（勾选了却不挂任何宿主），写路径拦截；hosts 缺省由 schema 回落 ['dsh']
@@ -108,7 +140,8 @@ export function validateConfigIntent(value) {
       }
     }
   }
-  for (const [skillDir, intent] of Object.entries(value?.skills ?? {})) {
+  for (const [skillDir, intent] of Object.entries(skills)) {
+    if (isOpaque(intent)) continue
     if (!intent || typeof intent !== 'object' || Array.isArray(intent)) {
       throw new Error(`技能意图格式错误：${skillDir}`)
     }
@@ -119,6 +152,7 @@ export function validateConfigIntent(value) {
 /**
  * 解析当前配置的 skills 目录并要求其存在，返回解析后的绝对路径。
  * 每次调用现读配置，目录切换保存后即刻生效。
+ * @param {{ get: () => object }} scope 配置只读门面（adapter 由 volatile 引用现读组装）
  * @throws {SkillManagerError} skilldir-unconfigured — 未配置或空串
  * @throws {SkillManagerError} skilldir-missing — 已配置但目录不存在 / 非目录 / 不可访问
  */

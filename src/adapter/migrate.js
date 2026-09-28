@@ -1,17 +1,23 @@
-// migrate — 旧 storage 意图一次性迁移：读存量 → 投影进 settings → 标记完成。
+// migrate — 旧 storage 意图一次性迁移：读存量 → 投影进配置行 → 标记完成。
 //
 // 边界：intentMigrated 已为 true 即整体跳过，重复启动幂等。
-// 时序：必须先于 openStore——新旧 spec 同名，未声明的旧表由新 spec 首写抹除。
-// 参考：目录配置与状态存储.md「旧意图迁移」。
+// 时序：必须先于 openStore——新旧 spec 同名，未声明的旧表由新 spec 首写抹除；
+//       且调用方须等本 fiber ACTIVE（写面 ctx.settings.update 要求该 ns 出现在 describe 里）。
+// 参考：目录配置与状态存储.md「旧意图迁移」；DSR-011、DSR-025。
 
 import { legacySkillManagerSpec } from './storage.js'
-import { DEFAULT_GROUP } from '../core/model/intent.js'
+import { CONFIG_NS, DEFAULT_GROUP } from '../core/model/intent.js'
 
 /**
- * 一次性迁移旧意图进 settings。
+ * 一次性迁移旧意图进配置行。
  * self 来源记录不进意图：本地 skill 无版本管理，也不登记。
- * @param {object} ctx Host 上下文，须注入 storage
- * @param {import('@deepseek-ai/dsh-settings').SettingsScope} scope 已注册的配置 scope
+ *
+ * 写面（0.1.7）：旧 `scope.update(patch)` 已随 SettingsScope 消失，改为
+ * `ctx.settings.update(ns, patch)`——它把补丁合并进本行在 profile `cordis.patch.yml` 里的
+ * `config`，再经普通 Loader 协调路径应用（settings/src/index.ts:347-350）。只有 volatile
+ * 路径可写（否则抛 `Config field "x" is not volatile`），本 schema 全字段 volatile。
+ * @param {object} ctx Host 上下文，须注入 storage 与 settings
+ * @param {{ get: () => object }} scope 配置只读门面（adapter 的 volatile 现读）
  * @param {{ warn?: Function }} [logger] 可选日志器，旧域打不开时只告警不外抛
  * @returns {Promise<boolean>} 是否执行了迁移写入
  */
@@ -49,7 +55,7 @@ export async function migrateLegacyIntent(ctx, scope, logger) {
     }
     const hasIntent = Object.keys(skills).length > 0 || Object.values(groups).some((g) => g.mounts.length > 0)
     if (!hasIntent) return false
-    await scope.update({
+    await ctx.settings.update(CONFIG_NS, {
       intentMigrated: true,
       ...(Object.keys(skills).length > 0 ? { skills } : {}),
       ...(Object.values(groups).some((g) => g.mounts.length > 0) ? { groups } : {}),

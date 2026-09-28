@@ -1,9 +1,13 @@
-// card — 插件配置卡片：设置 → 插件 → skill-manager 的 skillsDir 编辑与 pi 接管开关。
+// card — 配置页：Plugins 页 → 本行（skill-manager）的「配置」入口，编辑 skillsDir 与 pi 接管开关。
 //
-// 边界：只读写 ctx.settingsScope 的 skillsDir/pi 两个字段，不走 RPC；布局与原生 PluginCard 同构。
+// 边界：只读写 ctx.configForms 的 skillsDir/pi 两个字段，不走 RPC；外观与官方设置卡同构。
 // pi 目录不可配：固定按默认路径探测（PI_CODING_AGENT_DIR → ~/.pi/agent）。
-// 两字段统一草稿语义（与原生配置卡一致）：无修改时保存/放弃灰掉，一切修改点保存才生效。
-// 参考：插件运行时.md「插件配置卡片」；DSR-018、DSR-019。
+// 两字段统一草稿语义：无修改时保存/放弃灰掉，一切修改点保存才生效。
+//
+// 0.1.7 接线（client/15 §4）：本组件是 `plugins.row.config` 的注册组件，页面按 `view` 分发——
+// 'summary' 只要一句话（行缺描述时作其回落），'page' 才是表单主体；外壳因此从旧列表槽的
+// `<li>` 改为 `<div>`（页面把它渲染在自己的 <section> 里，行标题/图标/面包屑由页面自绘）。
+// 参考：插件运行时.md「插件配置页」；DSR-018、DSR-019、DSR-025。
 import { useState, useEffect } from 'react'
 import { T } from './theme.js'
 import { ChevronIcon, GhostBtn } from './ui.jsx'
@@ -11,13 +15,14 @@ import { buildRepairPrompt, RepairCopy, settingsWriteRepair } from './repair.jsx
 import { writeVerdict } from '../core/model/verdict.js'
 
 /**
- * skill-manager 配置卡片（settings.plugin.item keyed 槽位组件）。
+ * skill-manager 配置页（plugins.row.config keyed 槽位组件）。
  * @param {object} props
- * @param {object} props.scope skill-manager settings scope（直读直写）
+ * @param {'summary'|'page'} props.view 页面要的视图：`summary` = 一句话，`page` = 表单主体
+ * @param {object} props.scope 本行配置的共享 ConfigForm（直读直写；与旧 SettingsScope 同形）
  * @param {{ pickDirectory: () => Promise<string|null> }} props.uiWorkspace 原生目录选择服务面
  * @param {(field: string) => Promise<unknown>} props.readConfigField Host 权威读（settings.describe 的该字段值；读不到返回 undefined）
  */
-export function SkillManagerCard({ scope, uiWorkspace, readConfigField }) {
+export function SkillManagerCard({ view, scope, uiWorkspace, readConfigField }) {
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState('')
   const [touched, setTouched] = useState(false) // 用户是否编辑过草稿
@@ -169,9 +174,16 @@ export function SkillManagerCard({ scope, uiWorkspace, readConfigField }) {
     }
   }
 
-  // 结构：li > header（名称/描述/未保存标记/折叠箭头）+ 折叠 body（skillsDir 字段 + 接管宿主复选框 + footer：放弃/保存）。
+  // summary 视图：页面在行缺描述时拿它当一句话回落，只回文本，不渲表单外壳。
+  // 必须在全部 hook 之后返回（React 规则）。
+  if (view === 'summary') {
+    return <span>配置本地 skills 目录与 pi agent 接管（默认为空即未配置）</span>
+  }
+
+  // 结构：div（页面自有 <section> 内）> header（名称/描述/未保存标记/折叠箭头）
+  //   + 折叠 body（skillsDir 字段 + 接管宿主复选框 + footer：放弃/保存）。
   return (
-    <li style={{ listStyle: 'none', border: `1px solid ${T.borderL2}`, borderRadius: 12, background: open ? T.bgLayer2 : T.bgLayer3, transition: 'border-color .16s, background .16s' }}>
+    <div style={{ border: `1px solid ${T.borderL2}`, borderRadius: 12, background: open ? T.bgLayer2 : T.bgLayer3, transition: 'border-color .16s, background .16s' }}>
       <button
         type="button"
         aria-expanded={open}
@@ -280,6 +292,6 @@ export function SkillManagerCard({ scope, uiWorkspace, readConfigField }) {
           </div>
         </div>
       ) : null}
-    </li>
+    </div>
   )
 }

@@ -157,9 +157,11 @@ export function mountIssueRepair(issue, { name, targetLabel, path, root }) {
  * settings 写入裁定的本地 repair facts（该呈现面 Host 不参与，上下文在 Client 手里）。
  * verdict 取自 core/model/verdict.js 的 writeVerdict：not-applied = Host 权威值未变；
  * unknown = 读不到权威值（readError 带上失败原因，便于把"读不通"与"写没落定"分开排）。
- * 措辞只陈述裁定事实，不自称"Host validate 拒绝"——平台只回 ok=false，拒绝原因不经客户端透出
- * （DSH 把 seam 异常映射成 settings/rejected | settings/conflict，但 settings-scope 客户端语义是
- * 静默 recover），把"被拒"当成已知原因会把人引向错误方向（2026-09-14 实证：合法值被说成组名非法）。
+ * 措辞只陈述裁定事实，不自称"Host 校验拒绝"——共享表单只回 true/false，拒绝原因不经它透出
+ * （DSH 把 seam 异常映射成 settings/rejected | settings/conflict，但
+ * `ConfigForm.mutate/set/unset` 把它折成 false + 一次恢复读、原因丢弃；0.1.7 见
+ * `packages/client/ui-settings/src/client/config-form.ts`），把"被拒"当成已知原因会把人引向
+ * 错误方向（2026-09-14 实证：合法值被说成组名非法）。
  */
 export function settingsWriteRepair(verdict, field, attempted, authoritative, root, readError = null) {
   const notApplied = verdict === 'not-applied'
