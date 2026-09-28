@@ -60,13 +60,37 @@ export default {
       })
 
     // storage 域单实例打开。apply 同步返回、域异步就绪，打开失败只降级 API，不拖垮 Host。
-    // 关闭挂进 fiber dispose 的 async disposer：fiber 推进 DISPOSED 前会等它结算。
-    // 于是重载或依赖重启时旧域先关，新 apply 的 openStore 不会撞 already-open。
+    //
+    // ⚠ DSR-027（启动卡死，2026-09-28 实测）：disposer **绝不 await storeReady 这条链**。
+    // 该链的根是上面那笔 `ctx.settings.update`，而写的完成又要等本 fiber 卸载完成——
+    //   storeReady ← migratePromise ← settings.update → config-editor edit()
+    //     → reconcileProfilePatches()（app-boot/src/index.ts:289-291 对 root Include 行
+    //       entry.update()，并 await 旧 fiber 的 await()）⇒ 重组 ⇒ dispose 本 fiber
+    //     → fiber._unload() await 本 disposer ⇒ 回到 storeReady ⇒ **闭环**
+    // 闭环一旦形成：_unload() 永不结算 → fiber.inertia 永不清空 → tree.await() 的 while
+    // 永不出循环（vendor/loader/src/config/tree.ts:43-49）→ profile-boot 不返回、不打印 URL、
+    // 不落诊断、CPU 静置（与实测指纹一致）。故 disposer 只做「关掉此刻已开的域」这一件有界的事，
+    // 在途的 open 由 disposed 位自行收场——这是本类 disposer 的通用不变量：
+    // **不得 await 本 fiber 发起的在途链，否则等于让卸载依赖自己完成**。
     let store = null
     let storeError = null
+    let disposed = false
     const storeReady = migratePromise
-      .then(() => openStore(ctx))
-      .then((opened) => {
+      .then(() => {
+        // 已销毁则不再开域：否则会与下一次 apply 抢同名域（storage 单句柄），
+        // 或开出一个无人持有的句柄。
+        if (disposed) return null
+        return openStore(ctx)
+      })
+      .then(async (opened) => {
+        if (opened === null) return null
+        // 与上一处检查之间的窗口：open 在途期间被销毁 → 自持关闭，不泄漏句柄。
+        if (disposed) {
+          await opened.close().catch((error) => {
+            ctx.logger?.warn?.(`dsh-skill-manager: storage 域关闭失败：${error?.message ?? String(error)}`)
+          })
+          return null
+        }
         store = opened
         return opened
       })
@@ -79,13 +103,16 @@ export default {
       if (store === null) throw storeError ?? new Error('storage 域尚未就绪')
       return store
     }
-    ctx.effect(() => async () => {
-      const opened = await storeReady
-      try {
-        await opened?.close()
-      } catch (error) {
+    // 销毁：只关「此刻已开」的域并置位，**不等待** storeReady（见上方 DSR-027）。
+    // 于是重载或依赖重启时旧域先关，新 apply 的 openStore 不会撞 already-open。
+    ctx.effect(() => () => {
+      disposed = true
+      const opened = store
+      store = null
+      if (opened === null) return
+      return opened.close().catch((error) => {
         ctx.logger?.warn?.(`dsh-skill-manager: storage 域关闭失败：${error?.message ?? String(error)}`)
-      }
+      })
     }, 'dsh-skill-manager: close storage domain')
 
     // 设置页策略：本插件自绘配置页（浏览器半区注册进 Plugins 页的 plugins.row.config），

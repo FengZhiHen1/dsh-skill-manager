@@ -25,7 +25,7 @@ function createGate() {
  * 假 Host ctx：settings/storage/connection/workspaceRegistry/dshHomePath/effect 全记录。
  * 域句柄带 close 追踪；volatile 回调捕获供手动触发；fiber 结算由闸控制。
  */
-function fakeCtx(home, { config, openImpl } = {}) {
+function fakeCtx(home, { config, openImpl, updateImpl } = {}) {
   const calls = []
   const volatileListeners = new Set()
   const configListeners = new Set()
@@ -52,7 +52,11 @@ function fakeCtx(home, { config, openImpl } = {}) {
         calls.push(['configure', presentation.auto, owner === ctx.fiber])
         return () => calls.push(['configure-off'])
       },
-      update: async (ns, patch) => { calls.push(['settings-update', ns, patch]) },
+      update: async (ns, patch) => {
+        calls.push(['settings-update', ns, patch])
+        // updateImpl 可返回「永不结算」的 promise，复刻平台侧写路径被 profile 协调卡住的形状（DSR-027）。
+        return updateImpl === undefined ? undefined : updateImpl(ns, patch)
+      },
     },
     fiber: { await: () => gate.promise },
     on: (event, fn) => {
@@ -195,4 +199,114 @@ test('apply 挂载期校验：apply 收到的配置非法即在挂载期抛错�
   } finally {
     await cleanup(home)
   }
+})
+
+// DSR-027 回归：disposer 不得依赖「apply 期发起的在途配置写」。
+//
+// 生产环（实测卡死，2026-09-28）：
+//   boot → apply 发起 migratePromise → settings.update()
+//        → config-editor edit()（config-editor/src/index.ts:84）
+//        → reconcileProfilePatches()（app-boot/src/index.ts:289-291）
+//          对 root Include 行 entry.update() ⇒ 重组整棵树 ⇒ dispose 本插件 fiber
+//        → fiber._unload() 会 await 本插件异步 disposer（cordis fiber.ts:676-686）
+//        → disposer 等 storeReady，storeReady 的链根在那笔写上 ⇒ **闭环**
+//   ⇒ _unload() 永不结算 ⇒ fiber.inertia 永不清空
+//   ⇒ tree.await() 的 while 永不出循环（vendor/loader/src/config/tree.ts:43-49）
+//   ⇒ profile-boot 不返回、不打印 URL、不落诊断、CPU 静置。
+//
+// 本用例把「那笔写永不结算」灌进假 Host（updateImpl 返回 pending promise），
+// 断言 dispose 仍必须结算——即 disposer 不参与那条链。
+test('DSR-027：在途配置写不结算时 dispose 仍须结算（disposer 不得挂在写链上）', async (t) => {
+  const home = await mkTmp('dsh-sm-home-')
+  const root = await mkTmp()
+  t.after(() => cleanup(home))
+  t.after(() => cleanup(root))
+  await writeSkill(root, 'pdf')
+
+  // 迁移必然触发（intentMigrated:false 且有可迁移的非 self 记录）。
+  // 假域须真有一张非 self 的 skills 记录：迁移只在「有意图」时才写（migrate.js:56-57），
+  // 空域会提前 return false，那样本用例根本没测到那条链。
+  const baseOpen = async (spec) => {
+    const domain = fakeDomain()
+    if (spec?.tables?.mounts !== undefined) {
+      const record = (await import('./helpers.mjs')).skillRecord({ origin: 'github', repo: 'o/r' })
+      await domain.table('skills').put('grill-me', { ...record, disabled: false, group: '默认' })
+    }
+    return domain
+  }
+  const ctx = fakeCtx(home, {
+    config: CONFIG(root, { intentMigrated: false }),
+    openImpl: baseOpen,
+    updateImpl: () => new Promise(() => {}), // 永不结算：复刻被 profile 协调卡住的写
+  })
+  plugin.apply(ctx, CONFIG(root, { intentMigrated: false }))
+  ctx.openFiber()
+  await new Promise((r) => setTimeout(r, 50))
+
+  // 迁移确实发起了那笔写（否则本用例没测到东西）
+  assert.ok(
+    ctx.calls.some(([k]) => k === 'settings-update'),
+    '前置条件：迁移应当发起 settings.update',
+  )
+
+  // 核心断言：写挂住时，fiber 销毁不得挂住。
+  const outcome = await Promise.race([
+    ctx.dispose().then(() => 'settled'),
+    new Promise((r) => setTimeout(() => r('HUNG'), 1500)),
+  ])
+  assert.equal(outcome, 'settled', 'disposer 等在了永不结算的配置写上 ⇒ 复现 DSR-027 启动卡死')
+})
+
+// DSR-027 附带不变量 ①：销毁必须关掉「此刻已开」的域，否则重挂时新 apply 撞 already-open。
+// 旧的 async disposer 是靠 await storeReady 达到这一点的（代价是死锁）；新实现必须
+// 在不等待那条链的前提下保住同一保证。
+test('DSR-027①：已开域在销毁时同步关闭（重挂不撞 already-open）', async (t) => {
+  const home = await mkTmp('dsh-sm-home-')
+  const root = await mkTmp()
+  t.after(() => cleanup(home))
+  t.after(() => cleanup(root))
+  await writeSkill(root, 'pdf')
+  const ctx = fakeCtx(home, { config: CONFIG(root) })
+  plugin.apply(ctx, CONFIG(root))
+  ctx.openFiber()
+  await new Promise((r) => setTimeout(r, 50))
+  // CONFIG 默认 intentMigrated:true ⇒ 迁移整体跳过（migrate.js:26），只开新 spec 一个域。
+  assert.equal(ctx.domains.length, 1, '前置条件：新 spec 域已开')
+  await ctx.dispose()
+  assert.ok(ctx.domains.every((d) => d.closed === true), '销毁后每个已开域都必须已关闭')
+})
+
+// DSR-027 附带不变量 ②：销毁与「open 在途」竞态时不得泄漏句柄（开出来的域必须被关掉或持有）。
+test('DSR-027②：open 在途期间销毁 → 不泄漏句柄（开出的域自持关闭）', async (t) => {
+  const home = await mkTmp('dsh-sm-home-')
+  const root = await mkTmp()
+  t.after(() => cleanup(home))
+  t.after(() => cleanup(root))
+  await writeSkill(root, 'pdf')
+
+  const opened = []
+  let releaseOpen = null
+  const slowOpen = async () => {
+    // 让首次 open 悬停，制造「销毁发生在 open 在途」的窗口。
+    await new Promise((r) => { releaseOpen = r })
+    const domain = fakeDomain()
+    domain.closed = false
+    const origClose = domain.close.bind(domain)
+    domain.close = async () => { domain.closed = true; return origClose() }
+    opened.push(domain)
+    return domain
+  }
+  const ctx = fakeCtx(home, { config: CONFIG(root, { intentMigrated: true }), openImpl: slowOpen })
+  plugin.apply(ctx, CONFIG(root, { intentMigrated: true }))
+  ctx.openFiber()
+  await new Promise((r) => setTimeout(r, 30))
+
+  // 在 open 悬停时销毁，然后放行 open：该域必须被自行关闭，不得成为无人持有的僵尸句柄。
+  const disposed = ctx.dispose()
+  assert.ok(releaseOpen, '前置条件：open 应已发起且悬停')
+  releaseOpen()
+  await disposed
+  await new Promise((r) => setTimeout(r, 50))
+  assert.equal(opened.length, 1, '前置条件：那个域确实被开出来了')
+  assert.equal(opened[0].closed, true, 'open 在途期间销毁 ⇒ 开出的域必须自持关闭，否则泄漏句柄')
 })
