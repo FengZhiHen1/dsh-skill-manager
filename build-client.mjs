@@ -32,6 +32,11 @@ async function bundle() {
   const result = await build({
     entryPoints: [ENTRY],
     outfile: OUTFILE,
+    // esbuild 会在产物里写「// <源文件路径>」注释，而该路径是**相对 CWD** 计算的。
+    // 不钉住 absWorkingDir 时，从仓库根跑与从插件目录跑会产出不同文本（实测 130978 vs 130510），
+    // 于是 `--check` 的逐字节比对会**随调用者所在目录**假报「产物过期」。
+    // 钉成插件目录既是构建的稳定基准，也让产物内容与 CWD 无关（CI/编辑器/根目录脚本都一致）。
+    absWorkingDir: here,
     bundle: true,
     format: 'cjs',
     platform: 'browser',
