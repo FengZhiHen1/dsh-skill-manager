@@ -292,7 +292,14 @@ test('DSR-027②：open 在途期间销毁 → 不泄漏句柄（开出的域自
     const domain = fakeDomain()
     domain.closed = false
     const origClose = domain.close.bind(domain)
-    domain.close = async () => { domain.closed = true; return origClose() }
+    // close 故意做成**跨 macrotask** 的慢关闭：否则「是否等待收场链」在微任务顺序上
+    // 恰好也能通过，断言就失去判别力（本用例初版正是如此——消融掉等待后仍为绿）。
+    // 真实 storage 后端关闭同样是异步 I/O，故此形状更接近生产。
+    domain.close = async () => {
+      await new Promise((r) => setTimeout(r, 25))
+      domain.closed = true
+      return origClose()
+    }
     opened.push(domain)
     return domain
   }
@@ -306,7 +313,9 @@ test('DSR-027②：open 在途期间销毁 → 不泄漏句柄（开出的域自
   assert.ok(releaseOpen, '前置条件：open 应已发起且悬停')
   releaseOpen()
   await disposed
-  await new Promise((r) => setTimeout(r, 50))
+  // 关键：句柄必须在 **dispose 结算之前**就已释放——平台重组是「卸载旧 fiber 完成后
+  // 才 apply 新 fiber」（app-boot:290 await 旧 fiber），若句柄晚于卸载结算才关，
+  // 新 apply 的 open 仍会撞 already-open。故此处不 sleep、不额外等待，直接断言。
   assert.equal(opened.length, 1, '前置条件：那个域确实被开出来了')
-  assert.equal(opened[0].closed, true, 'open 在途期间销毁 ⇒ 开出的域必须自持关闭，否则泄漏句柄')
+  assert.equal(opened[0].closed, true, 'open 在途期间销毁 ⇒ 句柄必须在 dispose 结算前已关闭（否则新 apply 撞 already-open）')
 })

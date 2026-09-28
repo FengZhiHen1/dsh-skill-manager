@@ -1,6 +1,6 @@
 # DSR-027：disposer 不得 await 本 fiber 发起的在途链（启动卡死与闭环拆除）
 
-> 状态：**已修复，静态闸全绿**（2026-09-28）。`npm run check` 退出 0：产物新鲜度 + `src` 全量语法 + 分层门禁（23 个 core 文件）+ `node --test` **160/160**（新增 3 项 DSR-027 回归闸）。
+> 状态：**已修复，静态闸全绿**（2026-09-28）。`npm run check` 退出 0：产物新鲜度 + `src` 全量语法 + 分层门禁（23 个 core 文件）+ `node --test` **160/160**（新增 3 项 DSR-027 回归闸，且三项均经消融确认有判别力）。
 > ⚠ **实例级复验未做**——修复后尚未在真实 test 实例启动观察（红线：实例启停只能由用户执行）。见文末「尚未验证」。
 
 ## 症状（实测，2026-09-28）
@@ -39,7 +39,7 @@ apply 发起 migratePromise（index.js:55-60）
 1. disposer 等那笔写 → 写等重组 → 重组等本 fiber 卸载 → 卸载等 disposer（闭环）
 2. `_unload()` 永不结算 ⇒ `fiber.inertia` 永不清空（`fiber.ts:669`）
 3. `Loader.await()` 的 `while` 永不出循环（`vendor/loader/src/config/tree.ts:43-49`：只要有 entry 的 `_initTask`/`fiber.inertia` 非空就继续 `Promise.allSettled`）
-4. `profile-boot.ts:1010` 的 `await ctx.get('loader')?.await()` 永不返回 ⇒ `appReady.commit()`（`:317`）不执行
+4. `app-boot/src/index.ts:1010` 的 `await ctx.get('loader')?.await()` 永不返回 ⇒ `appReady.commit()`（`profile-boot.ts:317`）不执行（web 面同源：`bundle/web-app/src/index.ts:284` 的 `announceReady` 也挂在同一个 `loader.await()` 上）
 5. ⇒ 不打印 URL、不落诊断、CPU 静置——**与实测指纹逐条吻合**
 
 ## 已排除项（均为探针实证，非推断）
@@ -57,13 +57,24 @@ apply 发起 migratePromise（index.js:55-60）
 
 ## 最终决定
 
-**disposer 只做有界的事，绝不 await 本 fiber 发起的在途链。**
+**disposer 只能等「不依赖本 fiber 结算」的在途工作。**
 
-1. **disposer 改为同步语义**（`src/adapter/index.js:108-116`）：置 `disposed = true`，关掉「此刻已开」的域，**不等待** `storeReady`。
-2. **在途 open 由 `disposed` 位自行收场**（`:78-96`）：open 前检查一次、open 后再检查一次；若期间被销毁则**自持关闭并返回 null**，避免第二个检查点与第一个之间的窗口泄漏句柄。
-3. **保住旧语义**：旧实现靠 `await storeReady` 达到「旧域先关、新 apply 不撞 already-open」。storage 域 `open()` 对同名域是**硬错误**（`storage-domain/src/index.ts:104-105` `already-open`，单句柄），故该保证必须保住——新实现靠「同步关掉已持有的句柄」达成，与是否等待那条链无关。
+这条判据把「等」分成了两类，是本修复的关键区分：
 
-这条不变量对**所有**插件成立，不限于本插件：disposer 一旦依赖本 fiber 发起的在途异步链，就等于让卸载依赖自己完成。
+| 在途工作 | 是否依赖本 fiber 结算 | disposer 可否等 |
+| --- | --- | --- |
+| 那笔 `settings.update` 配置写 | **是**（写要等重组，重组要等本 fiber 卸载） | ❌ **绝不可等**——等它 = 卸载等自己 |
+| 在途的 `storage.domain.open` | 否（只依赖 storage 后端 I/O） | ✅ **应当等**——不等则句柄泄漏、新 apply 撞 already-open |
+
+1. **不等那笔写**（`src/adapter/index.js`）：disposer 不再 `await storeReady`（那条链的根即配置写）。
+2. **但要等在途的 open**：在途 open 的收场链（`openSettled`）被 disposer 等待，确保句柄在**卸载结算之前**已释放。storage 域同名单句柄（`storage-domain/src/index.ts:104-105` `already-open`），平台重组是「卸载旧 fiber 完成 → 才 apply 新 fiber」，故句柄晚关一步，新 apply 的 `open` 就会撞 already-open 并把管理 API 永久降级成 internal。
+3. **open 之前先查 `disposed`**：被销毁就不再发起 open（否则开出无人持有的句柄，或与下一次 apply 抢同名域）；open 之后再查一次，被销毁则自持关闭。
+
+旧实现是「用 `await storeReady` 顺带保证第 2 条」——保证本身正确，代价是把第 1 条的闭环也一起等进来了。修复把两者拆开：**等有界的那一段，不等会闭环的那一段**。
+
+⚠ 测试判别力的教训（值得记下）：第 2 条的回归闸**初版是假绿**。它用同步 `close()`，于是「等待收场链」与「不等待」在微任务顺序上恰好都得绿——**消融掉 `await pending` 后测试仍全绿**，即该断言没有判别力。改为**跨 macrotask 的慢关闭**（`await setTimeout(25)`，更贴近真实后端 I/O）后，消融立刻变红、复原转绿，判别力才真正建立。⇒ 写「顺序/时序」类断言时，必须用消融确认它真的会红。
+
+这条判据对**所有**插件成立，不限于本插件：disposer 一旦依赖本 fiber 发起的在途异步链，就等于让卸载依赖自己完成。
 
 ## 直接后果
 

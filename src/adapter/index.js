@@ -68,31 +68,51 @@ export default {
     //       entry.update()，并 await 旧 fiber 的 await()）⇒ 重组 ⇒ dispose 本 fiber
     //     → fiber._unload() await 本 disposer ⇒ 回到 storeReady ⇒ **闭环**
     // 闭环一旦形成：_unload() 永不结算 → fiber.inertia 永不清空 → tree.await() 的 while
-    // 永不出循环（vendor/loader/src/config/tree.ts:43-49）→ profile-boot 不返回、不打印 URL、
-    // 不落诊断、CPU 静置（与实测指纹一致）。故 disposer 只做「关掉此刻已开的域」这一件有界的事，
-    // 在途的 open 由 disposed 位自行收场——这是本类 disposer 的通用不变量：
-    // **不得 await 本 fiber 发起的在途链，否则等于让卸载依赖自己完成**。
+    // 永不出循环（vendor/loader/src/config/tree.ts:43-49）→ app-boot 不返回、不打印 URL、
+    // 不落诊断、CPU 静置（与实测指纹一致）。
+    //
+    // 通用的可等待性判据：**disposer 只能等「不依赖本 fiber 结算」的在途工作**。
+    //   · 那笔配置写       → 依赖本 fiber 结算完成 ⇒ 绝不可等（等它 = 卸载等自己）
+    //   · 在途的域 open    → 只依赖 storage 后端 I/O ⇒ 可以等，且**应当等**（见下）
+    // 于是拆成两件事：open 之前的 disposed 检查负责「不再发起」，open 之后的收场链负责
+    // 「发起了就一定要关掉」。后者是保住宿主不变量的关键：storage 域同名单句柄，
+    // 重挂时若旧句柄还占着 `reserved`，新 apply 的 open 会撞 already-open
+    // （storage-domain/src/index.ts:104-105）而把管理 API 永久降级成 internal。
+    // 旧实现靠 `await storeReady` 顺带保证这一点（代价是死锁），此处改为只等有界的那一段。
     let store = null
     let storeError = null
     let disposed = false
+    // 「open 已发起」时指向其**收场链**（open 结算 → 必要时关闭）；open 未发起则恒为 null。
+    // disposer 据此决定要不要等：为 null 就不等（此时物理上没有任何句柄可泄漏）。
+    let openSettled = null
+    const closeQuietly = async (opened) => {
+      if (opened == null) return
+      try {
+        await opened.close()
+      } catch (error) {
+        ctx.logger?.warn?.(`dsh-skill-manager: storage 域关闭失败：${error?.message ?? String(error)}`)
+      }
+    }
     const storeReady = migratePromise
       .then(() => {
-        // 已销毁则不再开域：否则会与下一次 apply 抢同名域（storage 单句柄），
-        // 或开出一个无人持有的句柄。
+        // 已销毁则不再发起 open：否则会与下一次 apply 抢同名域，或开出一个无人持有的句柄。
         if (disposed) return null
-        return openStore(ctx)
-      })
-      .then(async (opened) => {
-        if (opened === null) return null
-        // 与上一处检查之间的窗口：open 在途期间被销毁 → 自持关闭，不泄漏句柄。
-        if (disposed) {
-          await opened.close().catch((error) => {
-            ctx.logger?.warn?.(`dsh-skill-manager: storage 域关闭失败：${error?.message ?? String(error)}`)
+        openSettled = openStore(ctx)
+          .then(async (opened) => {
+            // 单线程内本块是原子的：与 disposer 的检查不会交错，故「关了」与「持有」必居其一。
+            if (disposed) {
+              await closeQuietly(opened) // open 在途期间被销毁 ⇒ 自持收场，不泄漏句柄
+              return null
+            }
+            store = opened
+            return opened
           })
-          return null
-        }
-        store = opened
-        return opened
+          .catch((error) => {
+            storeError = error
+            ctx.logger?.warn?.(`dsh-skill-manager: storage 域打开失败，管理 API 将返回 internal：${error?.message ?? error}`)
+            return null
+          })
+        return openSettled
       })
       .catch((error) => {
         storeError = error
@@ -103,16 +123,20 @@ export default {
       if (store === null) throw storeError ?? new Error('storage 域尚未就绪')
       return store
     }
-    // 销毁：只关「此刻已开」的域并置位，**不等待** storeReady（见上方 DSR-027）。
-    // 于是重载或依赖重启时旧域先关，新 apply 的 openStore 不会撞 already-open。
+    // 销毁：置位后只关「此刻已开」的域；若 open 正在途，再等它收场（有界，见上）。
+    // 绝不等那笔配置写——那正是闭环的入口。
     ctx.effect(() => () => {
       disposed = true
       const opened = store
+      const pending = openSettled
       store = null
-      if (opened === null) return
-      return opened.close().catch((error) => {
-        ctx.logger?.warn?.(`dsh-skill-manager: storage 域关闭失败：${error?.message ?? String(error)}`)
-      })
+      openSettled = null
+      if (opened === null && pending === null) return
+      return (async () => {
+        await closeQuietly(opened)
+        // 收场链内部负责「已被销毁则关闭」，此处只等它跑完，确保句柄在卸载结束前已释放。
+        if (pending !== null) await pending
+      })()
     }, 'dsh-skill-manager: close storage domain')
 
     // 设置页策略：本插件自绘配置页（浏览器半区注册进 Plugins 页的 plugins.row.config），
