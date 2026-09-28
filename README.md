@@ -18,25 +18,31 @@ DSH 技能管理插件：**配置即意图**——用户意图（分组、挂载
 
 ## 模块布局
 
-```
-index.js        Host 入口（配置行 Config、迁移、对账器、/skill-manager RPC 通道、三路队列）
-client.js       Client（技能设置页 + Plugins 页配置页；配置经 configForms 直读直写，overview 只读视图）
-lib/dir.js      配置命名空间（意图 schema + 形式校验）、目录门禁、原子写
-lib/store.js    storage 域 spec（五表投影 + 旧七表迁移 spec）与读写门面
-lib/migrate.js  旧 storage 意图一次性迁移进 settings
-lib/cache.js    进程内缓存层（bundle 快照、meta、dirHash、health 代际）
-lib/fence.js    受信请求围栏（回环/受信权威 + 同源标记）
-lib/zip.js      零依赖 ZIP 读取器（node:zlib，store/deflate）
-lib/net.js      skills.sh / GitHub 网络通道
-lib/library.js  库扫描（stat 签名复用解析）、frontmatter、目录哈希
-lib/groups.js   组文档纯推导（意图来自配置）
-lib/state.js    挂载状态投影、工作区镜像
-lib/sync.js     挂载推导、物化、对账、健康、项目既有条目分类
-lib/inbound.js  搜索/探测/入库/检查（repo 级去重）/更新/导入/出库/恢复
-lib/api.js      HTTP 信封、三路队列、只读视图与文件/网络操作
-```
+三层单向依赖 `adapter → core`（DSR-015；门禁 `tools/plugin-layering-check.mjs`，core 不得 import `@deepseek-ai/*`）：
 
-> 上面的目录清单是**旧扁平布局**的留档，现行形态是 `src/core` + `src/adapter` + `src/client` 三层（DSR-015），权威描述见 `docs/项目结构设计.md`；与此同批的配置模型也已在 DSR-025 换代（配置行 `Config` + volatile，配置页在 Plugins 页）。旧清单待整批清理，不在本次改动范围内。
+```
+src/adapter/          DSH 接缝（唯一允许 import @deepseek-ai/*）
+  index.js            入口装配（name/inject/Config/apply）：service、对账器、预热、页面策略、effect 清理
+  settings.js         配置边界：Config schema（DI 注入 schemastery）+ volatile 现读 + 两处校验挂点
+  storage.js          storage 域 spec 包裹（core 纯 schema → defineDomain/domainTable）
+  migrate.js          旧七表意图 → 配置行的一次性迁移编排
+src/core/             纯领域逻辑（裸 node 可单测）
+  service.js          三路队列、RPC dispatch、只读视图、写方法编排
+  model/              intent（配置 schema/校验）、store（域 spec）、library（库扫描）、contract（入站契约）、verdict（写后裁定）
+  mount/              derive（挂载推导）、materialize（junction 物化）、reconcile（对账）、inspect（行状态走查）、registry（归属登记）
+  inbound/            acquire、upstream、zipball、backups（搜索/探测/入库/检查/更新/出库/恢复）
+  base/               fsys（原子写）、net、zip、cache、audit（台账）、errors
+src/client/           浏览器半区（JSX，esbuild 产单文件 dist/client.js）
+  index.jsx           槽位装配（settings.section + plugins.row.config）、配置变更总线
+  section.jsx         技能页（管理/搜索两视图）
+  card.jsx            配置页（Plugins 页本行入口）
+  manage.jsx          管理视图（库列表、分组、行菜单）
+  search.jsx          搜索视图（skills.sh / GitHub 探测）
+  api.js              RPC 传输门面（超时、错误归一、入站契约校验）
+  repair.jsx          修复提示词模板与一键复制
+  ui.jsx / theme.js   通用 UI 基元与主题 token
+  nav-icon.js         设置导航图标补丁
+```
 
 低延迟路径：配置渲染永不等待网络（配置表单镜像页面启动即加载）；读请求走进程内 bundle 缓存快照（缓存热时零扫描）；写操作串行并在收尾预热缓存；网络慢操作独立队列不阻塞读写；技能页单请求 `overview` 出只读视图。详见 `docs/technical-details/插件运行时.md`。
 
