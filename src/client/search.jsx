@@ -4,7 +4,7 @@
 // 参考：插件运行时.md「搜索视图」；DSR-007、DSR-008、DSR-017。
 import { useState, useRef } from 'react'
 import { Input } from '@deepseek-ai/dsh-client-ui-primitives'
-import { T, S, badgeStyle, cardStyle, cardTitle, noteText, dotStyle, subCardStyle, dividerStyle } from './theme.js'
+import { T, R, S, badgeStyle, cardStyle, cardTitle, noteText, dotStyle, subCardStyle, dividerStyle } from './theme.js'
 import { GhostBtn, OutlineBtn, PrimaryBtn, ErrorLine, NoticeBar } from './ui.jsx'
 
 /**
@@ -240,7 +240,7 @@ export function SearchView({ call, reload, showToast }) {
               </div>
             )
           })()}
-          <div style={{ ...badgeStyle(T.warn), borderRadius: 10, padding: '9px 12px', fontSize: 11, lineHeight: 1.6, display: 'flex', gap: 8 }}>
+          <div style={{ ...badgeStyle(T.warn), borderRadius: R.md, padding: '9px 12px', fontSize: 11, lineHeight: 1.6, display: 'flex', gap: 8 }}>
             <span style={{ ...dotStyle(T.warn), marginTop: 5 }} />
             <div>
               <div>同名且同仓库时改用更新；同名异源时需先出库。</div>

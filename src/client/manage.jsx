@@ -4,7 +4,7 @@
 // 参考：插件运行时.md「管理视图」、挂载与同步.md「行状态走查」；DSR-008/009/017/018。
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { Input, Menu } from '@deepseek-ai/dsh-client-ui-primitives'
-import { T, S, badgeStyle, cardStyle, cardTitle, noteText, dotStyle, sectionHead, statusPillStyle, dividerStyle, navItemStyle, navItemActiveStyle, pillBase } from './theme.js'
+import { T, R, S, badgeStyle, cardStyle, cardTitle, noteText, dotStyle, sectionHead, statusPillStyle, dividerStyle, navItemStyle, navItemActiveStyle, pillBase } from './theme.js'
 import { GhostBtn, OutlineBtn, PrimaryBtn, ErrorLine, NoticeBar, RowMenu, MenuItem, menuCardStyle, ChevronIcon, UpdateConfirmationDialog, ConfirmDialog, ModalShell } from './ui.jsx'
 import { buildRepairPrompt, RepairCopy, mountIssueRepair } from './repair.jsx'
 import { parseTargetKey } from '../core/model/contract.js'
@@ -279,7 +279,7 @@ export function ManageView({ call, data, config, reload, showToast }) {
 
           {/* 非行级警告条（琥珀晕卡逐条，附修复复制入口） */}
           {warningLines.map((w) => (
-            <div key={w.key} style={{ ...badgeStyle(T.warn), borderRadius: 10, padding: '9px 12px', margin: '8px 0', fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div key={w.key} style={{ ...badgeStyle(T.warn), borderRadius: R.md, padding: '9px 12px', margin: '8px 0', fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={dotStyle(T.warn)} />
               {/* 长路径是无空格长 token：minWidth:0 放开收缩 + break-all 允许断行，否则按钮被顶出面板 */}
               <span style={{ flex: 1, minWidth: 0, wordBreak: 'break-all' }}>{w.text}</span>
@@ -358,7 +358,7 @@ export function ManageView({ call, data, config, reload, showToast }) {
                               title="行操作"
                               disabled={busy}
                               onClick={(e) => setMenuFor(menuFor?.dir === it.dir ? null : { dir: it.dir, rect: e.currentTarget.getBoundingClientRect() })}
-                              style={{ border: 'none', background: 'transparent', cursor: busy ? 'default' : 'pointer', fontSize: 16, lineHeight: 1, padding: '3px 6px', borderRadius: 6, color: menuFor?.dir === it.dir ? T.labelPrimary : T.labelSecondary }}
+                              style={{ border: 'none', background: 'transparent', cursor: busy ? 'default' : 'pointer', fontSize: 16, lineHeight: 1, padding: '3px 6px', borderRadius: R.xs, color: menuFor?.dir === it.dir ? T.labelPrimary : T.labelSecondary }}
                             >
                               ⋯
                             </button>
@@ -449,7 +449,7 @@ export function ManageView({ call, data, config, reload, showToast }) {
 const subRowPanel = {
   margin: '0 12px 8px',
   padding: '8px 12px',
-  borderRadius: 10,
+  borderRadius: R.md,
   background: T.bgLayer3,
   border: `1px solid ${T.borderL1}`,
 }
@@ -508,7 +508,7 @@ function ScopeRow({ checked, title, hint, count, onToggle, trailing }) {
   const [hover, setHover] = useState(false)
   return (
     <label
-      style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', borderRadius: 8, fontSize: 12, cursor: 'pointer', background: checked ? `color-mix(in srgb, ${T.brand} 8%, transparent)` : hover ? T.bgModulePlatform : 'transparent' }}
+      style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', borderRadius: R.sm, fontSize: 12, cursor: 'pointer', background: checked ? `color-mix(in srgb, ${T.brand} 8%, transparent)` : hover ? T.bgModulePlatform : 'transparent' }}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
     >
@@ -699,7 +699,7 @@ function GroupScopePanel({ config, group, workspaces, skills, onGroupOp, piAvail
                     type="button"
                     title="分组操作"
                     onClick={() => setOpsOpen((v) => !v)}
-                    style={{ border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: '3px 6px', borderRadius: 6, color: opsOpen ? T.labelPrimary : T.labelSecondary }}
+                    style={{ border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: '3px 6px', borderRadius: R.xs, color: opsOpen ? T.labelPrimary : T.labelSecondary }}
                   >
                     ⋯
                   </button>
@@ -747,7 +747,7 @@ function GroupScopePanel({ config, group, workspaces, skills, onGroupOp, piAvail
               )}
               {/* 内嵌滚动面板：行高约 29px，7 行封顶（上界理由：设置面板可视高度有限，超出内滚不撑破卡片） */}
               {(visibleWs.length > 0 || filtering) && (
-                <div style={{ border: `1px solid ${T.borderL1}`, borderRadius: 10, padding: 2, maxHeight: 208, overflowY: 'auto', scrollbarWidth: 'thin' }}>
+                <div style={{ border: `1px solid ${T.borderL1}`, borderRadius: R.md, padding: 2, maxHeight: 208, overflowY: 'auto', scrollbarWidth: 'thin' }}>
                   {visibleWs.map((workspace) => (
                     <ScopeRow
                       key={workspace.workspaceId}
@@ -766,7 +766,7 @@ function GroupScopePanel({ config, group, workspaces, skills, onGroupOp, piAvail
                 <button
                   type="button"
                   onClick={() => setShowAllWs((v) => !v)}
-                  style={{ display: 'block', width: '100%', border: `1px dashed ${T.borderL2}`, background: 'transparent', borderRadius: 8, padding: '6px 10px', marginTop: 6, font: 'inherit', fontSize: 11, color: T.labelSecondary, cursor: 'pointer', textAlign: 'center' }}
+                  style={{ display: 'block', width: '100%', border: `1px dashed ${T.borderL2}`, background: 'transparent', borderRadius: R.sm, padding: '6px 10px', marginTop: 6, font: 'inherit', fontSize: 11, color: T.labelSecondary, cursor: 'pointer', textAlign: 'center' }}
                 >
                   {showAllWs ? '▾ 收起其他工作区' : `▸ 展开其他 ${restCount} 个工作区（勾选即启用）`}
                 </button>
@@ -779,7 +779,7 @@ function GroupScopePanel({ config, group, workspaces, skills, onGroupOp, piAvail
           <div style={{ color: T.labelSecondary, fontSize: 13, lineHeight: 1.55, marginBottom: 12 }}>
             {`该分组有 ${pendingUnmount.count} 个 Skill 挂载在此目标下，取消后对账会移除这些链接。`}
           </div>
-          <div style={{ borderRadius: 10, padding: '10px 12px', marginBottom: 14, ...badgeStyle(T.warn), fontSize: 12, lineHeight: 1.55 }}>
+          <div style={{ borderRadius: R.md, padding: '10px 12px', marginBottom: 14, ...badgeStyle(T.warn), fontSize: 12, lineHeight: 1.55 }}>
             {`只移除链接指针，不删除技能库文件${pendingUnmount.hosts.includes('pi') ? '；本目标含 pi 宿主，.pi/skills 与 pi 用户级链接一并摘除' : ''}；重新勾选即可恢复挂载。`}
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>

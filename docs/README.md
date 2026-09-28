@@ -11,6 +11,7 @@
 - 文档-代码一致性：技术文档描述的就是源码现行形态（`src/core`+`src/adapter`+`src/client` 三层、`connection.rpc` 通道、esbuild 产物 client bundle、两表 + junction-only）；旧形态表述（扁平 `lib/`、自建路由、五表 copy 兜底、`/skill-manager/api` 信封）已随实施退役，如见残留属文档欠账，按「先修文档再修代码」处理。
 - 单测基线：150 项（2026-09-28，`npm run check` = 产物新鲜度哨兵 + 语法 + 分层门禁 + node --test）；实测门禁捕获并修复三处真实缺陷（settings 校验器误拒「默认」组键致启动崩溃；zipball 主站 URL 直连不可达改 API 形态；**写后裁定拿镜像快照比对致"写入成功却报被拒"**——DSR-024，2026-09-14 现场复现 + test 实例回归），详见 `TODO.md` 与提交历史。
 - **基线换代（2026-09-28，DSR-025）**：适配 DSH `0.1.7-rc.2`。配置模型换成「本行 Cordis `Config` + `.volatile()`」，配置页随 `settings.plugin.item` 槽废除迁往侧栏 Plugins 页（`plugins.row.config`），图标 API 与 client 注入边同步换代。静态闸全绿；**实例级实测与页面走查待用户执行**（见 `TODO.md`）。
+- **配置页改用官方原语 + token 归位（2026-09-28，DSR-026）**：配置页从自绘（500+ 行内联样式 + 自写草稿状态机）改为官方 `SettingsForm`/`SettingsFormModel`/`SettingsValueField`，交互对齐官方（无放弃控件、无未保存标记，离开页面丢弃暂存）；圆角/阴影/遮罩统一走 `--dsw-radius-*`/`--dsw-elevation-*`/`--dsw-alias-bg-mask-1`。产物 132.3 → 127.5 KB，单测 150 → 157。
 - 部署（DSR-012）：test profile 经 `link:` 源码直挂（P9 实测完成，2026-09-05；2026-09-09 同一路径复用于三项修复的实测场，**实测场已按 AGENTS.md 红线改用合成库 `E:\Project\Skills-test\skills`**，真实库只在 web 稳定实例使用）；web profile 已按 `github:` git 依赖挂载（lockfile resolution = 子仓库 HEAD，2026-09-09 核对），后续批次仍走「push → 重挂 → 刷页 + Host 重启」的用户操作通道。⚠ **web 上跑的仍是适配 0.1.2-rc.1 的旧版**：本版 peer 抬到 `^0.1.7-rc.2`，换钉前必须先升级该实例运行时，否则整行被门禁置 `disabled`。
 - 待验证项（GUI 浏览器走查）：设置页两视图/⋯ 菜单/挂载失败徽章展开/修复提示词一键复制/遮罩确认对话框渲染，以及 2026-09-09 批次的 AC-16（写后自动收敛刷新、新建组可见性）与页边距对齐标准节——**2026-09-14 已走查**：管理视图分组列渲染、⋯ 菜单、建组/删组/改名（含被拒路径）与裁定文案、client 产物改动刷页即生效；其余面仍待走查（Host 侧对应语义均已实测，见 `需求.md` missing evidence 节与 `test/api.test.mjs` 写队列共享回归闸）。
 - 本插件不再维护独立设计稿（OpenPencil `.op` 已弃用删除，2026-09-04）：界面视觉与交互细节以设置页实际实现为准；`technical-details/插件运行时.md` 的视图节只承载交互语义与信息架构，不作为视觉规格。
@@ -33,4 +34,5 @@
 | `technical-details/入站操作.md` | 扫描、搜索、入库、检查、更新、出库（限外部 skill）、备份恢复、禁用启用语义 |
 | `technical-details/挂载与同步.md` | dsh App 语义、DSH 工作区投影、挂载推导、junction 物化与摘除、归属判据、对账、行状态走查 |
 | `technical-details/插件运行时.md` | 插件包形态、组合挂载与部署、Host 服务、RPC 传输（DSR-014）、请求调度与缓存、修复提示词（DSR-018）、Client 设置页与生命周期 |
+| `client/UI 材料与 token 规则` | 见 `decisions/DSR-026`（本插件不自绘配置表单：几何/材料/交互态由官方 `SettingsForm` 原语提供；半径/阴影/遮罩统一走宿主 `--dsw-radius-*`/`--dsw-elevation-*`/`--dsw-alias-bg-mask-1`） |
 | `decisions/` | 真实重大取舍的备选、评价、后果与重访条件 |

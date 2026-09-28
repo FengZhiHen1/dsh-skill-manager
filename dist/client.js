@@ -339,7 +339,21 @@ var T = {
   labelDimmed: "var(--dsw-alias-label-dimmed)",
   success: "var(--dsw-alias-state-success-primary)",
   error: "var(--dsw-alias-state-error-primary)",
-  warn: "var(--dsw-alias-state-warn-primary)"
+  warn: "var(--dsw-alias-state-warn-primary)",
+  mask: "var(--dsw-alias-bg-mask-1)"
+};
+src;
+var R = {
+  xs: "var(--dsw-radius-xs)",
+  sm: "var(--dsw-radius-sm)",
+  md: "var(--dsw-radius-md)",
+  lg: "var(--dsw-radius-lg)",
+  xl: "var(--dsw-radius-xl)",
+  panel: "var(--dsw-radius-panel)"
+};
+var SHADOW = {
+  panel: "var(--dsw-elevation-panel)",
+  prominent: "var(--dsw-elevation-prominent)"
 };
 var badgeStyle = (color) => ({
   color,
@@ -362,7 +376,7 @@ var statusPillStyle = (kind) => {
   return pillBase;
 };
 var S = {
-  row: { display: "flex", alignItems: "center", gap: "8px", padding: "9px 12px", border: `1px solid ${T.borderL1}`, borderRadius: 12, marginBottom: 8, fontSize: 13 },
+  row: { display: "flex", alignItems: "center", gap: "8px", padding: "9px 12px", border: `1px solid ${T.borderL1}`, borderRadius: R.md, marginBottom: 8, fontSize: 13 },
   /**
    * 视图容器（管理/搜索两视图根）：左右零内缩——设置外壳 `.options` 已给 24px 页边距
    * （ui-settings-general SettingsRoot.module.css），官方各节自身不再加横向 padding；
@@ -372,20 +386,20 @@ var S = {
   /** 高密度列表行（容器卡 + 分隔线用法）：比 S.row 描边卡轻，行内不再带边框。 */
   listRow: { display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", fontSize: 13 },
   /** 筛选器触发钮（宿主 Menu 的 anchor）：浅底小圆角，与工具条输入框同高。 */
-  filterTrigger: { display: "inline-flex", alignItems: "center", gap: 4, border: "none", background: T.bgModulePlatform, borderRadius: 8, padding: "5px 10px", font: "inherit", fontSize: 12, color: T.labelPrimary, cursor: "pointer" },
+  filterTrigger: { display: "inline-flex", alignItems: "center", gap: 4, border: "none", background: T.bgModulePlatform, borderRadius: R.sm, padding: "5px 10px", font: "inherit", fontSize: 12, color: T.labelPrimary, cursor: "pointer" },
   muted: { color: T.labelSecondary, fontSize: 12 },
   /** 未配置引导页：同 panel 口径，横向零内缩（纵向留白自管）。 */
   guide: { padding: "24px 0", textAlign: "center", color: T.labelSecondary, fontSize: 13 },
   toolbar: { display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 6 }
 };
-var cardStyle = { border: `1px solid ${T.borderL1}`, borderRadius: 12, background: T.bgLayer3 };
-var subCardStyle = { borderRadius: 10, background: T.bgModulePlatform };
-var dotStyle = (color) => ({ width: 7, height: 7, borderRadius: 4, background: color, flex: "none" });
+var cardStyle = { border: `1px solid ${T.borderL1}`, borderRadius: R.md, background: T.bgLayer3 };
+var subCardStyle = { borderRadius: R.md, background: T.bgModulePlatform };
+var dotStyle = (color) => ({ width: 7, height: 7, borderRadius: "50%", background: color, flex: "none" });
 var sectionHead = { fontSize: 14, fontWeight: 600, color: T.labelPrimary };
 var cardTitle = { fontSize: 13, fontWeight: 600, color: T.labelPrimary };
 var noteText = { fontSize: 11, color: T.labelSecondary };
 var dividerStyle = { height: 1, background: T.borderL1, flex: "none" };
-var navItemStyle = { display: "flex", alignItems: "center", gap: 6, width: "100%", padding: "6px 10px", border: "none", borderRadius: 8, background: "transparent", font: "inherit", fontSize: 13, cursor: "pointer", color: T.labelSecondary };
+var navItemStyle = { display: "flex", alignItems: "center", gap: 6, width: "100%", padding: "6px 10px", border: "none", borderRadius: R.sm, background: "transparent", font: "inherit", fontSize: 13, cursor: "pointer", color: T.labelSecondary };
 var navItemActiveStyle = { background: T.bgModulePlatform, color: T.labelPrimary, fontWeight: 500 };
 
 // src/client/ui.jsx
@@ -428,10 +442,10 @@ function FallbackToast({ text, onDone }) {
         background: T.bgLayer3,
         color: T.labelPrimary,
         border: `1px solid ${T.borderL2}`,
-        borderRadius: 10,
+        borderRadius: R.md,
         padding: "8px 14px",
         fontSize: 12,
-        boxShadow: "0 8px 24px rgba(0,0,0,.18)",
+        boxShadow: SHADOW.panel,
         opacity: fade ? 0 : 1,
         transition: "opacity 1s"
       },
@@ -444,7 +458,7 @@ var OutlineBtn = (props) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_d
 var PrimaryBtn = (props) => /* @__PURE__ */ (0, import_jsx_runtime.jsx)(import_dsh_client_ui_primitives.Button, { variant: "primary", size: "sm", ...props });
 function ErrorLine({ error }) {
   if (!error) return null;
-  return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: { ...badgeStyle(T.error), borderRadius: 10, padding: "9px 12px", marginBottom: 8, fontSize: 12, display: "flex", alignItems: "flex-start", gap: 8 }, children: [
+  return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: { ...badgeStyle(T.error), borderRadius: R.md, padding: "9px 12px", marginBottom: 8, fontSize: 12, display: "flex", alignItems: "flex-start", gap: 8 }, children: [
     /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { ...dotStyle(T.error), marginTop: 5, flex: "none" } }),
     /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { flex: 1, minWidth: 0, wordBreak: "break-word", lineHeight: 1.55 }, children: String(error.message || error) })
   ] });
@@ -452,7 +466,7 @@ function ErrorLine({ error }) {
 function NoticeBar({ notice }) {
   if (!notice) return null;
   if (notice.tone !== "warn") return /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: { ...S.muted, marginBottom: 6 }, children: notice.text });
-  return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: { ...badgeStyle(T.warn), borderRadius: 10, padding: "9px 12px", marginBottom: 8, fontSize: 12, display: "flex", alignItems: "center", gap: 8 }, children: [
+  return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: { ...badgeStyle(T.warn), borderRadius: R.md, padding: "9px 12px", marginBottom: 8, fontSize: 12, display: "flex", alignItems: "center", gap: 8 }, children: [
     /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: dotStyle(T.warn) }),
     /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { flex: 1 }, children: notice.text })
   ] });
@@ -473,7 +487,7 @@ function MenuItem({ label, danger, disabled, onClick, onEnter, trailing, childre
         alignItems: "center",
         gap: 16,
         padding: "7px 12px",
-        borderRadius: 6,
+        borderRadius: R.xs,
         fontSize: 12,
         whiteSpace: "nowrap",
         cursor: disabled ? "default" : "pointer",
@@ -500,8 +514,8 @@ var menuCardStyle = {
   minWidth: 150,
   background: T.bgLayer3,
   border: `1px solid ${T.borderL2}`,
-  borderRadius: 12,
-  boxShadow: "0 8px 24px rgba(0,0,0,.18)",
+  borderRadius: R.md,
+  boxShadow: SHADOW.panel,
   padding: 6
 };
 var menuDivider = /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: { height: 1, margin: "5px 6px", background: T.borderL2 } });
@@ -616,7 +630,7 @@ function RowMenu({ it, groupNames, flags = [], busy, onAction, onMove, onClose, 
           alignItems: "center",
           gap: 6,
           padding: "7px 12px",
-          borderRadius: 6,
+          borderRadius: R.xs,
           fontSize: 12,
           whiteSpace: "nowrap",
           cursor: "pointer",
@@ -641,7 +655,7 @@ function ModalShell({ title, width = 480, onMaskClick, children }) {
     "div",
     {
       role: "presentation",
-      style: { position: "fixed", inset: 0, zIndex: 1e3, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(15, 17, 21, .42)", padding: 20 },
+      style: { position: "fixed", inset: 0, zIndex: 1e3, display: "flex", alignItems: "center", justifyContent: "center", background: T.mask, padding: 20 },
       onClick: onMaskClick,
       children: /* @__PURE__ */ (0, import_jsx_runtime.jsx)(
         "div",
@@ -649,7 +663,7 @@ function ModalShell({ title, width = 480, onMaskClick, children }) {
           role: "dialog",
           "aria-modal": "true",
           "aria-label": title,
-          style: { width: `min(${width}px, 100%)`, borderRadius: 16, border: `1px solid ${T.borderL2}`, background: T.bgLayer3, color: T.labelPrimary, boxShadow: "0 18px 48px rgba(0,0,0,.28)", padding: 20 },
+          style: { width: `min(${width}px, 100%)`, borderRadius: R.lg, border: `1px solid ${T.borderL2}`, background: T.bgLayer3, color: T.labelPrimary, boxShadow: SHADOW.prominent, padding: 20 },
           onClick: (e) => e.stopPropagation(),
           children
         }
@@ -662,7 +676,7 @@ function UpdateConfirmationDialog({ name, detail, busy, onCancel, onConfirm }) {
   return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(ModalShell, { title: `\u66F4\u65B0 ${name}\uFF1F`, onMaskClick: onCancel, children: [
     /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: { fontSize: 16, fontWeight: 600, marginBottom: 8 }, children: `\u66F4\u65B0 ${name}\uFF1F` }),
     /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: { color: T.labelSecondary, fontSize: 13, lineHeight: 1.55, marginBottom: 12 }, children: detail || "\u68C0\u6D4B\u5230\u4E0E\u5185\u5BB9\u57FA\u7EBF\u4E0D\u540C\u7684\u672C\u5730\u4FEE\u6539\u3002" }),
-    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: { borderRadius: 10, padding: "10px 12px", marginBottom: 14, ...badgeStyle(T.warn), fontSize: 12, lineHeight: 1.55 }, children: "\u66F4\u65B0\u4F1A\u66FF\u6362\u6B64 Skill \u76EE\u5F55\uFF1B\u4E0D\u4F1A\u81EA\u52A8\u5907\u4EFD\u672C\u5730\u4FEE\u6539\u3002\u8BF7\u5148\u81EA\u884C\u5907\u4EFD\u9700\u8981\u4FDD\u7559\u7684\u5185\u5BB9\u3002" }),
+    /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: { borderRadius: R.md, padding: "10px 12px", marginBottom: 14, ...badgeStyle(T.warn), fontSize: 12, lineHeight: 1.55 }, children: "\u66F4\u65B0\u4F1A\u66FF\u6362\u6B64 Skill \u76EE\u5F55\uFF1B\u4E0D\u4F1A\u81EA\u52A8\u5907\u4EFD\u672C\u5730\u4FEE\u6539\u3002\u8BF7\u5148\u81EA\u884C\u5907\u4EFD\u9700\u8981\u4FDD\u7559\u7684\u5185\u5BB9\u3002" }),
     /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("label", { style: { display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: T.labelSecondary, marginBottom: 16, cursor: "pointer" }, children: [
       /* @__PURE__ */ (0, import_jsx_runtime.jsx)("input", { type: "checkbox", checked: acknowledged, onChange: (event) => setAcknowledged(event.target.checked) }),
       /* @__PURE__ */ (0, import_jsx_runtime.jsx)("span", { style: { color: T.labelPrimary }, children: "\u6211\u5DF2\u786E\u8BA4\u8986\u76D6\u672C\u5730\u4FEE\u6539\uFF1B\u7EE7\u7EED\u540E\u4F1A\u5237\u65B0\u4E0A\u6E38\u57FA\u7EBF\u4E0E DSH \u6302\u8F7D\u3002" })
@@ -677,7 +691,7 @@ function ConfirmDialog({ title, body, warning, confirmLabel, busy = false, onCan
   return /* @__PURE__ */ (0, import_jsx_runtime.jsxs)(ModalShell, { title, width: 420, onMaskClick: busy ? void 0 : onCancel, children: [
     /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: { fontSize: 16, fontWeight: 600, marginBottom: 8 }, children: title }),
     /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: { color: T.labelSecondary, fontSize: 13, lineHeight: 1.55, marginBottom: 12 }, children: body }),
-    warning ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: { borderRadius: 10, padding: "10px 12px", marginBottom: 14, ...badgeStyle(T.warn), fontSize: 12, lineHeight: 1.55 }, children: warning }) : null,
+    warning ? /* @__PURE__ */ (0, import_jsx_runtime.jsx)("div", { style: { borderRadius: R.md, padding: "10px 12px", marginBottom: 14, ...badgeStyle(T.warn), fontSize: 12, lineHeight: 1.55 }, children: warning }) : null,
     /* @__PURE__ */ (0, import_jsx_runtime.jsxs)("div", { style: { display: "flex", justifyContent: "flex-end", gap: 8 }, children: [
       /* @__PURE__ */ (0, import_jsx_runtime.jsx)(OutlineBtn, { onClick: onCancel, disabled: busy, children: "\u53D6\u6D88" }),
       /* @__PURE__ */ (0, import_jsx_runtime.jsx)(PrimaryBtn, { onClick: onConfirm, disabled: busy, children: busy ? "\u5904\u7406\u4E2D\u2026" : confirmLabel })
@@ -724,7 +738,7 @@ function fallbackRepair({ operation = "unknown", code = "internal", message = ""
       recommendation: [
         "\u5148\u5237\u65B0\u9875\u9762\u6838\u5BF9\u73B0\u573A\uFF08\u6280\u80FD\u5217\u8868\u4E0E\u76EE\u5F55\u662F\u5426\u5DF2\u53D8\u5316\uFF09\uFF0C\u518D\u51B3\u5B9A\u662F\u5426\u91CD\u8BD5\u2014\u2014\u975E\u5E42\u7B49\u64CD\u4F5C\u76F4\u63A5\u91CD\u8BD5\u53EF\u80FD\u91CD\u590D\u6267\u884C",
         "\u786E\u8BA4 DSH \u5B9E\u4F8B\u4ECD\u5728\u8FD0\u884C\u4E14\u672C\u63D2\u4EF6\u5DF2\u52A0\u8F7D",
-        "\u628A\u672C\u63D0\u793A\u8BCD\u4EA4\u7ED9\u672C\u5730 Agent\uFF1A\u53EA\u8BFB\u68C0\u67E5\u63D2\u4EF6\u52A0\u8F7D\u65E5\u5FD7\u4E0E settings.yaml \u7684 skill-manager \u6BB5"
+        "\u628A\u672C\u63D0\u793A\u8BCD\u4EA4\u7ED9\u672C\u5730 Agent\uFF1A\u53EA\u8BFB\u68C0\u67E5\u63D2\u4EF6\u52A0\u8F7D\u65E5\u5FD7\u4E0E $DSH_HOME/profiles/<profile>/cordis.patch.yml \u91CC skill-manager \u884C\u7684 config"
       ]
     },
     "contract-violation": {
@@ -751,7 +765,7 @@ function buildRepairPrompt({ root, code, message, repair }) {
     `\u9519\u8BEF\u7801\uFF1A${code || r.operation || "unknown"}`,
     `\u9519\u8BEF\u6D88\u606F\uFF1A${message || r.summary || "\uFF08\u65E0\uFF09"}`,
     `\u95EE\u9898\u6982\u8FF0\uFF1A${r.summary || "\uFF08\u65E0\uFF09"}`,
-    `\u914D\u7F6E\u76EE\u5F55\uFF08skillsDir\uFF09\uFF1A${root || "\uFF08\u672A\u77E5\uFF0C\u8BF7\u4ECE $DSH_HOME/settings.yaml \u7684 skill-manager \u6BB5\u8BFB\u53D6\uFF09"}`,
+    `\u914D\u7F6E\u76EE\u5F55\uFF08skillsDir\uFF09\uFF1A${root || "\uFF08\u672A\u77E5\uFF0C\u8BF7\u4ECE $DSH_HOME/profiles/<profile>/cordis.patch.yml \u91CC skill-manager \u884C\u7684 config \u8BFB\u53D6\uFF09"}`,
     "",
     "\u4E0A\u4E0B\u6587\u6E05\u5355\uFF1A"
   ];
@@ -831,7 +845,7 @@ function settingsWriteRepair(verdict, field, attempted, authoritative, root, rea
     recommendation: notApplied ? [
       "\u5148\u539F\u6837\u91CD\u8BD5\u4E00\u6B21\uFF08\u5E76\u53D1\u5199\u51B2\u7A81\u53EF\u81EA\u884C\u6062\u590D\uFF09",
       '\u4ECD\u4E0D\u751F\u6548\u65F6\u6838\u5BF9\u503C\u672C\u8EAB\uFF1A\u7EC4\u540D 1\u201330 \u5B57\u7B26\uFF0C\u300C\u9ED8\u8BA4\u300D\u300C\u5168\u90E8\u300D\u4E3A\u4FDD\u7559\u5B57\uFF0C\u4E0D\u542B / \\ : * ? " < > | \u4E0E\u63A7\u5236\u5B57\u7B26\uFF1BskillsDir \u975E\u7A7A\u65F6\u5FC5\u987B\u662F\u7EDD\u5BF9\u8DEF\u5F84',
-      "\u5E73\u53F0\u4E0D\u628A\u62D2\u7EDD\u539F\u56E0\u900F\u7ED9\u5BA2\u6237\u7AEF\uFF1B\u8981\u5B9A\u4F4D\u5230\u5177\u4F53\u539F\u56E0\u65F6\uFF0C\u53EA\u8BFB\u6838\u5BF9 $DSH_HOME/settings.yaml \u7684 skill-manager \u6BB5\u4E0E\u63D2\u4EF6 src/core/model/intent.js \u7684 validate \u89C4\u5219"
+      "\u5E73\u53F0\u4E0D\u628A\u62D2\u7EDD\u539F\u56E0\u900F\u7ED9\u5BA2\u6237\u7AEF\uFF1B\u8981\u5B9A\u4F4D\u5230\u5177\u4F53\u539F\u56E0\u65F6\uFF0C\u53EA\u8BFB\u6838\u5BF9 $DSH_HOME/profiles/<profile>/cordis.patch.yml \u91CC skill-manager \u884C\u7684 config \u4E0E\u63D2\u4EF6 src/core/model/intent.js \u7684\u6821\u9A8C\u89C4\u5219"
     ] : [
       "\u5148\u5237\u65B0\u9875\u9762\uFF08\u6216\u91CD\u8BFB\u914D\u7F6E\u5FEB\u7167\uFF09\u6838\u5BF9\u73B0\u573A\uFF1A\u5DF2\u662F\u76EE\u6807\u503C\u5C31\u65E0\u9700\u91CD\u8BD5\uFF0C\u5199\u5165\u5F88\u53EF\u80FD\u5DF2\u751F\u6548",
       "\u73B0\u573A\u4ECD\u662F\u65E7\u503C\u518D\u539F\u6837\u91CD\u8BD5\u4E00\u6B21",
@@ -1071,7 +1085,7 @@ function ManageView({ call, data, config, reload, showToast }) {
           /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: cardTitle, children: "\u5F53\u524D\u67E5\u770B\uFF1A\u5168\u90E8\u6280\u80FD" }),
           /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { ...noteText, marginTop: 4 }, children: "\u9009\u62E9\u5DE6\u4FA7\u5206\u7EC4\uFF0C\u53EF\u914D\u7F6E\u5B83\u5728 DSH \u5168\u5C40\u4E0E\u5404\u5DE5\u4F5C\u533A\u7684\u53EF\u7528\u8303\u56F4\u3002" })
         ] }) : /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(GroupScopePanel, { config, group: groupFilter, workspaces: data.workspaces, skills: data.lib.skills, onGroupOp: groupOp, piAvailable: data.agents?.pi?.available === true }),
-        warningLines.map((w) => /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { ...badgeStyle(T.warn), borderRadius: 10, padding: "9px 12px", margin: "8px 0", fontSize: 12, display: "flex", alignItems: "center", gap: 8 }, children: [
+        warningLines.map((w) => /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { ...badgeStyle(T.warn), borderRadius: R.md, padding: "9px 12px", margin: "8px 0", fontSize: 12, display: "flex", alignItems: "center", gap: 8 }, children: [
           /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: dotStyle(T.warn) }),
           /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: { flex: 1, minWidth: 0, wordBreak: "break-all" }, children: w.text }),
           /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(RepairCopy, { text: w.prompt })
@@ -1140,7 +1154,7 @@ function ManageView({ call, data, config, reload, showToast }) {
                     title: "\u884C\u64CD\u4F5C",
                     disabled: busy,
                     onClick: (e) => setMenuFor(menuFor?.dir === it.dir ? null : { dir: it.dir, rect: e.currentTarget.getBoundingClientRect() }),
-                    style: { border: "none", background: "transparent", cursor: busy ? "default" : "pointer", fontSize: 16, lineHeight: 1, padding: "3px 6px", borderRadius: 6, color: menuFor?.dir === it.dir ? T.labelPrimary : T.labelSecondary },
+                    style: { border: "none", background: "transparent", cursor: busy ? "default" : "pointer", fontSize: 16, lineHeight: 1, padding: "3px 6px", borderRadius: R.xs, color: menuFor?.dir === it.dir ? T.labelPrimary : T.labelSecondary },
                     children: "\u22EF"
                   }
                 )
@@ -1221,7 +1235,7 @@ function ManageView({ call, data, config, reload, showToast }) {
 var subRowPanel = {
   margin: "0 12px 8px",
   padding: "8px 12px",
-  borderRadius: 10,
+  borderRadius: R.md,
   background: T.bgLayer3,
   border: `1px solid ${T.borderL1}`
 };
@@ -1268,7 +1282,7 @@ function ScopeRow({ checked, title, hint, count, onToggle, trailing }) {
   return /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)(
     "label",
     {
-      style: { display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", borderRadius: 8, fontSize: 12, cursor: "pointer", background: checked ? `color-mix(in srgb, ${T.brand} 8%, transparent)` : hover ? T.bgModulePlatform : "transparent" },
+      style: { display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", borderRadius: R.sm, fontSize: 12, cursor: "pointer", background: checked ? `color-mix(in srgb, ${T.brand} 8%, transparent)` : hover ? T.bgModulePlatform : "transparent" },
       onMouseEnter: () => setHover(true),
       onMouseLeave: () => setHover(false),
       children: [
@@ -1446,7 +1460,7 @@ ${w.path}`.toLowerCase().includes(wsFilter.trim().toLowerCase())) : showAllWs ? 
             type: "button",
             title: "\u5206\u7EC4\u64CD\u4F5C",
             onClick: () => setOpsOpen((v) => !v),
-            style: { border: "none", background: "transparent", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "3px 6px", borderRadius: 6, color: opsOpen ? T.labelPrimary : T.labelSecondary },
+            style: { border: "none", background: "transparent", cursor: "pointer", fontSize: 16, lineHeight: 1, padding: "3px 6px", borderRadius: R.xs, color: opsOpen ? T.labelPrimary : T.labelSecondary },
             children: "\u22EF"
           }
         ),
@@ -1487,7 +1501,7 @@ ${w.path}`.toLowerCase().includes(wsFilter.trim().toLowerCase())) : showAllWs ? 
         /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("span", { style: pillBase, children: `\u5DF2\u542F\u7528 ${enabledWs.length} \xB7 \u5171 ${workspaces.length}` })
       ] }),
       workspaces.length > 8 && /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { marginBottom: 8 }, children: /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(import_dsh_client_ui_primitives3.Input, { placeholder: "\u8FC7\u6EE4\u5DE5\u4F5C\u533A\u2026", value: wsFilter, onChange: (e) => setWsFilter(e.target.value) }) }),
-      (visibleWs.length > 0 || filtering) && /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { border: `1px solid ${T.borderL1}`, borderRadius: 10, padding: 2, maxHeight: 208, overflowY: "auto", scrollbarWidth: "thin" }, children: [
+      (visibleWs.length > 0 || filtering) && /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { border: `1px solid ${T.borderL1}`, borderRadius: R.md, padding: 2, maxHeight: 208, overflowY: "auto", scrollbarWidth: "thin" }, children: [
         visibleWs.map((workspace) => /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(
           ScopeRow,
           {
@@ -1507,7 +1521,7 @@ ${w.path}`.toLowerCase().includes(wsFilter.trim().toLowerCase())) : showAllWs ? 
         {
           type: "button",
           onClick: () => setShowAllWs((v) => !v),
-          style: { display: "block", width: "100%", border: `1px dashed ${T.borderL2}`, background: "transparent", borderRadius: 8, padding: "6px 10px", marginTop: 6, font: "inherit", fontSize: 11, color: T.labelSecondary, cursor: "pointer", textAlign: "center" },
+          style: { display: "block", width: "100%", border: `1px dashed ${T.borderL2}`, background: "transparent", borderRadius: R.sm, padding: "6px 10px", marginTop: 6, font: "inherit", fontSize: 11, color: T.labelSecondary, cursor: "pointer", textAlign: "center" },
           children: showAllWs ? "\u25BE \u6536\u8D77\u5176\u4ED6\u5DE5\u4F5C\u533A" : `\u25B8 \u5C55\u5F00\u5176\u4ED6 ${restCount} \u4E2A\u5DE5\u4F5C\u533A\uFF08\u52FE\u9009\u5373\u542F\u7528\uFF09`
         }
       )
@@ -1521,7 +1535,7 @@ ${w.path}`.toLowerCase().includes(wsFilter.trim().toLowerCase())) : showAllWs ? 
         "\u300D\u7684\u6302\u8F7D\uFF1F"
       ] }),
       /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { color: T.labelSecondary, fontSize: 13, lineHeight: 1.55, marginBottom: 12 }, children: `\u8BE5\u5206\u7EC4\u6709 ${pendingUnmount.count} \u4E2A Skill \u6302\u8F7D\u5728\u6B64\u76EE\u6807\u4E0B\uFF0C\u53D6\u6D88\u540E\u5BF9\u8D26\u4F1A\u79FB\u9664\u8FD9\u4E9B\u94FE\u63A5\u3002` }),
-      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { borderRadius: 10, padding: "10px 12px", marginBottom: 14, ...badgeStyle(T.warn), fontSize: 12, lineHeight: 1.55 }, children: `\u53EA\u79FB\u9664\u94FE\u63A5\u6307\u9488\uFF0C\u4E0D\u5220\u9664\u6280\u80FD\u5E93\u6587\u4EF6${pendingUnmount.hosts.includes("pi") ? "\uFF1B\u672C\u76EE\u6807\u542B pi \u5BBF\u4E3B\uFF0C.pi/skills \u4E0E pi \u7528\u6237\u7EA7\u94FE\u63A5\u4E00\u5E76\u6458\u9664" : ""}\uFF1B\u91CD\u65B0\u52FE\u9009\u5373\u53EF\u6062\u590D\u6302\u8F7D\u3002` }),
+      /* @__PURE__ */ (0, import_jsx_runtime3.jsx)("div", { style: { borderRadius: R.md, padding: "10px 12px", marginBottom: 14, ...badgeStyle(T.warn), fontSize: 12, lineHeight: 1.55 }, children: `\u53EA\u79FB\u9664\u94FE\u63A5\u6307\u9488\uFF0C\u4E0D\u5220\u9664\u6280\u80FD\u5E93\u6587\u4EF6${pendingUnmount.hosts.includes("pi") ? "\uFF1B\u672C\u76EE\u6807\u542B pi \u5BBF\u4E3B\uFF0C.pi/skills \u4E0E pi \u7528\u6237\u7EA7\u94FE\u63A5\u4E00\u5E76\u6458\u9664" : ""}\uFF1B\u91CD\u65B0\u52FE\u9009\u5373\u53EF\u6062\u590D\u6302\u8F7D\u3002` }),
       /* @__PURE__ */ (0, import_jsx_runtime3.jsxs)("div", { style: { display: "flex", justifyContent: "flex-end", gap: 8 }, children: [
         /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(OutlineBtn, { onClick: () => setPendingUnmount(null), children: "\u53D6\u6D88" }),
         /* @__PURE__ */ (0, import_jsx_runtime3.jsx)(PrimaryBtn, { onClick: confirmUnmount, children: `\u786E\u8BA4\u79FB\u9664 ${pendingUnmount.count} \u6761\u94FE\u63A5` })
@@ -1737,7 +1751,7 @@ ${suggestName(c)}`.toLowerCase().includes(query2));
           ] })
         ] });
       })(),
-      /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { style: { ...badgeStyle(T.warn), borderRadius: 10, padding: "9px 12px", fontSize: 11, lineHeight: 1.6, display: "flex", gap: 8 }, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { style: { ...badgeStyle(T.warn), borderRadius: R.md, padding: "9px 12px", fontSize: 11, lineHeight: 1.6, display: "flex", gap: 8 }, children: [
         /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("span", { style: { ...dotStyle(T.warn), marginTop: 5 } }),
         /* @__PURE__ */ (0, import_jsx_runtime4.jsxs)("div", { children: [
           /* @__PURE__ */ (0, import_jsx_runtime4.jsx)("div", { children: "\u540C\u540D\u4E14\u540C\u4ED3\u5E93\u65F6\u6539\u7528\u66F4\u65B0\uFF1B\u540C\u540D\u5F02\u6E90\u65F6\u9700\u5148\u51FA\u5E93\u3002" }),
@@ -1987,7 +2001,7 @@ function SkillsSection({ call, workspaces, scope, subscribeSkillSettings, readCo
       t.key
     )) }),
     error ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(ErrorLineWrap, { error, root: data && data.root }) : null,
-    editError ? /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { style: { ...badgeStyle(T.error), borderRadius: 10, padding: "8px 12px", margin: "8px 0 0", fontSize: 12, display: "flex", alignItems: "center", gap: 8 }, children: [
+    editError ? /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { style: { ...badgeStyle(T.error), borderRadius: R.md, padding: "8px 12px", margin: "8px 0 0", fontSize: 12, display: "flex", alignItems: "center", gap: 8 }, children: [
       /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { style: { flex: 1, minWidth: 0, wordBreak: "break-all" }, children: editError.message }),
       editError.prompt ? /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(RepairCopy, { text: editError.prompt }) : null
     ] }) : null,
@@ -1998,256 +2012,165 @@ function SkillsSection({ call, workspaces, scope, subscribeSkillSettings, readCo
 }
 function ErrorLineWrap({ error, root }) {
   if (!error) return null;
-  return /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { style: { ...badgeStyle(T.error), borderRadius: 10, padding: "8px 12px", margin: "4px 0 0", fontSize: 12, display: "flex", alignItems: "center", gap: 8 }, children: [
+  return /* @__PURE__ */ (0, import_jsx_runtime5.jsxs)("div", { style: { ...badgeStyle(T.error), borderRadius: R.md, padding: "8px 12px", margin: "4px 0 0", fontSize: 12, display: "flex", alignItems: "center", gap: 8 }, children: [
     /* @__PURE__ */ (0, import_jsx_runtime5.jsx)("span", { style: { flex: 1, minWidth: 0, wordBreak: "break-all" }, children: error.message || String(error) }),
     /* @__PURE__ */ (0, import_jsx_runtime5.jsx)(RepairCopy, { text: buildRepairPrompt({ root, code: error.code, message: error.message, repair: error.repair }) })
   ] });
 }
 
 // src/client/card.jsx
-var import_react6 = require("react");
+var import_dsh_client_ui_primitives5 = require("@deepseek-ai/dsh-client-ui-primitives");
+
+// src/core/model/config-fields.js
+var CONFIG_NS = "skill-manager";
+var SKILLS_DIR_FIELD = "skillsDir";
+var PI_FIELD = "pi";
+
+// src/core/model/page-specs.js
+var skillsDirSpec = {
+  field: SKILLS_DIR_FIELD,
+  format: (value) => typeof value === "string" ? value : "",
+  parse: (text) => {
+    const trimmed = text.trim();
+    return trimmed === "" ? { kind: "clear" } : { kind: "set", value: trimmed };
+  }
+};
+var piSpec = {
+  field: PI_FIELD,
+  format: (value) => value === true ? "true" : "false",
+  parse: (text) => {
+    const normalized = String(text).trim().toLowerCase();
+    if (normalized === "true") return { kind: "set", value: true };
+    if (normalized === "false") return { kind: "set", value: false };
+    return void 0;
+  }
+};
+var CONFIG_PAGE_SPECS = [skillsDirSpec, piSpec];
+var isOn = (text) => String(text).trim().toLowerCase() === "true";
+
+// src/client/card.jsx
 var import_jsx_runtime6 = require("react/jsx-runtime");
-function SkillManagerCard({ view, scope, uiWorkspace, readConfigField }) {
-  const [open, setOpen] = (0, import_react6.useState)(false);
-  const [draft, setDraft] = (0, import_react6.useState)("");
-  const [touched, setTouched] = (0, import_react6.useState)(false);
-  const [busy, setBusy] = (0, import_react6.useState)(false);
-  const [failed, setFailed] = (0, import_react6.useState)(null);
-  const [focused, setFocused] = (0, import_react6.useState)(false);
-  const [hoverDiscard, setHoverDiscard] = (0, import_react6.useState)(false);
-  const [focusEl, setFocusEl] = (0, import_react6.useState)(null);
-  const [snap, setSnap] = (0, import_react6.useState)(() => scope.getSnapshot());
-  (0, import_react6.useEffect)(() => {
-    let alive = true;
-    const apply2 = () => {
-      if (alive) setSnap(scope.getSnapshot());
-    };
-    const off = scope.subscribe(apply2);
-    apply2();
-    return () => {
-      alive = false;
-      off();
-    };
-  }, [scope]);
-  const ready = snap.status === "ready";
-  const section = snap.value && typeof snap.value === "object" ? snap.value : {};
-  const current = typeof section.skillsDir === "string" ? section.skillsDir : "";
-  const overridden = Boolean(snap && snap.user && typeof snap.user === "object" && "skillsDir" in snap.user);
-  const piOn = section.pi === true;
-  (0, import_react6.useEffect)(() => {
-    if (!touched) setDraft(current);
-  }, [current, touched]);
-  const [piDraft, setPiDraft] = (0, import_react6.useState)(null);
-  const dirty = touched && draft !== current || piDraft !== null && piDraft !== piOn;
-  const failure = (verdict, field, attempted, authoritative, readError) => ({
-    message: verdict === "not-applied" ? `\u914D\u7F6E\u300C${field}\u300D\u5199\u5165\u672A\u751F\u6548\uFF1AHost \u6743\u5A01\u503C\u4ECD\u662F\u539F\u503C\uFF08\u88AB\u62D2\u7EDD\u6216\u5DF2\u88AB\u5E76\u53D1\u5199\u8986\u76D6\uFF09\u3002` : `\u914D\u7F6E\u300C${field}\u300D\u5199\u5165\u7ED3\u679C\u672A\u786E\u8BA4\uFF1A\u8BFB\u4E0D\u5230 Host \u6743\u5A01\u503C\uFF08${readError || "\u539F\u56E0\u672A\u77E5"}\uFF09\uFF0C\u8BF7\u5237\u65B0\u9875\u9762\u6838\u5BF9\u73B0\u573A\u3002`,
-    prompt: buildRepairPrompt({
-      root: current,
-      code: verdict === "not-applied" ? "settings-write-not-applied" : "settings-write-unconfirmed",
-      message: `\u5B57\u6BB5 ${field} \u5199\u540E\u88C1\u5B9A\uFF1A${verdict}`,
-      repair: settingsWriteRepair(verdict, field, attempted, authoritative, current, readError)
-    })
-  });
-  const save = async () => {
-    if (!ready) return;
-    setBusy(true);
-    setFailed(null);
-    let field = "skillsDir";
-    let attempted = draft.trim();
-    try {
-      if (touched && attempted !== current) {
-        await scope.set("skillsDir", attempted);
-        const read = await readConfigField("skillsDir");
-        const verdict = writeVerdict(attempted, read.value);
-        if (verdict !== "accepted") {
-          setFailed(failure(verdict, "skillsDir", attempted, read.value, read.error));
-          return;
-        }
-        setDraft(attempted);
-        setTouched(false);
-      }
-      if (piDraft !== null && piDraft !== piOn) {
-        field = "pi";
-        attempted = piDraft;
-        await scope.set("pi", piDraft);
-        const read = await readConfigField("pi");
-        const verdict = writeVerdict(piDraft, read.value);
-        if (verdict !== "accepted") {
-          setFailed(failure(verdict, "pi", piDraft, read.value, read.error));
-          return;
-        }
-        setPiDraft(null);
-      }
-    } catch (e) {
-      setFailed({
-        message: `\u5199\u5165\u5931\u8D25\uFF08\u8BF7\u6C42\u672A\u8FBE Host\uFF09\uFF1A${e?.message ?? String(e)}`,
-        prompt: buildRepairPrompt({
-          root: current,
-          code: "settings-write-failed",
-          message: `\u5B57\u6BB5 ${field} \u5199\u5165\u8BF7\u6C42\u672A\u8FBE Host`,
-          repair: settingsWriteRepair("unknown", field, attempted, void 0, current)
-        })
-      });
-    } finally {
-      setBusy(false);
-    }
-  };
-  const discard = () => {
-    setFailed(null);
-    setDraft(current);
-    setTouched(false);
-    setPiDraft(null);
-  };
-  const reset = async () => {
-    if (!ready) return;
-    setBusy(true);
-    setFailed(null);
-    try {
-      await scope.unset("skillsDir");
-      const fresh = scope.getSnapshot();
-      const v = fresh.value && typeof fresh.value === "object" ? fresh.value : {};
-      setDraft(typeof v.skillsDir === "string" ? v.skillsDir : "");
-      setTouched(false);
-    } catch (e) {
-      setFailed(reject(`\u91CD\u7F6E\u5931\u8D25\uFF08\u8BF7\u6C42\u672A\u8FBE Host\uFF09\uFF1A${e?.message ?? String(e)}`, "settings-write-failed"));
-    } finally {
-      setBusy(false);
-    }
-  };
-  const pickDirectory = async () => {
-    setBusy(true);
-    setFailed(null);
-    try {
-      const path = await uiWorkspace.pickDirectory();
-      if (path) {
-        setDraft(path);
-        setTouched(true);
-      }
-    } catch (e) {
-      setFailed({
-        message: e && e.message ? `\u9009\u62E9\u76EE\u5F55\u5931\u8D25\uFF1A${e.message}` : "\u9009\u62E9\u76EE\u5F55\u5931\u8D25",
-        prompt: buildRepairPrompt({
-          root: current,
-          code: "directory-picker-failed",
-          message: e && e.message ? e.message : "",
-          repair: null
-        })
-      });
-    } finally {
-      setBusy(false);
-    }
-  };
+var LABELS = {
+  unavailable: "\u672C profile \u672A\u63D0\u4F9B\u8BE5\u914D\u7F6E\u9879\uFF08\u672C\u884C\u672A\u6FC0\u6D3B\uFF0C\u6216\u8BBE\u7F6E\u9762\u53EA\u8BFB\uFF09\u2014\u2014\u5F53\u524D\u6309 profile \u91CC\u7684\u884C\u914D\u7F6E\u5DE5\u4F5C\u3002",
+  readOnly: "\u5F53\u524D profile \u7684\u8BBE\u7F6E\u9762\u53EA\u8BFB\uFF0C\u65E0\u6CD5\u4FDD\u5B58\u3002",
+  saveFailed: "\u4FDD\u5B58\u672A\u751F\u6548\uFF1AHost \u672A\u63A5\u53D7\uFF08\u6821\u9A8C\u672A\u8FC7\u6216\u7248\u672C\u51B2\u7A81\uFF09\uFF0C\u5DF2\u56DE\u8BFB\u5F53\u524D\u751F\u6548\u503C\uFF1B\u8349\u7A3F\u4FDD\u7559\uFF0C\u8BF7\u8C03\u6574\u540E\u91CD\u8BD5\u3002",
+  save: "\u4FDD\u5B58",
+  saving: "\u4FDD\u5B58\u4E2D\u2026"
+};
+var DIR_LABEL = "\u672C\u5730 skills \u76EE\u5F55";
+var DIR_HINT = "\u81EA\u7814/\u672C\u5730 skill \u7684\u5E73\u94FA\u76EE\u5F55\uFF0C\u7EDD\u5BF9\u8DEF\u5F84\uFF0C\u4FDD\u5B58\u540E\u7ACB\u5373\u751F\u6548\u3002GitHub \u5165\u5E93\u5B89\u88C5\u5230\u63D2\u4EF6\u4E13\u5C5E\u76EE\u5F55\uFF0C\u4E0D\u53D7\u672C\u5730\u7F16\u8F91\u5F71\u54CD\u3002";
+var OVERRIDDEN = "\u5DF2\u8986\u76D6";
+var RESET = "\u91CD\u7F6E";
+function SkillManagerCard({ view, useConfigPage, edit, resetField, save, discard, uiWorkspace }) {
+  const state = useConfigPage((snapshot) => snapshot);
   if (view === "summary") {
     return /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { children: "\u914D\u7F6E\u672C\u5730 skills \u76EE\u5F55\u4E0E pi agent \u63A5\u7BA1\uFF08\u9ED8\u8BA4\u4E3A\u7A7A\u5373\u672A\u914D\u7F6E\uFF09" });
   }
-  return /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { style: { border: `1px solid ${T.borderL2}`, borderRadius: 12, background: open ? T.bgLayer2 : T.bgLayer3, transition: "border-color .16s, background .16s" }, children: [
-    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)(
-      "button",
-      {
-        type: "button",
-        "aria-expanded": open,
-        "aria-label": `${open ? "\u6536\u8D77" : "\u5C55\u5F00"}: \u6280\u80FD\u7BA1\u7406`,
-        onClick: () => setOpen(!open),
-        onFocus: () => setFocusEl("header"),
-        onBlur: () => setFocusEl(null),
-        style: { width: "100%", appearance: "none", border: 0, background: "none", font: "inherit", color: "inherit", textAlign: "left", cursor: "pointer", display: "flex", alignItems: "center", gap: 12, padding: "14px 16px", borderRadius: 12, ...focusEl === "header" ? { outline: `2px solid ${T.brand}`, outlineOffset: -2 } : {} },
-        children: [
-          /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("span", { style: { flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 4 }, children: [
-            /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { style: { fontSize: 15, fontWeight: 600, lineHeight: 1.4, color: T.labelPrimary }, children: "\u6280\u80FD\u7BA1\u7406" }),
-            /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { style: { fontSize: 13, lineHeight: 1.5, color: T.labelTertiary }, children: "\u914D\u7F6E\u672C\u5730 skills \u76EE\u5F55\u4E0E pi agent \u63A5\u7BA1\uFF08\u9ED8\u8BA4\u4E3A\u7A7A\u5373\u672A\u914D\u7F6E\uFF09" })
-          ] }),
-          dirty ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { style: { flex: "none", borderRadius: 999, padding: "1px 8px", fontSize: 11, lineHeight: "17px", fontWeight: 500, whiteSpace: "nowrap", background: T.bgModulePlatform, color: T.labelSecondary }, children: "\u672A\u4FDD\u5B58" }) : null,
-          ChevronIcon ? /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(ChevronIcon, { style: { flex: "none", color: T.labelTertiary, transition: "transform .16s", transform: open ? "rotate(180deg)" : void 0 } }) : /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { style: { flex: "none", color: T.labelTertiary, fontSize: 12 }, children: open ? "\u25BE" : "\u25B8" })
-        ]
-      }
-    ),
-    open ? /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { style: { borderTop: `1px solid ${T.borderL2}`, margin: "0 16px", paddingBottom: 8 }, children: [
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { style: { display: "flex", flexDirection: "column", gap: 6, padding: "12px 0" }, children: [
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { style: { display: "flex", alignItems: "center", gap: 8 }, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("label", { htmlFor: "skill-manager-skills-dir", style: { flex: 1, minWidth: 0, fontSize: 13, fontWeight: 500, lineHeight: 1.5, color: T.labelPrimary }, children: "\u672C\u5730 skills \u76EE\u5F55" }),
-          overridden ? /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("span", { style: { display: "inline-flex", alignItems: "center", gap: 8 }, children: [
-            /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { style: { borderRadius: 999, padding: "1px 8px", fontSize: 11, lineHeight: "17px", whiteSpace: "nowrap", fontWeight: 500, background: T.bgModulePlatform, color: T.labelSecondary }, children: "\u5DF2\u8986\u76D6" }),
-            /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("button", { type: "button", disabled: busy || !ready, onClick: reset, style: { border: "none", background: "none", padding: 0, font: "inherit", fontSize: 12, lineHeight: 1.5, color: T.labelSecondary, cursor: "pointer" }, children: "\u91CD\u7F6E" })
-          ] }) : null
-        ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { style: { display: "flex", gap: 8, alignItems: "center" }, children: [
-          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
-            "input",
-            {
-              id: "skill-manager-skills-dir",
-              type: "text",
-              value: draft,
-              placeholder: "\u4F8B\u5982 E:\\Project\\Skills\uFF08\u9ED8\u8BA4\u4E3A\u7A7A = \u672A\u914D\u7F6E\uFF09",
-              onChange: (e) => {
-                setDraft(e.target.value);
-                setTouched(true);
-                setFailed(null);
-              },
-              onFocus: () => setFocused(true),
-              onBlur: () => setFocused(false),
-              style: { flex: 1, minWidth: 0, height: 34, padding: "0 12px", border: `1px solid ${focused ? T.brand : T.borderL2}`, borderRadius: 8, background: T.bgLayer3, font: "inherit", fontSize: 13, lineHeight: 1.5, color: T.labelPrimary, outline: "none", boxSizing: "border-box" }
-            }
-          ),
-          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(GhostBtn, { disabled: busy || !ready, onClick: pickDirectory, children: "\u9009\u62E9\u2026" })
-        ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { style: { margin: 0, fontSize: 12, lineHeight: 1.5, color: T.labelTertiary }, children: "\u81EA\u7814/\u672C\u5730 skill \u7684\u5E73\u94FA\u76EE\u5F55\uFF0C\u7EDD\u5BF9\u8DEF\u5F84\uFF0C\u4FDD\u5B58\u540E\u7ACB\u5373\u751F\u6548\u3002GitHub \u5165\u5E93\u5B89\u88C5\u5230\u63D2\u4EF6\u4E13\u5C5E\u76EE\u5F55\uFF0C\u4E0D\u53D7\u672C\u5730\u7F16\u8F91\u5F71\u54CD\u3002" })
+  const disabled = !state.writable;
+  const pickDirectory = async () => {
+    try {
+      const path = await uiWorkspace.pickDirectory();
+      if (path) edit("skillsDir", path);
+    } catch {
+    }
+  };
+  return /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)(import_dsh_client_ui_primitives5.SettingsForm, { labels: LABELS, state, onSave: save, onDiscard: discard, children: [
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { style: { display: "flex", alignItems: "center", gap: 8 }, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("div", { style: { flex: 1, minWidth: 0 }, children: /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+        import_dsh_client_ui_primitives5.SettingsValueField,
+        {
+          id: "skill-manager-skills-dir",
+          label: DIR_LABEL,
+          hint: DIR_HINT,
+          overriddenLabel: OVERRIDDEN,
+          resetLabel: RESET,
+          invalidLabel: "\u8BE5\u8349\u7A3F\u4E0D\u662F\u672C\u5B57\u6BB5\u63A5\u53D7\u7684\u503C",
+          placeholder: "\u4F8B\u5982 E:\\Project\\Skills\uFF08\u9ED8\u8BA4\u4E3A\u7A7A = \u672A\u914D\u7F6E\uFF09",
+          text: state.skillsDir.text,
+          overridden: state.skillsDir.overridden,
+          invalid: state.skillsDir.invalid,
+          disabled,
+          onEdit: (text) => edit("skillsDir", text),
+          onReset: () => resetField("skillsDir")
+        }
+      ) }),
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(GhostBtn, { disabled, onClick: pickDirectory, children: "\u9009\u62E9\u2026" })
+    ] }),
+    /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { style: { display: "flex", alignItems: "center", gap: 14, paddingTop: 4 }, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { style: { fontSize: 13, fontWeight: 500, color: T.labelPrimary }, children: "\u63A5\u7BA1\u5BBF\u4E3B" }),
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("label", { style: { display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: T.labelTertiary, cursor: "default" }, title: "DSH \u662F\u672C\u63D2\u4EF6\u7684\u57FA\u672C\u76D8\uFF0C\u6052\u4E3A\u63A5\u7BA1\u5BBF\u4E3B", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("input", { type: "checkbox", checked: true, disabled: true, style: { accentColor: T.brand, width: 13, height: 13, margin: 0 } }),
+        "DSH"
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { style: { display: "flex", alignItems: "center", gap: 14, padding: "2px 0 12px" }, children: [
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { style: { fontSize: 13, fontWeight: 500, color: T.labelPrimary }, children: "\u63A5\u7BA1\u5BBF\u4E3B" }),
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("label", { style: { display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: T.labelTertiary, cursor: "default" }, title: "DSH \u662F\u672C\u63D2\u4EF6\u7684\u57FA\u672C\u76D8\uFF0C\u6052\u4E3A\u63A5\u7BA1\u5BBF\u4E3B", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("input", { type: "checkbox", checked: true, disabled: true, style: { accentColor: T.brand, width: 13, height: 13, margin: 0 } }),
-          "DSH"
-        ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("label", { style: { display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: T.labelPrimary, cursor: ready && !busy ? "pointer" : "default" }, title: "\u52FE\u9009\u540E\u4FDD\u5B58\u751F\u6548\uFF1Api \u6309\u9ED8\u8BA4\u8DEF\u5F84\u88AB\u63A5\u7BA1\uFF08~/.pi/agent/skills \u4E0E\u5404\u9879\u76EE .pi/skills\uFF09", children: [
-          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("input", { type: "checkbox", checked: piDraft ?? piOn, disabled: busy || !ready, onChange: (e) => {
-            setPiDraft(e.target.checked);
-            setFailed(null);
-          }, style: { accentColor: T.brand, width: 13, height: 13, margin: 0 } }),
-          "pi agent"
-        ] }),
-        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { style: { fontSize: 12, lineHeight: 1.5, color: T.labelTertiary }, children: "pi \u56FA\u5B9A\u8D70\u9ED8\u8BA4\u8DEF\u5F84\uFF08~/.pi/agent\uFF09\uFF0C\u4FDD\u5B58\u540E\u751F\u6548" })
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("label", { style: { display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: T.labelPrimary, cursor: disabled ? "default" : "pointer" }, title: "\u52FE\u9009\u540E\u4FDD\u5B58\u751F\u6548\uFF1Api \u6309\u9ED8\u8BA4\u8DEF\u5F84\u88AB\u63A5\u7BA1\uFF08~/.pi/agent/skills \u4E0E\u5404\u9879\u76EE .pi/skills\uFF09", children: [
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
+          "input",
+          {
+            type: "checkbox",
+            checked: isOn(state.pi.text),
+            disabled,
+            onChange: (event) => edit("pi", event.target.checked ? "true" : "false"),
+            style: { accentColor: T.brand, width: 13, height: 13, margin: 0 }
+          }
+        ),
+        "pi agent"
       ] }),
-      /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { style: { display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, padding: "12px 0 4px", borderTop: `1px solid ${T.borderL2}` }, children: [
-        failed ? /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)(import_jsx_runtime6.Fragment, { children: [
-          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { style: { flex: 1, minWidth: 0, margin: 0, fontSize: 12, lineHeight: 1.5, color: T.error }, children: failed.message }),
-          /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(RepairCopy, { text: failed.prompt })
-        ] }) : null,
-        (() => {
-          const blocked = !dirty || busy || !ready;
-          const focusStyle = (el) => focusEl === el ? { outline: `2px solid ${T.brand}`, outlineOffset: 1 } : {};
-          return /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)(import_jsx_runtime6.Fragment, { children: [
-            /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
-              "button",
-              {
-                type: "button",
-                disabled: blocked,
-                onClick: discard,
-                onMouseEnter: () => setHoverDiscard(true),
-                onMouseLeave: () => setHoverDiscard(false),
-                onFocus: () => setFocusEl("discard"),
-                onBlur: () => setFocusEl(null),
-                style: { appearance: "none", border: `1px solid ${!blocked && hoverDiscard ? T.labelDimmed : T.borderL2}`, borderRadius: 8, padding: "5px 14px", font: "inherit", fontSize: 13, lineHeight: 1.5, cursor: blocked ? "default" : "pointer", background: "none", color: !blocked && hoverDiscard ? T.labelPrimary : T.labelSecondary, opacity: blocked ? 0.4 : 1, ...focusStyle("discard") },
-                children: "\u653E\u5F03"
-              }
-            ),
-            /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(
-              "button",
-              {
-                type: "button",
-                disabled: blocked,
-                onClick: save,
-                onFocus: () => setFocusEl("save"),
-                onBlur: () => setFocusEl(null),
-                style: { appearance: "none", border: "1px solid transparent", borderRadius: 8, padding: "5px 14px", font: "inherit", fontSize: 13, lineHeight: 1.5, cursor: blocked ? "default" : "pointer", background: T.labelPrimary, color: T.bgLayer3, opacity: blocked ? 0.4 : 1, ...focusStyle("save") },
-                children: busy ? "\u4FDD\u5B58\u4E2D\u2026" : "\u4FDD\u5B58"
-              }
-            )
-          ] });
-        })()
-      ] })
+      state.pi.overridden ? /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("span", { style: { display: "inline-flex", alignItems: "center", gap: 8 }, children: [
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(import_dsh_client_ui_primitives5.Tag, { tone: "neutral", children: OVERRIDDEN }),
+        /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("button", { type: "button", disabled, onClick: () => resetField("pi"), style: { border: "none", background: "none", padding: 0, font: "inherit", fontSize: 12, lineHeight: 1.5, color: T.labelSecondary, cursor: disabled ? "default" : "pointer" }, children: RESET })
+      ] }) : null,
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("span", { style: { fontSize: 12, lineHeight: 1.5, color: T.labelTertiary }, children: "pi \u56FA\u5B9A\u8D70\u9ED8\u8BA4\u8DEF\u5F84\uFF08~/.pi/agent\uFF09\uFF0C\u4FDD\u5B58\u540E\u751F\u6548" })
+    ] }),
+    state.failed ? /* @__PURE__ */ (0, import_jsx_runtime6.jsxs)("div", { style: { display: "flex", alignItems: "flex-start", gap: 8, marginTop: 8 }, children: [
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)("p", { style: { flex: 1, minWidth: 0, margin: 0, fontSize: 12, lineHeight: 1.5, color: T.error }, children: "\u914D\u7F6E\u5199\u5165\u672A\u751F\u6548\uFF08Host \u62D2\u7EDD\u6216\u7248\u672C\u51B2\u7A81\uFF09\u3002\u8349\u7A3F\u5DF2\u4FDD\u7559\uFF0C\u53EF\u8C03\u6574\u540E\u91CD\u8BD5\uFF0C\u6216\u590D\u5236\u4E0B\u65B9\u63D0\u793A\u8BCD\u4EA4\u7ED9\u672C\u5730 Agent \u6392\u67E5\u3002" }),
+      /* @__PURE__ */ (0, import_jsx_runtime6.jsx)(RepairCopy, { text: buildRepairPrompt({
+        root: state.skillsDir.text,
+        code: "settings-write-not-applied",
+        message: "\u914D\u7F6E\u9875\u4FDD\u5B58\u540E Host \u672A\u63A5\u53D7\uFF08saveFailed\uFF09",
+        repair: {
+          operation: "skill-manager \u914D\u7F6E\u9875\u4FDD\u5B58",
+          summary: "\u672C\u884C\u914D\u7F6E\uFF08skillsDir / pi\uFF09\u7684\u4E00\u6B21\u539F\u5B50\u5199\u5165\u672A\u88AB Host \u63A5\u53D7\uFF1B\u8868\u5355\u5DF2\u56DE\u8BFB\u5E76\u786E\u8BA4\u672A\u843D\u5B9A\u3002",
+          facts: [
+            { label: "\u547D\u540D\u7A7A\u95F4", value: "skill-manager\uFF08= profile \u91CC\u672C\u63D2\u4EF6\u884C\u7684 id\uFF09" },
+            { label: "\u5C1D\u8BD5\u5199\u5165\u7684\u76EE\u5F55", value: state.skillsDir.text === "" ? "\uFF08\u7A7A = \u6E05\u9664\u8BE5\u5B57\u6BB5\uFF09" : state.skillsDir.text },
+            { label: "\u5C1D\u8BD5\u5199\u5165\u7684 pi \u5F00\u5173", value: isOn(state.pi.text) ? "true" : "false" },
+            { label: "\u6700\u53EF\u80FD\u7684\u539F\u56E0", value: "\u76EE\u5F55\u4E0D\u662F\u7EDD\u5BF9\u8DEF\u5F84\uFF1B\u6216\u8BE5 profile \u7684\u884C\u914D\u7F6E\u88AB home patch / \u547D\u4EE4\u884C overlay \u8986\u76D6\uFF08\u90A3\u4E24\u5C42\u4F18\u5148\u4E8E\u8868\u5355\u5199\u5165\uFF0C\u5199\u5165\u4F1A\u88AB\u62D2\uFF09" }
+          ],
+          recommendation: [
+            "\u6838\u5BF9\u300C\u672C\u5730 skills \u76EE\u5F55\u300D\u662F\u5426\u4E3A\u7EDD\u5BF9\u8DEF\u5F84\uFF08\u5982 E:\\Project\\Skills\uFF09",
+            "\u68C0\u67E5\u8BE5 profile \u7684 cordis.patch.yml \u4E0E $DSH_HOME/cordis.patch.yml \u662F\u5426\u4E5F\u5199\u4E86 skill-manager \u884C",
+            "\u5FC5\u8981\u65F6\u7528\u300C\u91CD\u7F6E\u300D\u6E05\u6389\u8BE5\u5B57\u6BB5\u7684\u8986\u76D6\uFF0C\u56DE\u843D profile \u884C\u91CC\u7684\u7EC4\u5408\u5C42\u914D\u7F6E"
+          ]
+        }
+      }) })
     ] }) : null
   ] });
 }
+
+// src/client/config-page.js
+var import_dsh_client_ui_primitives6 = require("@deepseek-ai/dsh-client-ui-primitives");
+var ConfigPageController = class {
+  constructor(scope) {
+    this.form = new import_dsh_client_ui_primitives6.SettingsFormModel(scope, CONFIG_PAGE_SPECS);
+    this.store = this.form.bind(() => this.projection());
+  }
+  /** 组件通过 `useConfigPage(selector)` 读到的快照。 */
+  projection() {
+    return {
+      ...this.form.shell(),
+      skillsDir: this.form.field("skillsDir"),
+      pi: this.form.field("pi")
+    };
+  }
+  /** 槽位注册时注入的面：`hooks`（保留舱）+ 官方模型的四个动作。 */
+  inject() {
+    return { hooks: { configPage: this.store }, ...this.form.actions() };
+  }
+  /** 释放模型的 scope 订阅。 */
+  dispose() {
+    this.form.dispose();
+  }
+};
 
 // src/client/nav-icon.js
 var STROKE_WIDTH = 1.3;
@@ -2292,7 +2215,7 @@ function observeSkillsNavIcon() {
 }
 
 // src/client/index.jsx
-var NS = "skill-manager";
+var NS = CONFIG_NS;
 var ROW_KEY = "dsh-skill-manager#skill-manager";
 var inject = ["slots", "workspaces", "uiWorkspace", "configForms", "remote", "remote.settings", "connection"];
 function apply(ctx) {
@@ -2300,6 +2223,8 @@ function apply(ctx) {
   const workspaces = ctx.workspaces;
   const uiWorkspace = ctx.uiWorkspace;
   const scope = ctx.configForms.get(NS);
+  const page = new ConfigPageController(scope);
+  ctx.effect(() => () => page.dispose(), "dsh-skill-manager: config page form");
   const readConfigField = async (field) => {
     try {
       const response = await ctx.remote.settings.describe();
@@ -2337,7 +2262,7 @@ function apply(ctx) {
       () => ctx.slots.inject(
         "plugins.row.config",
         () => ctx.slots.register(
-          { name: "plugins.row.config", key: ROW_KEY, inject: () => ({ scope, uiWorkspace, readConfigField }) },
+          { name: "plugins.row.config", key: ROW_KEY, inject: () => ({ ...page.inject(), uiWorkspace }) },
           SkillManagerCard
         )
       )

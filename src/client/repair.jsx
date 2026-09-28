@@ -1,7 +1,7 @@
-// repair — 修复提示词统一组件：RPC 失败、settings 拒绝、挂载失败三处共用一套模板。
+// repair — 修复提示词统一组件：RPC 失败、配置写入未落定、挂载失败三处共用一套模板。
 //
 // 边界：文案模板归 Client（刷新即生效），Host 只供事实。
-// 参考：插件运行时.md「Client 入口」；DSR-018、R-17。
+// 参考：插件运行时.md「Client 入口」；DSR-018、R-17、DSR-025。
 import { useState, useEffect } from 'react'
 import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
 import { T } from './theme.js'
@@ -49,7 +49,7 @@ export function fallbackRepair({ operation = 'unknown', code = 'internal', messa
       recommendation: [
         '先刷新页面核对现场（技能列表与目录是否已变化），再决定是否重试——非幂等操作直接重试可能重复执行',
         '确认 DSH 实例仍在运行且本插件已加载',
-        '把本提示词交给本地 Agent：只读检查插件加载日志与 settings.yaml 的 skill-manager 段',
+        '把本提示词交给本地 Agent：只读检查插件加载日志与 $DSH_HOME/profiles/<profile>/cordis.patch.yml 里 skill-manager 行的 config',
       ],
     },
     'contract-violation': {
@@ -82,7 +82,7 @@ export function buildRepairPrompt({ root, code, message, repair }) {
     `错误码：${code || r.operation || 'unknown'}`,
     `错误消息：${message || r.summary || '（无）'}`,
     `问题概述：${r.summary || '（无）'}`,
-    `配置目录（skillsDir）：${root || '（未知，请从 $DSH_HOME/settings.yaml 的 skill-manager 段读取）'}`,
+    `配置目录（skillsDir）：${root || '（未知，请从 $DSH_HOME/profiles/<profile>/cordis.patch.yml 里 skill-manager 行的 config 读取）'}`,
     '',
     '上下文清单：',
   ]
@@ -182,7 +182,7 @@ export function settingsWriteRepair(verdict, field, attempted, authoritative, ro
       ? [
           '先原样重试一次（并发写冲突可自行恢复）',
           '仍不生效时核对值本身：组名 1–30 字符，「默认」「全部」为保留字，不含 / \\ : * ? " < > | 与控制字符；skillsDir 非空时必须是绝对路径',
-          '平台不把拒绝原因透给客户端；要定位到具体原因时，只读核对 $DSH_HOME/settings.yaml 的 skill-manager 段与插件 src/core/model/intent.js 的 validate 规则',
+          '平台不把拒绝原因透给客户端；要定位到具体原因时，只读核对 $DSH_HOME/profiles/<profile>/cordis.patch.yml 里 skill-manager 行的 config 与插件 src/core/model/intent.js 的校验规则',
         ]
       : [
           '先刷新页面（或重读配置快照）核对现场：已是目标值就无需重试，写入很可能已生效',

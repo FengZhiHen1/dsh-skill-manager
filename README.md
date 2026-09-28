@@ -1,6 +1,6 @@
 # dsh-skill-manager
 
-> ⚠️ **基线要求（硬性）**：本插件（`0.2.x` 起）适配 **DSH `0.1.7-rc.2` 及以后**。适配内容见 DSR-025：配置模型换成「profile 条目 `Config` + `.volatile()`」（旧 `ctx.settings.register`/`SettingsScope`/`settings.yaml` 在新树零命中），配置页随 `settings.plugin.item` 槽废除迁往**侧栏 Plugins 页**，图标 API 与 client 注入边同步换代。
+> ⚠️ **基线要求（硬性）**：本插件（`0.2.x` 起）适配 **DSH `0.1.7-rc.2` 及以后**。适配内容见 DSR-025（配置模型换成「profile 条目 `Config` + `.volatile()`」；旧 `ctx.settings.register`/`SettingsScope`/`settings.yaml` 在新树零命中，配置页随 `settings.plugin.item` 槽废除迁往**侧栏 Plugins 页**，图标 API 与 client 注入边同步换代）与 DSR-026（配置页改用官方 `SettingsForm`/`SettingsValueField` 原语，圆角/阴影/遮罩归到宿主 token）。
 > ⇒ **升级顺序：先把实例升到 `0.1.7-rc.2`，再挂载/更新本插件**。在 `0.1.2-rc.1` 等旧运行时上，peer 版本门禁会把**整行自动置 `disabled: true`**（实例照常启动，只在 stderr 留一行），插件直接消失；反向操作（先更新插件）等于把稳定实例上的技能管理静默关掉。
 
 DSH 技能管理插件：**配置即意图**——用户意图（分组、挂载目标、禁用/归属）存于本插件 loader 行的 Cordis `Config`（持久化在该 profile 的 `cordis.patch.yml` 里 `id: skill-manager` 行的 `config`），UI 经标准配置表单（`ctx.configForms`）直读直写（渲染即时、保存即生效），Host 对账器监听配置变更后台物化链接。技能页提供管理/搜索两视图：库列表（本地文件 + GitHub 入库元数据）、skills.sh 搜索下载、GitHub zipball 入库、检查更新、备份恢复；本地 skill 无版本管理（即本地文件）。物化状态存于 DSH storage 域（`$DSH_HOME/storages/skill_manager.json`，运行时投影）。
@@ -28,14 +28,15 @@ src/adapter/          DSH 接缝（唯一允许 import @deepseek-ai/*）
   migrate.js          旧七表意图 → 配置行的一次性迁移编排
 src/core/             纯领域逻辑（裸 node 可单测）
   service.js          三路队列、RPC dispatch、只读视图、写方法编排
-  model/              intent（配置 schema/校验）、store（域 spec）、library（库扫描）、contract（入站契约）、verdict（写后裁定）
+  model/              intent（配置 schema/校验）、config-fields（命名空间与字段名单一事实源）、page-specs（配置页字段规格，浏览器安全）、store（域 spec）、library（库扫描）、contract（入站契约）、verdict（写后裁定）
   mount/              derive（挂载推导）、materialize（junction 物化）、reconcile（对账）、inspect（行状态走查）、registry（归属登记）
   inbound/            acquire、upstream、zipball、backups（搜索/探测/入库/检查/更新/出库/恢复）
   base/               fsys（原子写）、net、zip、cache、audit（台账）、errors
 src/client/           浏览器半区（JSX，esbuild 产单文件 dist/client.js）
   index.jsx           槽位装配（settings.section + plugins.row.config）、配置变更总线
   section.jsx         技能页（管理/搜索两视图）
-  card.jsx            配置页（Plugins 页本行入口）
+  card.jsx            配置页（Plugins 页本行入口；渲染官方 SettingsForm/SettingsValueField 原语）
+  config-page.js      配置页控制器（官方 SettingsFormModel：草稿暂存 / revision 围栏 / 保存后回读）
   manage.jsx          管理视图（库列表、分组、行菜单）
   search.jsx          搜索视图（skills.sh / GitHub 探测）
   api.js              RPC 传输门面（超时、错误归一、入站契约校验）

@@ -1,27 +1,21 @@
-// intent — 配置即意图领域模型：settings 段 schema、形式校验与组纯推导。
+// intent — 配置即意图领域模型：配置 schema、形式校验与组纯推导。
 //
-// 边界：settings 命名空间注册与 @deepseek-ai 平台 import 在 adapter 层。
-//       故 schemastery 实例由调用方注入（`configSchema(z)`），本层不 import 它——
-//       配置 schema 需要 `.volatile()`，而该扩展只存在于 `@deepseek-ai/schemastery`，
-//       按分层门禁 R1 core 不得 import `@deepseek-ai/*`。同 store.js 的 DI 形态。
+// 边界：配置 schema 的注册（adapter）与 @deepseek-ai 平台 import 都在 adapter 层。
+//       故 schemastery 实例由调用方注入（`configSchema(z)`）——配置 schema 需要 `.volatile()`，
+//       而该扩展只存在于 `@deepseek-ai/schemastery`，按分层门禁 R1 core 不得 import
+//       `@deepseek-ai/*`。同 store.js 的 DI 形态。
+//       命名空间与字段名抽在 model/config-fields.js（浏览器侧的字段规格也用同一份）。
 // 参考：插件运行时.md「配置即意图」；DSR-015、DSR-025。
 
 import { statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
 import { SkillManagerError } from '../base/errors.js'
+import { CONFIG_NS, DEFAULT_GROUP, PI_FIELD, SKILLS_DIR_FIELD } from './config-fields.js'
 
-/** 插件配置的 settings 命名空间名。
- * ⚠ 0.1.7 起命名空间 = 本行在 profile 中的 loader entry id（ds-harness 不再有插件自选名）。
- * 故本常量必须与 cordis.patch.yml 里 insert 行的 `id:` 逐字相同；改行 id 即换命名空间，
- * 会把设置页的配置卡与本命名空间解绑。 */
-export const CONFIG_NS = 'skill-manager'
-/** 本地 skills 目录的配置键名；空串 = 未配置。 */
-export const SKILLS_DIR_FIELD = 'skillsDir'
-/** pi 接管开关的配置键名（布尔）；pi 目录固定按默认路径探测，不可配。 */
-export const PI_FIELD = 'pi'
-/** 虚拟默认组（不落 settings.groups 也始终存在）。 */
-export const DEFAULT_GROUP = '默认'
+// 命名空间与字段名的单一事实源在 config-fields.js（浏览器侧的字段规格共用同一份，
+// 避免两处各写一份而漂移）。此处按本模块既有的导出面再导出，消费方无需改 import。
+export { CONFIG_NS, SKILLS_DIR_FIELD, PI_FIELD, DEFAULT_GROUP }
 /** 合法挂载宿主与默认宿主集（存量规则无 hosts 键时按默认回落 = 仅 DSH）。 */
 export const HOSTS = ['dsh', 'pi']
 export const DEFAULT_HOSTS = ['dsh']

@@ -18,11 +18,13 @@
 import { createCall } from './api.js'
 import { SkillsSection } from './section.jsx'
 import { SkillManagerCard } from './card.jsx'
+import { ConfigPageController } from './config-page.js'
 import { observeSkillsNavIcon } from './nav-icon.js'
+import { CONFIG_NS } from '../core/model/config-fields.js'
 
-// 配置命名空间 = 本插件 loader 行的 id（见 src/core/model/intent.js CONFIG_NS 的说明）；
+// 配置命名空间 = 本插件 loader 行的 id（单一事实源在 core/model/config-fields.js）；
 // `plugins.row.config` 的 key = `<包名>#<行 id>`（ui-plugin-manager/src/client/config-ledger.ts:36-38）。
-const NS = 'skill-manager'
+const NS = CONFIG_NS
 const ROW_KEY = 'dsh-skill-manager#skill-manager'
 
 // 构建：esbuild 打成单文件产物；导出由 __ModuleLoader__ 工厂契约包裹。
@@ -44,6 +46,9 @@ export function apply(ctx) {
   // 共享配置表单：一个 Host entry 一份，读写与 revision 围栏都由它拥有。
   // 快照形状 { status, value, base, user, revision, writable, mode }——旧 scope 语义的对应物。
   const scope = ctx.configForms.get(NS)
+  // 配置页控制器：官方设置表单模型（草稿暂存 / 计划 / 保存后回读）+ 快照投影 + 注入面。
+  const page = new ConfigPageController(scope)
+  ctx.effect(() => () => page.dispose(), 'dsh-skill-manager: config page form')
 
   /**
    * Host 权威读：独立于镜像的一次 settings.describe，取本命名空间某字段的解析值。
@@ -93,10 +98,14 @@ export function apply(ctx) {
     )
     // 配置页：旧 `settings.plugin.item` 卡片已废，改挂 Plugins 页的本行配置入口。
     // 页面按 `view` 分发：'summary' 取一句话（行缺描述时的回落），'page' 取真正表单。
+    // 注入面 = 控制器（`hooks.configPage` 被渲染器合成 `useConfigPage` selector hook）+
+    // 目录选择服务面。**不再注入 readConfigField**：两字段进同一次原子 mutate，
+    // 卡片路径没有「连发两笔写、第一笔读到落后快照」的窗口（DSR-024 那个成因），
+    // 且官方模型保存后自会从 section 回读并判定未落定。
     const offCard = ctx.configForms.whileServed([NS], () =>
       ctx.slots.inject('plugins.row.config', () =>
         ctx.slots.register(
-          { name: 'plugins.row.config', key: ROW_KEY, inject: () => ({ scope, uiWorkspace, readConfigField }) },
+          { name: 'plugins.row.config', key: ROW_KEY, inject: () => ({ ...page.inject(), uiWorkspace }) },
           SkillManagerCard,
         ),
       ),

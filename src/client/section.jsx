@@ -3,7 +3,7 @@
 // 边界：配置渲染零网络（settings mirror 快照直读），数据读全部经 overview RPC。
 // 参考：插件运行时.md「配置即意图」「视图设计」；DSR-011、DSR-017、DSR-018。
 import { useState, useEffect, useRef } from 'react'
-import { T, S, badgeStyle } from './theme.js'
+import { T, R, S, badgeStyle } from './theme.js'
 import { ErrorLine, OutlineBtn, useTick, useToast, ToastHost } from './ui.jsx'
 import { buildRepairPrompt, RepairCopy, settingsWriteRepair } from './repair.jsx'
 import { writeVerdict } from '../core/model/verdict.js'
@@ -291,7 +291,7 @@ export function SkillsSection({ call, workspaces, scope, subscribeSkillSettings,
       {error ? <ErrorLineWrap error={error} root={data && data.root} /> : null}
       {editError
         ? (
-            <div style={{ ...badgeStyle(T.error), borderRadius: 10, padding: '8px 12px', margin: '8px 0 0', fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ ...badgeStyle(T.error), borderRadius: R.md, padding: '8px 12px', margin: '8px 0 0', fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ flex: 1, minWidth: 0, wordBreak: 'break-all' }}>{editError.message}</span>
               {editError.prompt ? <RepairCopy text={editError.prompt} /> : null}
             </div>
@@ -308,7 +308,7 @@ export function SkillsSection({ call, workspaces, scope, subscribeSkillSettings,
 function ErrorLineWrap({ error, root }) {
   if (!error) return null
   return (
-    <div style={{ ...badgeStyle(T.error), borderRadius: 10, padding: '8px 12px', margin: '4px 0 0', fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+    <div style={{ ...badgeStyle(T.error), borderRadius: R.md, padding: '8px 12px', margin: '4px 0 0', fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
       <span style={{ flex: 1, minWidth: 0, wordBreak: 'break-all' }}>{error.message || String(error)}</span>
       <RepairCopy text={buildRepairPrompt({ root, code: error.code, message: error.message, repair: error.repair })} />
     </div>

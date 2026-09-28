@@ -5,7 +5,7 @@
 import { useEffect, useRef, useState } from 'react'
 import * as primitives from '@deepseek-ai/dsh-client-ui-primitives'
 import { Button } from '@deepseek-ai/dsh-client-ui-primitives'
-import { T, S, badgeStyle, dotStyle } from './theme.js'
+import { T, R, S, SHADOW, badgeStyle, dotStyle } from './theme.js'
 
 /**
  * 防御：icon 为可选装饰，缺失时降级为文本箭头，绝不让整卡渲染失败。
@@ -55,8 +55,8 @@ function FallbackToast({ text, onDone }) {
       role="status"
       style={{
         position: 'fixed', top: 16, left: '50%', transform: 'translateX(-50%)', zIndex: 1200,
-        background: T.bgLayer3, color: T.labelPrimary, border: `1px solid ${T.borderL2}`, borderRadius: 10,
-        padding: '8px 14px', fontSize: 12, boxShadow: '0 8px 24px rgba(0,0,0,.18)',
+        background: T.bgLayer3, color: T.labelPrimary, border: `1px solid ${T.borderL2}`, borderRadius: R.md,
+        padding: '8px 14px', fontSize: 12, boxShadow: SHADOW.panel,
         opacity: fade ? 0 : 1, transition: 'opacity 1s',
       }}
     >
@@ -81,7 +81,7 @@ export const PrimaryBtn = (props) => <Button variant="primary" size="sm" {...pro
 export function ErrorLine({ error }) {
   if (!error) return null
   return (
-    <div style={{ ...badgeStyle(T.error), borderRadius: 10, padding: '9px 12px', marginBottom: 8, fontSize: 12, display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+    <div style={{ ...badgeStyle(T.error), borderRadius: R.md, padding: '9px 12px', marginBottom: 8, fontSize: 12, display: 'flex', alignItems: 'flex-start', gap: 8 }}>
       <span style={{ ...dotStyle(T.error), marginTop: 5, flex: 'none' }} />
       <span style={{ flex: 1, minWidth: 0, wordBreak: 'break-word', lineHeight: 1.55 }}>{String(error.message || error)}</span>
     </div>
@@ -97,7 +97,7 @@ export function NoticeBar({ notice }) {
   if (!notice) return null
   if (notice.tone !== 'warn') return <div style={{ ...S.muted, marginBottom: 6 }}>{notice.text}</div>
   return (
-    <div style={{ ...badgeStyle(T.warn), borderRadius: 10, padding: '9px 12px', marginBottom: 8, fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+    <div style={{ ...badgeStyle(T.warn), borderRadius: R.md, padding: '9px 12px', marginBottom: 8, fontSize: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
       <span style={dotStyle(T.warn)} />
       <span style={{ flex: 1 }}>{notice.text}</span>
     </div>
@@ -122,7 +122,7 @@ export function MenuItem({ label, danger, disabled, onClick, onEnter, trailing, 
         alignItems: 'center',
         gap: 16,
         padding: '7px 12px',
-        borderRadius: 6,
+        borderRadius: R.xs,
         fontSize: 12,
         whiteSpace: 'nowrap',
         cursor: disabled ? 'default' : 'pointer',
@@ -147,8 +147,8 @@ export const menuCardStyle = {
   minWidth: 150,
   background: T.bgLayer3,
   border: `1px solid ${T.borderL2}`,
-  borderRadius: 12,
-  boxShadow: '0 8px 24px rgba(0,0,0,.18)',
+  borderRadius: R.md,
+  boxShadow: SHADOW.panel,
   padding: 6,
 }
 /** 菜单分隔线（不可变元素常量）。 */
@@ -281,7 +281,7 @@ export function RowMenu({ it, groupNames, flags = [], busy, onAction, onMove, on
               key={group}
               style={{
                 display: 'flex', alignItems: 'center', gap: 6,
-                padding: '7px 12px', borderRadius: 6, fontSize: 12, whiteSpace: 'nowrap', cursor: 'pointer',
+                padding: '7px 12px', borderRadius: R.xs, fontSize: 12, whiteSpace: 'nowrap', cursor: 'pointer',
                 color: group === current ? T.labelPrimary : T.labelSecondary,
                 fontWeight: group === current ? 500 : 400,
               }}
@@ -302,14 +302,14 @@ export function ModalShell({ title, width = 480, onMaskClick, children }) {
   return (
     <div
       role="presentation"
-      style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(15, 17, 21, .42)', padding: 20 }}
+      style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', background: T.mask, padding: 20 }}
       onClick={onMaskClick}
     >
       <div
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        style={{ width: `min(${width}px, 100%)`, borderRadius: 16, border: `1px solid ${T.borderL2}`, background: T.bgLayer3, color: T.labelPrimary, boxShadow: '0 18px 48px rgba(0,0,0,.28)', padding: 20 }}
+        style={{ width: `min(${width}px, 100%)`, borderRadius: R.lg, border: `1px solid ${T.borderL2}`, background: T.bgLayer3, color: T.labelPrimary, boxShadow: SHADOW.prominent, padding: 20 }}
         onClick={(e) => e.stopPropagation()}
       >
         {children}
@@ -325,7 +325,7 @@ export function UpdateConfirmationDialog({ name, detail, busy, onCancel, onConfi
     <ModalShell title={`更新 ${name}？`} onMaskClick={onCancel}>
       <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>{`更新 ${name}？`}</div>
       <div style={{ color: T.labelSecondary, fontSize: 13, lineHeight: 1.55, marginBottom: 12 }}>{detail || '检测到与内容基线不同的本地修改。'}</div>
-      <div style={{ borderRadius: 10, padding: '10px 12px', marginBottom: 14, ...badgeStyle(T.warn), fontSize: 12, lineHeight: 1.55 }}>
+      <div style={{ borderRadius: R.md, padding: '10px 12px', marginBottom: 14, ...badgeStyle(T.warn), fontSize: 12, lineHeight: 1.55 }}>
         更新会替换此 Skill 目录；不会自动备份本地修改。请先自行备份需要保留的内容。
       </div>
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: T.labelSecondary, marginBottom: 16, cursor: 'pointer' }}>
@@ -350,7 +350,7 @@ export function ConfirmDialog({ title, body, warning, confirmLabel, busy = false
     <ModalShell title={title} width={420} onMaskClick={busy ? undefined : onCancel}>
       <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>{title}</div>
       <div style={{ color: T.labelSecondary, fontSize: 13, lineHeight: 1.55, marginBottom: 12 }}>{body}</div>
-      {warning ? <div style={{ borderRadius: 10, padding: '10px 12px', marginBottom: 14, ...badgeStyle(T.warn), fontSize: 12, lineHeight: 1.55 }}>{warning}</div> : null}
+      {warning ? <div style={{ borderRadius: R.md, padding: '10px 12px', marginBottom: 14, ...badgeStyle(T.warn), fontSize: 12, lineHeight: 1.55 }}>{warning}</div> : null}
       <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
         <OutlineBtn onClick={onCancel} disabled={busy}>取消</OutlineBtn>
         <PrimaryBtn onClick={onConfirm} disabled={busy}>{busy ? '处理中…' : confirmLabel}</PrimaryBtn>
