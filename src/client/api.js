@@ -6,7 +6,14 @@
 
 import { ContractError, parseEndpointPayload } from '../core/model/contract.js'
 
-/** RPC 通道名，Host 侧经 connection.rpc.handle 注册同名 channel。 */
+/**
+ * RPC 通道名（客户端契约面）。
+ * ⛔ 待改造：Host 侧现用 `connection.rpc.handle(CHANNEL, …)` 注册，该 API **在生产 web 组合下
+ * 注册不上任何自定义通道**（表现为 405，行却 `active`）。**待改为** `/api` 精确 Fetch 路由：
+ * Host 侧 `ctx.connection.fetch.register({ path: `/api/skill-manager/${endpoint}`, … })`，
+ * 本处调用改为 `ctx.connection.rpc.call('/api', `skill-manager/${endpoint}`, payload, signal)`。
+ * 见仓库级 docs/decisions/0002-自定义RPC通道改用精确Fetch路由.md。
+ */
 export const CHANNEL = '/skill-manager'
 
 /** 超时两档：API 请求 15s、下载 90s，经 AbortController 计时中断。 */

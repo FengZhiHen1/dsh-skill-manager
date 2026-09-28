@@ -166,6 +166,16 @@ test('apply 装配：fiber 结算 → 迁移 → openStore；页面策略关自�
   assert.equal(await isLink(join(home, 'skills', 'pdf')), false) // dispose 后无对账发生
 })
 
+// ⛔⛔ 本用例是**盲闸**，其结论已被推翻（2026-09-28 二次实证）——保留作方法教训留档。
+//
+// 为什么它是盲闸：本文件的假 ctx（见上方 makeFakeCtx 的 `inject()`）在回调里**直接装上了
+//   可用的 `connection.rpc.handle`**（由假件自己完成注册），于是被测代码的**真实失败点
+//   `owner.webServer` 从未被触达** ⇒ 无论生产是否可用，本用例恒绿。
+// **教训：假件的桩必须落在被测代码的失败点之外。**
+//
+// 真因与正解见仓库级 docs/decisions/0002-自定义RPC通道改用精确Fetch路由.md。
+//
+// ---- 以下为原文（结论已失效，仅存档）----
 // DSR-028 回归：RPC 必须在 `ctx.inject(['webServer'], …)` 回调里、用**回调给的 ctx** 注册。
 //
 // 生产实测（0.1.7-rc.2，2026-09-28）：两个插件行都挂载失败并报
@@ -176,7 +186,7 @@ test('apply 装配：fiber 结算 → 迁移 → openStore；页面策略关自�
 // ⇒ 只有读该 ctx 的 inject 声明内有 webServer 才放行（cordis reflect.ts:140 是守卫入口）。
 //
 // 本用例把守卫复刻进假 ctx（见 fakeCtx.connection / fakeCtx.inject），钉死两个易错点。
-test('DSR-028：RPC 走动态注入注册；直接调或误用外层 ctx 都会撞 webServer 守卫', async (t) => {
+test('DSR-028（⛔ 已失效，见上方横幅）：RPC 走动态注入注册；直接调或误用外层 ctx 都会撞 webServer 守卫', async (t) => {
   const home = await mkTmp('dsh-sm-home-')
   const root = await mkTmp()
   t.after(() => cleanup(home))

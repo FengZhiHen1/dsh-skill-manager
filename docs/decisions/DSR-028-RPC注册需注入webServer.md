@@ -1,6 +1,29 @@
 # DSR-028：`connection.rpc.handle` 必须在注入 `webServer` 的 ctx 上注册
 
-> 状态：**已修复，静态闸全绿**（2026-09-28）。`npm run check` 退出 0：产物新鲜度 + 语法 + 分层门禁 + `node --test` **162/162**（新增 1 项 DSR-028 回归闸，经消融确认有判别力）。
+> # ⛔ 本决定已被推翻（2026-09-28 当日二次实证）
+>
+> **下文「最终决定：动态注入」的结论是错的**，且**保留原文仅作方法教训留档**。请勿据本文件写代码。
+>
+> - **真因**：失败发生在 **connection 服务自己的 ctx** 上（`rpc-host.ts:87` `get rpc() { const owner = this.ctx }`），
+>   而 `webserver` 与 `connection` 是**顶层兄弟行** ⇒ `owner.webServer` 永远解析不到。
+>   **改调用方的 inject（无论动态还是静态）都无效** —— 消融实测：`['webServer']` 动态注入 ❌、
+>   调用方静态 `inject` 含 `webServer` ❌。
+> - **本「修复」的真实效果是让问题更隐蔽**：改前是**响亮失败**（行挂载失败、界面标「异常」、
+>   日志有 `cannot get property "webServer" without inject`）；改后变成**静默 405**
+>   （行 `fiberPhase=active`、无任何日志、浏览器一律 405）。**可观测性倒退。**
+> - **正确做法**：见仓库级 [`docs/decisions/0002-自定义RPC通道改用精确Fetch路由.md`](../../../../docs/decisions/0002-自定义RPC通道改用精确Fetch路由.md)
+>   —— **首选** `ctx.connection.fetch.register({ path:'/api/<ns>/<ep>', methods:['POST'], fetch })`
+>   （不读 `owner.webServer`，且免费继承平台围栏/认证/瀑布/体积上限）。
+> - **本文件的回归闸是「盲闸」**：其假 ctx 的 `inject()` 里直接给出
+>   `injected.connection.rpc.handle = (channel) => calls.push(...)`，**由假件自己完成了注册**，
+>   `owner.webServer` 从未被触达 ⇒ 闸恒绿。**教训：假件的桩必须落在被测代码的失败点之外。**
+> - 另注：下文「这不是 0.1.7 的新要求」亦**不成立** —— 经逐 tag 复核，这是
+>   **0.1.5-alpha.1 起的回归**（提交 `2ef85b1e17` 把 `connection` 自己的 `inject` 由
+>   `['webServer','credentials']` 删成 `['credentials']`，却未同步改读 `owner.webServer` 的写法）。
+> - ⚠ 文末「探针未能体外复现该守卫」的判断也已过时：**体外复现已成功**（用真实部署类
+>   `HostConnectionService` + 部署版 cordis，以 connection 自身 `/api` 注册为保真对照）。
+
+> 状态（原文，已失效）：**已修复，静态闸全绿**（2026-09-28）。`npm run check` 退出 0：产物新鲜度 + 语法 + 分层门禁 + `node --test` **162/162**（新增 1 项 DSR-028 回归闸，经消融确认有判别力）。
 > ⚠ **实例级复验未做**——修复后尚未在真实 test 实例启动观察（红线：实例启停由用户执行）。见文末「尚未验证」。
 
 ## 症状（实测，2026-09-28）

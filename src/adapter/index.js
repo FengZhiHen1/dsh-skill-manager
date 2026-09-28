@@ -211,22 +211,19 @@ export default {
 
     // RPC 通道：/skill-manager 前缀挂 connection.rpc，围栏与 JSON 信封由平台承担。
     // handler 必须返回 Result，抛错会退化成 500 纯文本——createDispatch 保证绝不外抛。
-    // handle 经 owner.effect 自持生命周期，随本插件 fiber 注销，无需插件清理。
     //
-    // ⚠ 必须在 `ctx.inject(['webServer'], …)` 回调里、用**回调给的 ctx** 注册（DSR-028）。
-    // 生产实测（0.1.7-rc.2，2026-09-28）：直接在 apply 里 `ctx.connection.rpc.handle()` 抛
-    //   `cannot get property "webServer" without inject`
-    // 成因是平台实现把 owner 绑成**读该服务的 ctx**：
-    //   connection/lib/index.js:573  get rpc() { const owner = this.ctx; … }
-    //   connection/lib/index.js:656  owner.effect(() => owner.webServer.register(route))
-    // ⇒ 注册路径末端要触达 `owner.webServer`，而 cordis 只在**读该 ctx 的 inject 声明内**
-    //   服务名时放行（vendor/cordis/src/reflect.ts:140 `Reflect.has(target, prop)` 为守卫入口）。
-    // 两个易错点：
-    //   ① 不能在 apply 里直接调 —— 此时本 fiber 的 ctx 没声明 webServer；
-    //   ② 回调里必须用 `webCtx` 读 connection，**不能**用外层 `ctx` —— 外层 ctx 同样没声明。
-    // 用**动态**注入而非静态 `inject: [..., 'webServer']`：webServer 由 profile 的 web bundle
-    // 提供（@deepseek-ai/dsh-web-app 的 webserver 行），非本插件依赖；静态声明会在不含该行的
-    // profile 上让本插件永远 PENDING（正是 DSR-027 那类启动挂死）。动态注入则只是不注册 RPC。
+    // ⛔⛔ 下面这段写法已被推翻（2026-09-28 二次实证），**必须改造** —— 留此仅为标记待改点。
+    //   现状：`webCtx.connection.rpc.handle(...)` 在**生产 web 组合下注册不上任何自定义通道**：
+    //   失败点在 **connection 服务自己的 ctx** 上（rpc-host.ts:87 `get rpc() { const owner = this.ctx }`，
+    //   :192 `owner.effect(() => owner.webServer.register(route))`），而 `webserver` 行与 `connection`
+    //   行是**顶层兄弟行**，cordis 服务解析只沿祖先链上溯 ⇒ 必抛 `cannot get property "webServer"
+    //   without inject`。该异常发生在匿名子 fiber 内、**启动期不外显** ⇒ 行仍 `active`，浏览器一律 405。
+    //   ⇒ 改**调用方**的 inject（动态或静态）都无效，这已是消融结论。
+    //   正解见 → docs/decisions/0002-自定义RPC通道改用精确Fetch路由.md
+    //   首选：ctx.connection.fetch.register({ path: '/api/skill-manager/<endpoint>', methods:['POST'],
+    //         requestBody:'buffered', fetch }) —— registerFetchRoute 不读 owner.webServer，
+    //         且由 connection 自己正确挂载的 /api 承载 ⇒ 免费继承围栏(403)/认证(401)/waterfall/体积上限(413)。
+    //   客户端配套：rpc.call('/api', 'skill-manager/<endpoint>', payload, signal)（见 src/client/api.js）。
     ctx.inject(['webServer'], (webCtx) => {
       webCtx.connection.rpc.handle('/skill-manager', createDispatch(api, { writeQueue }))
     })
