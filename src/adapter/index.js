@@ -13,6 +13,7 @@ import { migrateLegacyIntent } from './migrate.js'
 import { createSharedCache } from '../core/base/cache.js'
 import { createAudit } from '../core/base/audit.js'
 import { buildApi, createDispatch, createQueue } from '../core/service.js'
+import { registerRpcChannel, RPC_NAMESPACE, API_CHANNEL } from './rpc-channel.js'
 
 /**
  * profile 名从启动参数现取：知识库确认平台只承诺 ctx.dshHomePath（19-services-index），
@@ -209,23 +210,24 @@ export default {
       clearTimeout(warmTimer)
     }, 'dsh-skill-manager: config watcher and warmup')
 
-    // RPC 通道：/skill-manager 前缀挂 connection.rpc，围栏与 JSON 信封由平台承担。
-    // handler 必须返回 Result，抛错会退化成 500 纯文本——createDispatch 保证绝不外抛。
+    // RPC 通道：自定义能力挂在 `/api/<ns>/<ep>` 的**精确 Fetch 路由**上。
     //
-    // ⛔⛔ 下面这段写法已被推翻（2026-09-28 二次实证），**必须改造** —— 留此仅为标记待改点。
-    //   现状：`webCtx.connection.rpc.handle(...)` 在**生产 web 组合下注册不上任何自定义通道**：
-    //   失败点在 **connection 服务自己的 ctx** 上（rpc-host.ts:87 `get rpc() { const owner = this.ctx }`，
-    //   :192 `owner.effect(() => owner.webServer.register(route))`），而 `webserver` 行与 `connection`
-    //   行是**顶层兄弟行**，cordis 服务解析只沿祖先链上溯 ⇒ 必抛 `cannot get property "webServer"
-    //   without inject`。该异常发生在匿名子 fiber 内、**启动期不外显** ⇒ 行仍 `active`，浏览器一律 405。
-    //   ⇒ 改**调用方**的 inject（动态或静态）都无效，这已是消融结论。
-    //   正解见 → docs/decisions/0002-自定义RPC通道改用精确Fetch路由.md
-    //   首选：ctx.connection.fetch.register({ path: '/api/skill-manager/<endpoint>', methods:['POST'],
-    //         requestBody:'buffered', fetch }) —— registerFetchRoute 不读 owner.webServer，
-    //         且由 connection 自己正确挂载的 /api 承载 ⇒ 免费继承围栏(403)/认证(401)/waterfall/体积上限(413)。
-    //   客户端配套：rpc.call('/api', 'skill-manager/<endpoint>', payload, signal)（见 src/client/api.js）。
-    ctx.inject(['webServer'], (webCtx) => {
-      webCtx.connection.rpc.handle('/skill-manager', createDispatch(api, { writeQueue }))
+    // 为什么不是 `connection.rpc.handle`：该 API 在生产 web 组合下**注册不上任何自定义通道**
+    // （失败点在 connection 服务自己的 ctx 上，`webserver` 与 `connection` 是顶层兄弟行
+    // ⇒ `owner.webServer` 必抛；异常在匿名子 fiber 内吞掉 ⇒ 行仍 active、浏览器一律 405）。
+    // 改调用方 inject（动态/静态）都无效。详见 docs/decisions/0002-自定义RPC通道改用精确Fetch路由.md
+    // 与 src/adapter/rpc-channel.js 头注。
+    //
+    // 改用 `connection.fetch.register`：registerFetchRoute 只写内部 Map、不读 owner.webServer，
+    // 且由 connection 自己正确挂载的 `/api` 承载 ⇒ **免费继承**围栏(403)/认证(401)/
+    // `connection/request` waterfall/体积上限(413)/并发与断连排空。**本插件不再自持安全围栏。**
+    // 端点清单取 `api` 的键——与 dispatch 的 `Object.hasOwn(api, endpoint)` 门禁同源，不会漂移。
+    registerRpcChannel(ctx, {
+      namespace: RPC_NAMESPACE,
+      endpoints: Object.keys(api),
+      dispatch: createDispatch(api, { writeQueue }),
+      label: 'dsh-skill-manager',
+      warn: (msg) => ctx.logger?.warn?.(msg),
     })
   },
 }

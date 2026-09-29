@@ -5,16 +5,28 @@
 // 参考：插件运行时.md「RPC 传输」「生命周期与副作用清单」；DSR-014。
 
 import { ContractError, parseEndpointPayload } from '../core/model/contract.js'
+import { API_CHANNEL, RPC_NAMESPACE } from '../adapter/rpc-channel.js'
 
 /**
- * RPC 通道名（客户端契约面）。
- * ⛔ 待改造：Host 侧现用 `connection.rpc.handle(CHANNEL, …)` 注册，该 API **在生产 web 组合下
- * 注册不上任何自定义通道**（表现为 405，行却 `active`）。**待改为** `/api` 精确 Fetch 路由：
- * Host 侧 `ctx.connection.fetch.register({ path: `/api/skill-manager/${endpoint}`, … })`，
- * 本处调用改为 `ctx.connection.rpc.call('/api', `skill-manager/${endpoint}`, payload, signal)`。
- * 见仓库级 docs/decisions/0002-自定义RPC通道改用精确Fetch路由.md。
+ * RPC 通道名（**已废弃**）。
+ *
+ * 旧值 `/skill-manager` 是**自定义 channel**，靠 Host 侧 `connection.rpc.handle` 注册；
+ * 该 API 在生产 web 组合下注册不上（⇒ 405），已改用 `/api` 精确 Fetch 路由（见 `API_CHANNEL`）。
+ * 保留此常量仅为兼容历史引用；**新代码请用 `API_CHANNEL` + `qualifiedEndpoint()`**。
+ * @deprecated
  */
 export const CHANNEL = '/skill-manager'
+
+/**
+ * 客户端调用端点 = `<ns>/<endpoint>`（如 `skill-manager/overview`）。
+ * Host 侧把自定义能力注册为 `/api/<ns>/<endpoint>` 的**精确 Fetch 路由**，故通道名恒为 `/api`，
+ * 命名空间折叠进端点串——这是 `assertFetchRoute` 要求路径落在 `/api` 之下的直接结果。
+ * @param {string} endpoint 端点名
+ * @returns {string}
+ */
+export function qualifiedEndpoint(endpoint) {
+  return `${RPC_NAMESPACE}/${endpoint}`
+}
 
 /** 超时两档：API 请求 15s、下载 90s，经 AbortController 计时中断。 */
 const API_TIMEOUT_MS = 15_000
@@ -71,7 +83,7 @@ export function createCall(ctx) {
     const timer = setTimeout(() => controller.abort(), budget)
     let result
     try {
-      result = await ctx.connection.rpc.call(CHANNEL, endpoint, payload, controller.signal)
+      result = await ctx.connection.rpc.call(API_CHANNEL, `${RPC_NAMESPACE}/${endpoint}`, payload, controller.signal)
     } catch (error) {
       throw toTransportError(error, endpoint, budget)
     } finally {

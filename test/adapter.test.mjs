@@ -31,6 +31,7 @@ function fakeCtx(home, { config, openImpl, updateImpl } = {}) {
   const configListeners = new Set()
   const disposers = []
   const domains = []
+  const routes = new Map()
   const gate = createGate()
   const defaultOpen = async (spec) => {
     const domain = fakeDomain()
@@ -67,39 +68,33 @@ function fakeCtx(home, { config, openImpl, updateImpl } = {}) {
     storage: { domain: { open: openImpl ?? defaultOpen } },
     workspaceRegistry: { list: () => [] },
     dshHomePath: (...parts) => join(home, ...parts),
-    // 外层 ctx 的连接服务：`connection` 本身可用（本插件静态 inject 了它），但其 `rpc.handle`
-    // 在生产里会触达 `owner.webServer` 而 owner 无该声明 ⇒ **直接调必抛**。
+    // 外层 ctx 的连接服务：`connection` 本身可用（本插件静态 inject 了它），但它的
+    // `rpc.handle` 在生产里会触达 `owner.webServer` 而 owner 无该声明 ⇒ **直接调必抛**。
     // 这就是 DSR-028 的现场形态：抛的不是 connection，而是它内部的 webServer。
+    // ⇒ 本插件因此改用 `connection.fetch.register`（`/api` 精确 Fetch 路由）：该面只写内部
+    //   Map、不读 owner.webServer，且由 connection 自己正确挂载的 `/api` 承载。
     connection: {
       rpc: {
         handle: () => {
           throw new Error('cannot get property "webServer" without inject')
         },
       },
+      // 精确 Fetch 路由表：**只记录，不代为完成任何事**（关键：桩必须落在失败点之外）。
+      // 真实平台按完整 pathname 精确匹配 ⇒ 这里复刻同一语义，供用例自行派发验证。
+      fetch: {
+        register: (route) => {
+          if (routes.has(route.path)) throw new Error(`duplicate route ${route.path}`)
+          routes.set(route.path, route)
+          calls.push(['fetch-route', route.path])
+          return () => {
+            routes.delete(route.path)
+            calls.push(['fetch-route-off', route.path])
+          }
+        },
+      },
     },
+    routes,
     effect: (fn) => disposers.push(fn()),
-    /**
-     * 动态注入（真实 cordis 语义的最小复刻，DSR-028）。
-     * 生产平台把 `connection.rpc.handle` 的 owner 绑成**读该服务的 ctx**，注册末端要触达
-     * `owner.webServer`，而 cordis 只在读该 ctx 的 inject 声明内放行
-     * （reflect.ts:140 `Reflect.has(target, prop)` 为守卫入口）⇒ 必须用**回调给的 ctx** 读连接服务。
-     *
-     * 这里刻意复刻这条守卫（两个易错点都会抛与生产同形的错误）：
-     *   ① 在 apply 里直接 `ctx.connection.rpc.handle(...)` → 外层 ctx 无 webServer ⇒ 抛；
-     *   ② 回调里误用外层 `ctx` 而非 `webCtx` → 同样抛。
-     * 只有 `webCtx.connection.rpc.handle(...)` 成功。消融验证见本文件 DSR-028 用例。
-     */
-    inject(deps, callback) {
-      calls.push(['inject', deps.join(',')])
-      for (const d of deps) {
-        if (d !== 'webServer') throw new Error(`fakeCtx.inject: 本假件只提供 webServer，收到 ${d}`)
-      }
-      const injected = Object.create(ctx)
-      injected.connection = {
-        rpc: { handle: (channel, handler) => { ctx.handler = handler; calls.push(['rpc', channel]) } },
-      }
-      return callback(injected, undefined)
-    },
     volatileListeners,
     configListeners,
     domains,
@@ -151,7 +146,25 @@ test('apply 装配：fiber 结算 → 迁移 → openStore；页面策略关自�
   ctx.openFiber()
   await new Promise((r) => setTimeout(r, 50))
   assert.deepEqual(ctx.calls.filter(([k]) => k === 'open'), [['open', 7], ['open', 3]]) // legacy 七表先于新 spec（skills/check_cache/managed_links）
-  assert.deepEqual(ctx.calls.filter(([k]) => k === 'rpc'), [['rpc', '/skill-manager']])
+  // 自定义 RPC 能力挂在 `/api/<ns>/<endpoint>` 精确 Fetch 路由上（不再走 rpc.handle）。
+  // 端点清单与 dispatch 认可的集合同源（api 的键），故这里逐端点核对路径。
+  assert.deepEqual([...ctx.routes.keys()].sort(), [
+    '/api/skill-manager/add',
+    '/api/skill-manager/backups',
+    '/api/skill-manager/check',
+    '/api/skill-manager/overview',
+    '/api/skill-manager/remove',
+    '/api/skill-manager/repo-skills',
+    '/api/skill-manager/restore',
+    '/api/skill-manager/search',
+    '/api/skill-manager/sync',
+    '/api/skill-manager/update',
+    '/api/skill-manager/warm',
+  ], '每个端点一条 /api 精确路由，且命名空间正确')
+  assert.ok([...ctx.routes.values()].every((r) => r.methods.length === 1 && r.methods[0] === 'POST'),
+    '精确路由只声明 POST（非 POST 由平台回落到 interceptor/404）')
+  assert.ok([...ctx.routes.values()].every((r) => r.requestBody === 'buffered'),
+    'requestBody=buffered ⇒ 继承平台 bridge 的体积上限(413)')
   // 页面策略：auto:false，且 owner 必须是本 fiber（否则策略挂错实例）
   assert.deepEqual(ctx.calls.filter(([k]) => k === 'configure'), [['configure', false, true]])
   assert.equal(ctx.volatileListeners.size, 1)
@@ -166,27 +179,24 @@ test('apply 装配：fiber 结算 → 迁移 → openStore；页面策略关自�
   assert.equal(await isLink(join(home, 'skills', 'pdf')), false) // dispose 后无对账发生
 })
 
-// ⛔⛔ 本用例是**盲闸**，其结论已被推翻（2026-09-28 二次实证）——保留作方法教训留档。
+// ─────────────────────────────────────────────────────────────────────────────
+// RPC 承载闸门（2026-09-28 重写，取代已失效的 DSR-028 用例）
 //
-// 为什么它是盲闸：本文件的假 ctx（见上方 makeFakeCtx 的 `inject()`）在回调里**直接装上了
-//   可用的 `connection.rpc.handle`**（由假件自己完成注册），于是被测代码的**真实失败点
-//   `owner.webServer` 从未被触达** ⇒ 无论生产是否可用，本用例恒绿。
+// 旧用例是**盲闸**：假件的 `inject()` 回调里直接装上可用的 `connection.rpc.handle`
+// （由假件自己完成注册），被测代码的真实失败点 `owner.webServer` 从未被触达 ⇒ 恒绿。
 // **教训：假件的桩必须落在被测代码的失败点之外。**
 //
-// 真因与正解见仓库级 docs/decisions/0002-自定义RPC通道改用精确Fetch路由.md。
+// 新闸的两条腿：
+//   ① **接线闸**（恒跑）：注册必须落在 `connection.fetch.register`，且路径/方法/body 模式正确。
+//      旧写法（`rpc.handle`）在本假件上必抛 `without inject` ⇒ 回退立即变红。
+//   ② **可答闸**（恒跑）：**真的**向已注册路由派发一次信封请求，断言拿到标准
+//      `server-response`。旧盲闸从不发请求，故通道是否可达它不知道。
 //
-// ---- 以下为原文（结论已失效，仅存档）----
-// DSR-028 回归：RPC 必须在 `ctx.inject(['webServer'], …)` 回调里、用**回调给的 ctx** 注册。
-//
-// 生产实测（0.1.7-rc.2，2026-09-28）：两个插件行都挂载失败并报
-//   `cannot get property "webServer" without inject`
-// 成因：平台把 `connection.rpc.handle` 的 owner 绑成**读该服务的 ctx**
-//   （connection/lib/index.js:573 `const owner = this.ctx`），注册末端执行
-//   `owner.effect(() => owner.webServer.register(route))`（同文件 :656）
-// ⇒ 只有读该 ctx 的 inject 声明内有 webServer 才放行（cordis reflect.ts:140 是守卫入口）。
-//
-// 本用例把守卫复刻进假 ctx（见 fakeCtx.connection / fakeCtx.inject），钉死两个易错点。
-test('DSR-028（⛔ 已失效，见上方横幅）：RPC 走动态注入注册；直接调或误用外层 ctx 都会撞 webServer 守卫', async (t) => {
+// 安全语义（围栏 403 / 认证 401 / waterfall / 体积上限 413）由平台 `/api` 路由承担，
+// 本插件不再复制 ⇒ 不在本层断言（那是平台契约，由真实部署类实验覆盖）。
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('RPC 承载：走 /api 精确 Fetch 路由注册，且真的能答一次信封请求', async (t) => {
   const home = await mkTmp('dsh-sm-home-')
   const root = await mkTmp()
   t.after(() => cleanup(home))
@@ -197,25 +207,45 @@ test('DSR-028（⛔ 已失效，见上方横幅）：RPC 走动态注入注册�
   ctx.openFiber()
   await new Promise((r) => setTimeout(r, 30))
 
-  // ① 生产正确路径：经 inject 回调注册（成功，且通道名正确）
-  assert.deepEqual(ctx.calls.filter(([k]) => k === 'rpc'), [['rpc', '/skill-manager']],
-    'RPC 必须在动态注入回调里注册成功')
-  assert.ok(ctx.calls.some(([k, d]) => k === 'inject' && d === 'webServer'),
-    '必须请求注入 webServer（否则平台注册路径会撞守卫）')
+  // ① 接线闸：不得再走 rpc.handle（它在本假件上必抛），必须落在 fetch 路由表
+  assert.ok(!ctx.calls.some(([k]) => k === 'rpc'), '不得再调用 connection.rpc.handle（生产注册不上）')
+  assert.ok(ctx.routes.has('/api/skill-manager/overview'), 'overview 必须注册为 /api 精确路由')
 
-  // ② 易错点一：绕过动态注入、直接在外层 ctx 上注册 → 与生产同形地抛错
-  assert.throws(() => ctx.connection.rpc.handle('/x', () => ({})), /without inject/,
-    '外层 ctx 无 webServer 声明 ⇒ 直接注册必须抛（这正是生产失败的形态）')
-
-  // ③ 易错点二：回调里误用外层 ctx（而非 webCtx）→ 同样抛
-  let leaked = null
-  ctx.inject(['webServer'], () => {
-    try { ctx.connection.rpc.handle('/y', () => ({})) } catch (error) { leaked = error }
+  // ② 可答闸：真的派发一次请求（复刻平台按 pathname 精确匹配 + POST 限定）
+  const route = ctx.routes.get('/api/skill-manager/overview')
+  const request = new Request('http://127.0.0.1:3080/api/skill-manager/overview', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ type: 'client-request', rpcId: 'r-1', method: 'skill-manager/overview', payload: {} }),
   })
-  assert.match(String(leaked?.message), /without inject/,
-    '注入回调里若读外层 ctx，仍会撞守卫 ⇒ 必须用回调给的 ctx')
+  const response = await route.fetch(request)
+  assert.equal(response.status, 200, '已注册端点必须能答 200（旧盲闸从不发请求，故查不出 405 类失效）')
 
+  const envelope = await response.json()
+  assert.equal(envelope.type, 'server-response')
+  assert.equal(envelope.rpcId, 'r-1', 'rpcId 必须原样带回（客户端会比对，不匹配即抛）')
+  assert.equal(envelope.result.ok, true)
+  assert.ok('value' in envelope.result, '成功侧必须带 value（平台 serverResponseSchema 形状）')
+
+  // ③ 契约面：method 与端点不符 → 400（平台 rpcFetchHandler 同形）
+  const mismatched = await route.fetch(new Request('http://127.0.0.1:3080/api/skill-manager/overview', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ type: 'client-request', rpcId: 'r-2', method: 'other/thing', payload: {} }),
+  }))
+  assert.equal(mismatched.status, 400, 'method ≠ 端点必须 400')
+
+  // ④ 契约面：非 JSON 内容类型 → 415
+  const wrongType = await route.fetch(new Request('http://127.0.0.1:3080/api/skill-manager/overview', {
+    method: 'POST',
+    headers: { 'content-type': 'text/plain' },
+    body: 'x',
+  }))
+  assert.equal(wrongType.status, 415, 'content-type 非 application/json 必须 415')
+
+  // ⑤ 生命周期：dispose 后路由必须摘除（否则插件重载会因 duplicate 抛错）
   await ctx.dispose()
+  assert.equal(ctx.routes.size, 0, 'dispose 后所有精确路由必须摘除')
 })
 
 test('apply 降级：storage 域打开失败 → 管理 API 回 internal，插件不拖垮启动', async (t) => {
@@ -227,7 +257,15 @@ test('apply 降级：storage 域打开失败 → 管理 API 回 internal，插�
   plugin.apply(ctx, CONFIG(root))
   ctx.openFiber()
   await new Promise((r) => setTimeout(r, 50))
-  const result = await ctx.handler('overview', {})
+  // 经已注册的 `/api/skill-manager/overview` 精确路由取结果（不再有 ctx.handler 直调面）
+  const route = ctx.routes.get('/api/skill-manager/overview')
+  const response = await route.fetch(new Request('http://127.0.0.1:3080/api/skill-manager/overview', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ type: 'client-request', rpcId: 'r-1', method: 'skill-manager/overview', payload: {} }),
+  }))
+  const envelope = await response.json()
+  const result = envelope.result
   assert.equal(result.ok, false)
   assert.equal(result.error.code, 'internal')
   assert.match(result.error.message, /already-open/)

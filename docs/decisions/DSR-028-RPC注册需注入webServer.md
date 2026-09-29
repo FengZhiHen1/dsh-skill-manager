@@ -11,9 +11,12 @@
 > - **本「修复」的真实效果是让问题更隐蔽**：改前是**响亮失败**（行挂载失败、界面标「异常」、
 >   日志有 `cannot get property "webServer" without inject`）；改后变成**静默 405**
 >   （行 `fiberPhase=active`、无任何日志、浏览器一律 405）。**可观测性倒退。**
-> - **正确做法**：见仓库级 [`docs/decisions/0002-自定义RPC通道改用精确Fetch路由.md`](../../../../docs/decisions/0002-自定义RPC通道改用精确Fetch路由.md)
->   —— **首选** `ctx.connection.fetch.register({ path:'/api/<ns>/<ep>', methods:['POST'], fetch })`
+> - **正确做法（已实施）**：见仓库级 [`docs/decisions/0002-自定义RPC通道改用精确Fetch路由.md`](../../../../docs/decisions/0002-自定义RPC通道改用精确Fetch路由.md)
+>   —— **首选** `ctx.connection.fetch.register({ path:'/api/skill-manager/<ep>', methods:['POST'], fetch })`
 >   （不读 `owner.webServer`，且免费继承平台围栏/认证/瀑布/体积上限）。
+>   ✅ **本插件已按此改造**（新模块 `src/adapter/rpc-channel.js`；Host 侧逐端点注册精确路由，
+>   Client 侧改 `rpc.call('/api', 'skill-manager/<ep>', …)`）。旧的 DSR-028 回归用例已重写为
+>   「接线闸 + 可答闸」（并做了消融：改回 `rpc.handle` ⇒ 立即变红，证明新闸有判别力）。
 > - **本文件的回归闸是「盲闸」**：其假 ctx 的 `inject()` 里直接给出
 >   `injected.connection.rpc.handle = (channel) => calls.push(...)`，**由假件自己完成了注册**，
 >   `owner.webServer` 从未被触达 ⇒ 闸恒绿。**教训：假件的桩必须落在被测代码的失败点之外。**

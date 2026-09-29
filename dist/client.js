@@ -261,8 +261,11 @@ function parseEndpointPayload(endpoint, value) {
   return value;
 }
 
+// src/adapter/rpc-channel.js
+var API_CHANNEL = "/api";
+var RPC_NAMESPACE = "skill-manager";
+
 // src/client/api.js
-var CHANNEL = "/skill-manager";
 var API_TIMEOUT_MS = 15e3;
 var DOWNLOAD_TIMEOUT_MS = 9e4;
 var DOWNLOAD_ENDPOINTS = /* @__PURE__ */ new Set(["add", "update"]);
@@ -295,7 +298,7 @@ function createCall(ctx) {
     const timer = setTimeout(() => controller.abort(), budget);
     let result;
     try {
-      result = await ctx.connection.rpc.call(CHANNEL, endpoint, payload, controller.signal);
+      result = await ctx.connection.rpc.call(API_CHANNEL, `${RPC_NAMESPACE}/${endpoint}`, payload, controller.signal);
     } catch (error) {
       throw toTransportError(error, endpoint, budget);
     } finally {
